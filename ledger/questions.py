@@ -12,21 +12,29 @@ because each one follows connections across runs: models, matches, test versions
 Judged pairs exclude attempts that ended for reasons outside the models' control (outages, run caps).
 """
 
-# Q1. Per model on one workflow (all versions unless stale ones are excluded by the caller): pair wins, judged
-# pairs, average cost per attempt, cost per clean (passed) result. The budget is the average cost per attempt
+# Scope parameters shared by Q1 and head-to-head (pass every one; null means "any"):
+#   $test_id one workflow, $suite every workflow in runs of that suite, $version_key one exact version,
+#   $current_only only versions with no newer version of the same test.
+# Q1. Per model in that scope: pair wins, judged pairs, average cost per attempt, cost per clean (passed) result. The budget is the average cost per attempt
 # the user can pay. Models over budget are listed too, flagged, so the answer can say what the budget rules out.
 BEST_UNDER_BUDGET = """
-MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
-WHERE NOT mt.excluded AND ($version_key IS NULL OR tv.key = $version_key)
+MATCH (t:Test)<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
+      (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded
+  AND ($test_id IS NULL OR t.id = $test_id)
+  AND ($suite IS NULL OR r.suite = $suite)
+  AND ($version_key IS NULL OR tv.key = $version_key)
+  AND (NOT $current_only OR NOT EXISTS {
+        MATCH (tv)-[:VERSION_OF]->(:Test)<-[:VERSION_OF]-(newer:TestVersion) WHERE newer.version_rank > tv.version_rank })
 OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
-WITH m.name AS model, a, mt,
+WITH m.name AS model, a, mt, tv,
      CASE WHEN w.name = m.name THEN 1 ELSE 0 END AS won,
      CASE WHEN w IS NULL THEN 1 ELSE 0 END AS tied,
      CASE WHEN a.passed THEN 1 ELSE 0 END AS ok
 WITH model, count(a) AS attempts, sum(won) AS pair_wins, sum(tied) AS ties, sum(ok) AS passed,
      sum(a.cost_usd) AS spent, avg(a.cost_usd) AS cost_per_attempt, avg(a.mistakes) AS mistakes,
-     avg(a.progress) AS progress, collect(DISTINCT mt.run_id) AS runs
-RETURN model, attempts, pair_wins, ties, passed, cost_per_attempt,
+     avg(a.progress) AS progress, collect(DISTINCT mt.run_id) AS runs, collect(DISTINCT tv.key) AS versions
+RETURN model, attempts, pair_wins, ties, passed, cost_per_attempt, versions,
        CASE WHEN passed = 0 THEN NULL ELSE spent / passed END AS cost_per_clean,
        mistakes, progress, cost_per_attempt <= $budget AS within_budget, runs,
        toFloat(pair_wins) / attempts AS win_rate
@@ -35,8 +43,13 @@ ORDER BY within_budget DESC, win_rate DESC, cost_per_attempt
 
 # Head-to-head between two models on one workflow: the evidence behind a pick, pair by pair.
 HEAD_TO_HEAD = """
-MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)
-WHERE NOT mt.excluded AND ($version_key IS NULL OR tv.key = $version_key)
+MATCH (t:Test)<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run)
+WHERE NOT mt.excluded
+  AND ($test_id IS NULL OR t.id = $test_id)
+  AND ($suite IS NULL OR r.suite = $suite)
+  AND ($version_key IS NULL OR tv.key = $version_key)
+  AND (NOT $current_only OR NOT EXISTS {
+        MATCH (tv)-[:VERSION_OF]->(:Test)<-[:VERSION_OF]-(newer:TestVersion) WHERE newer.version_rank > tv.version_rank })
 MATCH (mt)<-[:IN]-(:Attempt)-[:BY]->(x:Model {name: $a}), (mt)<-[:IN]-(:Attempt)-[:BY]->(y:Model {name: $b})
 OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
 RETURN mt.key AS match, tv.version AS version, mt.difficulty AS difficulty, mt.rule AS rule,
