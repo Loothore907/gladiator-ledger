@@ -5,6 +5,11 @@ Dec 10). It loads Gladiator's run records into a Relate graph and answers "which
 this budget", with the matches behind the answer. The owner directs and approves; Claude does the hands-on work.
 The owner prefers plain-English summaries.
 
+## Standing permissions (owner, 2026-11-21)
+Same as the Gladiator repo: Claude may open PRs into `main` from a feature branch and **merge its own PRs once CI
+is green** on the current head (squash merge), without asking. Fix red CI first; never skip or disable a test to
+get green. Ask first before merging a PR Claude did not open, or changing repo settings or secrets.
+
 ## Rules
 - **Ledger is new work, started 2026-11-21.** Gladiator (the engine, Apache-2.0, started Oct 21 2026) is disclosed
   earlier code. Never copy Gladiator code into Ledger without marking it as reused in the file header and in the
