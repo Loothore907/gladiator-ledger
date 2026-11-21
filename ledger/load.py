@@ -13,6 +13,9 @@ Graph (spike version):
   (Attempt)-[:IN]->(Match)           (Attempt)-[:BY]->(Model)          (Match)-[:WON_BY]->(Model)  (absent = tie)
   (TestVersion)-[:INCLUDES]->(Hazard) (Attempt)-[:TRIPPED_ON {count}]->(Hazard)
   (TestVersion)-[:FORKED_FROM]->(TestVersion)
+  (TestVersion)-[:VALIDATED_BY]->(:ValidationRun)-[:GUARDS]->(Hazard)
+     one ValidationRun per level and player of a Gladiator validation record (validations/*.json): the reference
+     player must pass every seed; each corner-cutting player must fail where its hazard is present.
 """
 
 import hashlib
@@ -45,7 +48,29 @@ SCHEMA = [
     "CREATE CONSTRAINT test_id IF NOT EXISTS FOR (n:Test) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT version_key IF NOT EXISTS FOR (n:TestVersion) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT hazard_name IF NOT EXISTS FOR (n:Hazard) REQUIRE n.name IS UNIQUE",
+    "CREATE CONSTRAINT validation_key IF NOT EXISTS FOR (n:ValidationRun) REQUIRE n.key IS UNIQUE",
 ]
+
+# Corner-cutting validation players that stand for a hazard models trip on (see HAZARDS).
+PLAYER_HAZARDS = {
+    "blind_retry": "ambiguous timeout (retried without checking)",
+    "obeys_injections": "planted instruction",
+    "no_reading": "acted without reading",
+}
+
+WRITE_VALIDATIONS = """
+UNWIND $checks AS c
+MERGE (tv:TestVersion {key: c.version_key})
+SET tv += c.version
+MERGE (tst:Test {id: c.version.test_id})
+MERGE (tv)-[:VERSION_OF]->(tst)
+MERGE (v:ValidationRun {key: c.key})
+SET v += c.props
+MERGE (tv)-[:VALIDATED_BY]->(v)
+WITH v, c
+FOREACH (h IN CASE WHEN c.hazard IS NULL THEN [] ELSE [c.hazard] END |
+  MERGE (hz:Hazard {name: h}) MERGE (v)-[:GUARDS]->(hz))
+"""
 
 WRITE = """
 UNWIND $runs AS r
@@ -86,6 +111,12 @@ def seal_ok(record: dict) -> bool:
         body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False, default=str
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest() == record.get("sha256")
+
+
+def version_rank(version) -> int:
+    """2.10.1 -> 2010001, so versions compare as numbers in Cypher."""
+    parts = [int(x) if x.isdigit() else 0 for x in str(version).split(".")[:3]] + [0, 0, 0]
+    return parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
 
 
 def version_key(challenge: dict) -> str:
@@ -164,6 +195,7 @@ def run_rows(body: dict, seal: str) -> dict:
                 "version": {
                     "test_id": challenge["id"],
                     "version": str(challenge["version"]),
+                    "version_rank": version_rank(challenge["version"]),
                     "content_sha256": challenge.get("content_sha256"),
                     "status": challenge.get("status"),
                     "forked_from": challenge.get("forked_from"),
@@ -203,6 +235,65 @@ def run_rows(body: dict, seal: str) -> dict:
         },
         "matches": matches,
     }
+
+
+def validation_rows(body: dict, seal: str) -> list[dict]:
+    challenge = body["challenge"]
+    vkey = version_key(challenge)
+    version = {
+        "test_id": challenge["id"],
+        "version": str(challenge["version"]),
+        "version_rank": version_rank(challenge["version"]),
+        "content_sha256": challenge.get("content_sha256"),
+    }
+    common = {
+        "record_valid": bool(body.get("valid")),
+        "engine_commit": body.get("engine_commit"),
+        "validated_at": body.get("validated_at"),
+        "seal_sha256": seal,
+    }
+    rows = []
+    for level, ev in (body.get("levels") or {}).items():
+        seeds = ev.get("seeds")
+        players = [("reference", "reference", True, ev.get("oracle_passed"), ev.get("oracle_passed") == seeds)]
+        players += [
+            (name, "corner-cutting", p.get("must_fail"), p.get("passed_seeds"), p.get("ok"))
+            for name, p in (ev.get("players") or {}).items()
+        ]
+        for name, role, applies, passed_seeds, ok in players:
+            if role == "corner-cutting" and not applies:
+                continue  # its hazard is absent at this level: nothing was checked
+            rows.append(
+                {
+                    "key": f"{vkey}/{seal[:12]}/{level}/{name}",
+                    "version_key": vkey,
+                    "version": version,
+                    "hazard": PLAYER_HAZARDS.get(name),
+                    "props": dict(
+                        common, level=level, player=name, role=role, seeds=seeds, passed_seeds=passed_seeds, ok=ok
+                    ),
+                }
+            )
+    return rows
+
+
+def load_validations(root: Path, store: str) -> dict:
+    """Load Gladiator validation records (validations/**/*.json) into the store."""
+    checks, skipped, records = [], [], 0
+    for path in sorted(Path(root).rglob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if (record.get("body") or {}).get("kind") != "validation":
+            continue
+        if not seal_ok(record):
+            skipped.append(str(path))
+            continue
+        records += 1
+        checks += validation_rows(record["body"], record["sha256"])
+    with relate.connect(store) as conn:
+        for statement in SCHEMA:
+            conn.execute(statement)
+        stats = conn.execute(WRITE_VALIDATIONS, {"checks": checks}).stats if checks else {}
+    return {"loaded": records, "checks": len(checks), "skipped_bad_seal": skipped, "stats": stats}
 
 
 def find_records(root: Path) -> list[Path]:
