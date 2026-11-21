@@ -125,3 +125,24 @@ def test_sign_test():
     assert cli.sign_test_p(9, 0) < 0.01
     assert cli.sign_test_p(5, 3) > 0.5
     assert cli.sign_test_p(0, 0) == 1.0
+
+
+def test_suite_scope_counts_every_workflow_and_skips_old_versions(tmp_path):
+    runs = tmp_path / "runs"
+    run(runs, "old", "p:a", "p:b", [(False, True, 0.01, 0.01)] * 9, version="1.0.0")  # b won on the old version
+    run(runs, "new", "p:a", "p:b", [(True, False, 0.01, 0.01)] * 9, version="1.1.0")  # a wins on the current one
+    store = str(tmp_path / "s.rl")
+    load.load(runs, store)
+    rec = cli.recommend(store, None, budget=1.0, suite="s")
+    assert rec["pick"] == "p:a" and all(m["attempts"] == 9 for m in rec["models"])
+    every = cli.recommend(store, None, budget=1.0, suite="s", all_versions=True)
+    assert all(m["attempts"] == 18 for m in every["models"]) and every["pick"] is None  # 9-9: a tie
+
+
+def test_only_model_in_budget_says_so(tmp_path):
+    runs = tmp_path / "runs"
+    run(runs, "r1", "p:a", "p:b", [(True, False, 0.01, 0.5)] * 9)
+    store = str(tmp_path / "s.rl")
+    load.load(runs, store)
+    rec = cli.recommend(store, "t/x", budget=0.1)
+    assert rec["pick"] == "p:a" and any("only model" in c for c in rec["caveats"])

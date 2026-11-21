@@ -14,6 +14,7 @@ names no winner.
 uv sync
 uv run ledger build --records path/to/runs --validations path/to/gladiator/validations
 uv run ledger recommend refund-queue --budget 0.05
+uv run ledger recommend --suite small-tier --budget 0.05
 uv run ledger ask hazard_profile
 ```
 

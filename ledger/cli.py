@@ -51,20 +51,40 @@ def current_version(store: str, test: str) -> str | None:
     return found[0]["key"] if found else None
 
 
-def recommend(store: str, workflow: str, budget: float, all_versions: bool = False, min_pairs: int = MIN_PAIRS):
-    """A pick, the evidence behind it and its caveats. Names no winner on thin evidence or a tie."""
-    test = test_id(workflow)
-    version = None if all_versions else current_version(store, test)
-    if not all_versions and version is None:
-        return {"workflow": test, "pick": None, "verdict": "no data", "caveats": [f"No judged matches on {test}."]}
-    params = {"test_id": test, "budget": budget, "version_key": version}
+SCOPE_DEFAULTS = {"test_id": None, "suite": None, "version_key": None, "current_only": False}
+
+
+def recommend(
+    store: str,
+    workflow: str | None,
+    budget: float,
+    all_versions: bool = False,
+    min_pairs: int = MIN_PAIRS,
+    suite: str | None = None,
+):
+    """A pick, the evidence behind it and its caveats. Names no winner on thin evidence or a tie.
+    Scope: one workflow (its newest version with data, or all versions), or a whole suite (current versions)."""
+    if suite:
+        test, version, label = None, None, "current versions" if not all_versions else "all versions"
+        params = dict(SCOPE_DEFAULTS, suite=suite, current_only=not all_versions, budget=budget)
+        scope = {"suite": suite}
+    else:
+        test = test_id(workflow)
+        version = None if all_versions else current_version(store, test)
+        if not all_versions and version is None:
+            return {"workflow": test, "pick": None, "verdict": "no data", "caveats": [f"No judged matches on {test}."]}
+        label = version or "all versions"
+        params = dict(SCOPE_DEFAULTS, test_id=test, version_key=version, budget=budget)
+        scope = {"workflow": test}
     table = rows(store, questions.BEST_UNDER_BUDGET, params)
     caveats = []
     fits = [r for r in table if r["within_budget"]]
     over = [r["model"] for r in table if not r["within_budget"]]
     if over:
         caveats.append(f"Over budget (${budget:.4f}/attempt): {', '.join(over)}.")
-    result = {"workflow": test, "version": version or "all versions", "budget": budget, "models": table}
+    result = dict(scope, version=label, budget=budget, models=table)
+    if not table:
+        return dict(result, pick=None, verdict="no data", caveats=caveats + ["No judged matches in this scope."])
     if not fits:
         return dict(result, pick=None, verdict="nothing fits the budget", caveats=caveats)
     thin = [r["model"] for r in fits if r["attempts"] < min_pairs]
@@ -74,6 +94,8 @@ def recommend(store: str, workflow: str, budget: float, all_versions: bool = Fal
     if not ranked:
         return dict(result, pick=None, verdict="not enough evidence", caveats=caveats)
     top = ranked[0]
+    if len(ranked) == 1:
+        caveats.append(f"{top['model']} is the only model with enough evidence within this budget: nothing to beat.")
     evidence, verdict, pick = [], "pick", top["model"]
     if len(ranked) > 1:
         second = ranked[1]
@@ -98,14 +120,29 @@ def recommend(store: str, workflow: str, budget: float, all_versions: bool = Fal
                     f"{top['model']} leads {second['model']} {wins}-{losses}, but a split like that happens by chance "
                     f"{p:.0%} of the time between equal models: a lean, not a settled result."
                 )
-    cycles = [c for c in rows(store, questions.BEAT_CYCLES) if version is None or c["version"] == version]
+    in_scope = {v for r in table for v in r["versions"]}
+    cycles = [c for c in rows(store, questions.BEAT_CYCLES) if c["version"] in in_scope]
     if cycles:
-        caveats.append(f"Beat cycles on this test ({len(cycles)}): the ranking is not a simple ladder.")
-    if version:
-        promo = [r for r in rows(store, questions.PROMOTION) if r["version"] == version]
-        if promo and not promo[0]["validated"]:
-            caveats.append("This test version has no passing validation record in the graph.")
-    else:
+        narrow = all(max(c["leads"]) <= 1 for c in cycles)
+        detail = "; ".join(
+            f"{c['a'].split(':')[-1]} > {c['b'].split(':')[-1]} > {c['c'].split(':')[-1]} > "
+            f"{c['a'].split(':')[-1]} ({', '.join(c['margins'])})"
+            for c in cycles
+        )
+        caveats.append(
+            f"Beat cycles ({len(cycles)}): {detail}. "
+            + (
+                "Every edge is a one-pair lead, so this may be noise."
+                if narrow
+                else "The ranking is not a simple ladder."
+            )
+        )
+    unvalidated = [
+        r["version"] for r in rows(store, questions.PROMOTION) if r["version"] in in_scope and not r["validated"]
+    ]
+    if unvalidated:
+        caveats.append(f"No passing validation record in the graph for: {', '.join(sorted(unvalidated))}.")
+    if all_versions and test:
         stale = rows(store, questions.STALE_RESULTS)
         if any(s["version"].startswith(test + "@") for s in stale):
             caveats.append("Includes results from older versions of this test.")
@@ -117,7 +154,8 @@ def money(x):
 
 
 def print_recommendation(r: dict) -> None:
-    print(f"Workflow: {r['workflow']}  ({r.get('version')})  budget {money(r.get('budget'))} per attempt")
+    what = r.get("workflow") or f"suite {r.get('suite')}"
+    print(f"Scope: {what}  ({r.get('version')})  budget {money(r.get('budget'))} per attempt")
     if r.get("pick"):
         label = {"pick": "Pick", "leaning": "Leaning"}.get(r["verdict"], r["verdict"])
         print(f"{label}: {r['pick']}")
@@ -152,7 +190,8 @@ def main(argv=None):
     a.add_argument("--param", action="append", default=[], help="name=value (numbers are parsed)")
     a.add_argument("--json", action="store_true")
     r = sub.add_parser("recommend", help="which model for this workflow under this budget, with evidence")
-    r.add_argument("workflow", help="test id, e.g. refund-queue or gladiator/refund-queue")
+    r.add_argument("workflow", nargs="?", help="test id, e.g. refund-queue or gladiator/refund-queue")
+    r.add_argument("--suite", help="recommend across every workflow in a Gladiator suite, e.g. small-tier")
     r.add_argument("--budget", type=float, required=True, help="USD you can pay per attempt")
     r.add_argument("--all-versions", action="store_true", help="also count results from older test versions")
     r.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
@@ -174,7 +213,8 @@ def main(argv=None):
                 params[k] = float(v) if "." in v else int(v)
             except ValueError:
                 params[k] = v
-        params.setdefault("version_key", None)
+        for k, v in SCOPE_DEFAULTS.items():
+            params.setdefault(k, v)
         result = rows(args.store, questions.ALL[args.question], params)
         if args.json:
             print(json.dumps(result, indent=1, default=str))
@@ -182,7 +222,9 @@ def main(argv=None):
             for row in result:
                 print(row)
     elif args.cmd == "recommend":
-        result = recommend(args.store, args.workflow, args.budget, args.all_versions, args.min_pairs)
+        if not (args.workflow or args.suite):
+            ap.error("recommend needs a workflow or --suite")
+        result = recommend(args.store, args.workflow, args.budget, args.all_versions, args.min_pairs, args.suite)
         if args.json:
             print(json.dumps(result, indent=1, default=str))
         else:

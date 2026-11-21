@@ -79,7 +79,8 @@ and Ledger applies the current rule to all of them alike. The record's own verdi
 | Q4 | **Promotion evidence**: validated, played by enough distinct models, pairs with a clear winner | TestVersion → ValidationRun, and TestVersion → Match → Model |
 | Q5 | **Stale results**: matches played on a version that has a newer version or a fork | TestVersion → Test ← newer TestVersion, and FORKED_FROM |
 
-`ledger recommend` builds on Q1: it takes the newest version of the workflow with data, ranks the models that fit
+`ledger recommend` builds on Q1, for one workflow (its newest version with data) or, with `--suite`, for every
+workflow in a Gladiator suite (current versions only, where the evidence is deepest). It ranks the models that fit
 the budget, checks the top two head to head (sign test), and adds caveats for thin evidence, cycles, missing
 validation and older versions. **It names no winner when the evidence is thin or the top two are level**, the same
 rule Gladiator applies to matches.
