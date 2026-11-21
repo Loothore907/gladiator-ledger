@@ -67,22 +67,27 @@ RETURN model, hazard, exposed, tripped, times, toFloat(tripped) / exposed AS rat
 ORDER BY hazard, rate DESC, model
 """
 
-# Q3. Beat cycles: per test version, who beat whom by pair majority (ties dropped), then 3-cycles among them.
+# Q3. Beat cycles: per test version, who beat whom by pair majority (ties dropped), then 3-cycles among them,
+# with each edge's pair score (a cycle of 2-1 wins is weak evidence; one of 6-0 wins is not).
 BEAT_CYCLES = """
 MATCH (tv:TestVersion)<-[:USED]-(mt:Match)<-[:IN]-(:Attempt)-[:BY]->(m:Model)
 WHERE NOT mt.excluded
 WITH tv, mt, collect(m) AS p
 OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
-WITH tv, p[0] AS x, p[1] AS y, sum(CASE WHEN w = p[0] THEN 1 WHEN w = p[1] THEN -1 ELSE 0 END) AS net
-WHERE net <> 0
-WITH tv, CASE WHEN net > 0 THEN x.name ELSE y.name END AS winner, CASE WHEN net > 0 THEN y.name ELSE x.name END AS loser
-WITH tv, collect([winner, loser]) AS beats
+WITH tv, p[0] AS x, p[1] AS y,
+     sum(CASE WHEN w = p[0] THEN 1 ELSE 0 END) AS xw, sum(CASE WHEN w = p[1] THEN 1 ELSE 0 END) AS yw
+WHERE xw <> yw
+WITH tv, CASE WHEN xw > yw THEN [x.name, y.name, xw, yw] ELSE [y.name, x.name, yw, xw] END AS beat
+WITH tv, collect(beat) AS beats
 UNWIND beats AS ab
 UNWIND beats AS bc
 UNWIND beats AS ca
 WITH tv, ab, bc, ca
 WHERE ab[1] = bc[0] AND bc[1] = ca[0] AND ca[1] = ab[0] AND ab[0] < bc[0] AND ab[0] < ca[0]
-RETURN tv.key AS version, ab[0] AS a, bc[0] AS b, ca[0] AS c
+RETURN tv.key AS version, ab[0] AS a, bc[0] AS b, ca[0] AS c,
+       [toString(ab[2]) + '-' + toString(ab[3]), toString(bc[2]) + '-' + toString(bc[3]),
+        toString(ca[2]) + '-' + toString(ca[3])] AS margins,
+       [ab[2] - ab[3], bc[2] - bc[3], ca[2] - ca[3]] AS leads
 ORDER BY version
 """
 

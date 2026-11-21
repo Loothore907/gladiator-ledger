@@ -123,7 +123,20 @@ def recommend(
     in_scope = {v for r in table for v in r["versions"]}
     cycles = [c for c in rows(store, questions.BEAT_CYCLES) if c["version"] in in_scope]
     if cycles:
-        caveats.append(f"Beat cycles on this test ({len(cycles)}): the ranking is not a simple ladder.")
+        narrow = all(max(c["leads"]) <= 1 for c in cycles)
+        detail = "; ".join(
+            f"{c['a'].split(':')[-1]} > {c['b'].split(':')[-1]} > {c['c'].split(':')[-1]} > "
+            f"{c['a'].split(':')[-1]} ({', '.join(c['margins'])})"
+            for c in cycles
+        )
+        caveats.append(
+            f"Beat cycles ({len(cycles)}): {detail}. "
+            + (
+                "Every edge is a one-pair lead, so this may be noise."
+                if narrow
+                else "The ranking is not a simple ladder."
+            )
+        )
     unvalidated = [
         r["version"] for r in rows(store, questions.PROMOTION) if r["version"] in in_scope and not r["validated"]
     ]
