@@ -7,15 +7,31 @@ model evaluation engine, into a [Relate](https://relatedb.ai) graph, and answers
 answer comes with the matches behind it. When the evidence is thin or the top models are level, it says so and
 names no winner.
 
-> Work in progress for the Relate hackathon (Nov 2026). Setup, the shipped store and the demo are coming.
+> Entry for the Relate hackathon (Nov–Dec 2026).
 
-## Try it
+## Try it (no API keys, no cost)
+The repository ships a Relate store built from real Gladiator match records (`data/ledger.rl`), so every answer
+reproduces from a clean clone.
+
 ```bash
 uv sync
-uv run ledger build --records path/to/runs --validations path/to/gladiator/validations
-uv run ledger recommend refund-queue --budget 0.05
 uv run ledger recommend --suite small-tier --budget 0.05
+uv run ledger recommend refund-queue --budget 0.05
 uv run ledger ask hazard_profile
+uv run ledger ask beat_cycles
+```
+
+`ledger ask` takes any of: `best_under_budget`, `head_to_head`, `hazard_profile`, `beat_cycles`, `beats`,
+`promotion`, `stale_results`.
+
+## What's in the data
+`data/records/` holds the sealed public run records (`record.json`) of every match: two models, the same generated
+worlds, every action, grade and cost. `data/validations/` holds the sealed validation records of each test version.
+Gladiator's private `operator.json` files (hidden simulator state) are never included. To rebuild the store from
+these files:
+
+```bash
+uv run ledger build --records data/records --validations data/validations
 ```
 
 ## How Relate is used
