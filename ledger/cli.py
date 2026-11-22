@@ -5,6 +5,7 @@ ledger ask hazard_profile
 ledger ask best_under_budget --param test_id=gladiator/refund-queue --param budget=0.05
 ledger recommend refund-queue --budget 0.05
 ledger verify
+ledger opponents "haiku 5.5" --open-only
 ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash
 """
 
@@ -17,6 +18,7 @@ from pathlib import Path
 import relate
 
 from ledger import load, publish, questions
+from ledger.bridges import epoch
 
 DEFAULT_STORE = "data/ledger.rl"
 GOOD_ENOUGH = 0.8  # default bar for "good enough for this task": share of attempts passed
@@ -54,7 +56,7 @@ def current_version(store: str, test: str) -> str | None:
     return found[0]["key"] if found else None
 
 
-SCOPE_DEFAULTS = {"test_id": None, "suite": None, "version_key": None, "current_only": False}
+SCOPE_DEFAULTS = {"test_id": None, "suite": None, "version_key": None, "current_only": False, "open_only": False}
 
 
 def recommend(
@@ -154,6 +156,65 @@ def recommend(
         if any(s["version"].startswith(test + "@") for s in stale):
             caveats.append("Includes results from older versions of this test.")
     return dict(result, pick=pick, verdict=verdict, evidence=evidence, caveats=caveats)
+
+
+def resolve_model(store: str, name: str) -> str | None:
+    """A model's key in the graph from what a person typed: its exact id, its display name, or an unambiguous
+    part of either (case-insensitive)."""
+    models = rows(store, "MATCH (m:Model) RETURN m.name AS name, m.display_name AS display_name")
+    want = name.strip().lower()
+    for m in models:
+        if want in (m["name"].lower(), (m["display_name"] or "").lower()):
+            return m["name"]
+    partial = [m["name"] for m in models if want in m["name"].lower() or want in (m["display_name"] or "").lower()]
+    return partial[0] if len(partial) == 1 else None
+
+
+def opponents(store: str, model: str, open_only: bool = False, limit: int = 5) -> dict:
+    """Models that score close to this one on a published index: candidates for a fair head-to-head. The score only
+    suggests the opponent; which one does a task better is what the match is for."""
+    key = resolve_model(store, model)
+    out = {"asked": model, "model": key, "benchmark": epoch.BENCHMARK, "open_only": open_only, "candidates": []}
+    if key is None:
+        return dict(out, note=f"No single model matches '{model}'. Use an exact id or a fuller name.")
+    mine = rows(
+        store,
+        "MATCH (m:Model {name: $m})-[s:SCORED]->(:Benchmark {name: $b}) RETURN s.score AS score, s.low AS low, "
+        "s.high AS high, m.display_name AS display_name",
+        {"m": key, "b": epoch.BENCHMARK},
+    )
+    if not mine:
+        return dict(out, note=f"{key} has no published score on the {epoch.BENCHMARK}, so no opponent is suggested.")
+    close = rows(store, questions.CLOSE_TO, {"model": key, "benchmark": epoch.BENCHMARK, "open_only": open_only})
+    return dict(out, score=mine[0], candidates=close[:limit])
+
+
+def print_opponents(o: dict) -> None:
+    if o.get("note"):
+        print(o["note"])
+        return
+    s = o["score"]
+    print(f"{o['model']}  ({s['display_name']})")
+    print(f"{o['benchmark']}: {s['score']:.1f}  (range {s['low']:.1f} to {s['high']:.1f})")
+    print("\nClosest on paper" + (", open weights only" if o["open_only"] else "") + ":")
+    width = max(len(c["model"]) for c in o["candidates"]) if o["candidates"] else 5
+    print(f"  {'model':{width}}  score     gap  ranges overlap  weights  in Ledger")
+    for c in o["candidates"]:
+        if c["pairs_played"]:
+            known = f"{c['pairs_played']} pairs already played against it"
+        elif c["has_matches"]:
+            known = "has matches, none against it"
+        else:
+            known = "no matches yet"
+        print(
+            f"  {c['model']:{width}}  {c['score']:5.1f}  {c['gap']:+6.2f}  {'yes' if c['ranges_overlap'] else 'no':14}  "
+            f"{c['weights']:7}  {known}"
+        )
+    print(
+        "\nA close score only makes the head-to-head fair. Which one does your task better is what the match shows:"
+        "\n  ledger verdict <task> --a <model> --b <model>"
+    )
+    print("Scores: Epoch AI, 'Capabilities & benchmarking', epoch.ai/benchmarks (CC BY 4.0). See data/epoch/README.md.")
 
 
 def _side(pairs: list[dict], side: str) -> dict:
@@ -354,6 +415,7 @@ def main(argv=None):
     )
     b.add_argument("--records", type=Path, required=True, help="folder holding runs/<run_id>/record.json")
     b.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
+    b.add_argument("--scores", type=Path, help="folder holding Epoch's eci_scores.csv (data/epoch)")
     i = sub.add_parser(
         "import",
         parents=[common],
@@ -391,6 +453,13 @@ def main(argv=None):
     v.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that counts as good enough")
     v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
     v.add_argument("--json", action="store_true")
+    o = sub.add_parser(
+        "opponents", parents=[common], help="models that score close to one you name: candidates for a fair match"
+    )
+    o.add_argument("model", help="a model id or name, e.g. anthropic:claude-haiku-5-5 or 'haiku 5.5'")
+    o.add_argument("--open-only", action="store_true", help="only models with open weights")
+    o.add_argument("-n", type=int, default=5, help="how many to show (default 5)")
+    o.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
 
     if args.cmd == "build":
@@ -399,6 +468,8 @@ def main(argv=None):
         load.link_forks(args.store)
         if args.validations:
             out["validations"] = load.load_validations(args.validations, args.store)
+        if args.scores:
+            out["scores"] = load.load_scores(args.scores, args.store)
         print(json.dumps({k: {x: v[x] for x in v if x != "stats"} for k, v in out.items()}, indent=1))
     elif args.cmd == "import":
         out = {}
@@ -423,6 +494,9 @@ def main(argv=None):
         params = {}
         for kv in args.param:
             k, _, v = kv.partition("=")
+            if v.lower() in ("true", "false"):
+                params[k] = v.lower() == "true"
+                continue
             try:
                 params[k] = float(v) if "." in v else int(v)
             except ValueError:
@@ -442,6 +516,12 @@ def main(argv=None):
             print(json.dumps(result, indent=1, default=str))
         else:
             print_recommendation(result)
+    elif args.cmd == "opponents":
+        result = opponents(args.store, args.model, args.open_only, args.n)
+        if args.json:
+            print(json.dumps(result, indent=1, default=str))
+        else:
+            print_opponents(result)
     elif args.cmd == "verdict":
         result = verdict(
             args.store, args.workflow, args.a, args.b, args.suite, args.all_versions, args.bar, args.min_pairs

@@ -43,6 +43,11 @@ out far too low. The bug was fixed
 were played again on the fixed engine, and only those matches are shipped. The earlier frontier-model matches were
 not re-run and are no longer included.
 
+**Third-party data.** `data/epoch/eci_scores.csv` is an unmodified copy of the Capabilities Index file from Epoch
+AI's Benchmarking Hub (https://epoch.ai/benchmarks), retrieved 2026-11-22 and used under the Creative Commons
+Attribution 4.0 licence. Ledger uses it only to suggest which models are close enough on paper to be worth
+matching; it makes no claim from it.
+
 ## Relate capabilities used
 - **Embedded Python library** `relate-db` 1.2.0, imported as `relate`, with no server.
 - **Single-file store** (`data/ledger.rl`), opened read-only for every question.

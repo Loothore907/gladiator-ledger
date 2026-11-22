@@ -10,8 +10,10 @@ The shared shape, per kind of evidence:
           the test version used, who won and by which rule) and each attempt's facts (model, passed, progress,
           mistakes, cost, tokens, time, the hazards it met and tripped on).
   checks  evidence that a test version can be trusted: one row per validation check.
+  scores  published benchmark scores: one row per model and benchmark (score and its interval). Never used to
+          rank, only to find models that score close to each other, so a head-to-head between them is fair.
 
-Bridges in this repository: `gladiator` (ledger/bridges/gladiator.py).
+Bridges in this repository: `gladiator` (ledger/bridges/gladiator.py) and `epoch` (ledger/bridges/epoch.py).
 """
 
 from dataclasses import dataclass, field
@@ -25,5 +27,6 @@ class Evidence:
     description: str = ""
     runs: list[dict] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)
+    scores: list[dict] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)  # files refused (for example a seal that does not match)
     records: int = 0  # source files behind `checks` (a run row is one file, so runs need no count)

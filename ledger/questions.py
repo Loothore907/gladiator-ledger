@@ -11,6 +11,7 @@ because each one follows connections across runs: models, matches, test versions
 
   pair_on_task           One task, two models: every pair where they met, with both sides' facts.
   pair_hazards           The hazards each of those two models met and tripped on, in those pairs.
+  close_to               Which models score closest to this one on a published benchmark (to pick an opponent).
   sources                Where the evidence came from: each bridge, and how much it contributed.
 
 Judged pairs exclude attempts that ended for reasons outside the models' control (outages, run caps).
@@ -175,13 +176,35 @@ RETURN model, hazard, exposed, tripped
 ORDER BY hazard, model
 """
 
+# Opponents: the models whose published score on a benchmark is closest to one model's, whether the two score
+# ranges overlap ("close on paper"), and what the graph already knows about each: has it played any matches, and
+# how many pairs has it already played against this model? Scores only pick the opponent; the match decides.
+CLOSE_TO = """
+MATCH (me:Model {name: $model})-[mine:SCORED]->(b:Benchmark {name: $benchmark})<-[theirs:SCORED]-(other:Model)
+WHERE other <> me AND (NOT $open_only OR other.weights = 'open')
+OPTIONAL MATCH (me)<-[:BY]-(:Attempt)-[:IN]->(mt:Match)<-[:IN]-(:Attempt)-[:BY]->(other)
+WHERE NOT mt.excluded
+WITH mine, theirs, other, count(DISTINCT mt) AS pairs_played
+OPTIONAL MATCH (other)<-[:BY]-(x:Attempt)
+WITH mine, theirs, other, pairs_played, count(x) AS attempts
+RETURN other.name AS model, other.display_name AS display_name, other.weights AS weights,
+       theirs.score AS score, theirs.score - mine.score AS gap,
+       (theirs.low <= mine.high AND mine.low <= theirs.high) AS ranges_overlap,
+       attempts > 0 AS has_matches, pairs_played
+ORDER BY abs(theirs.score - mine.score), model
+LIMIT 25
+"""
+
 # Where the evidence came from: each bridge (source), with how much it contributed.
 SOURCES = """
 MATCH (s:Source)
 OPTIONAL MATCH (r:Run)-[:FROM]->(s)
 WITH s, count(r) AS runs
 OPTIONAL MATCH (v:ValidationRun)-[:FROM]->(s)
-RETURN s.name AS source, s.description AS description, runs, count(v) AS validation_checks
+WITH s, runs, count(v) AS validation_checks
+OPTIONAL MATCH (b:Benchmark)-[:FROM]->(s)
+OPTIONAL MATCH (:Model)-[sc:SCORED]->(b)
+RETURN s.name AS source, s.description AS description, runs, validation_checks, count(sc) AS published_scores
 ORDER BY source
 """
 
@@ -194,6 +217,7 @@ ALL = {
     "promotion": PROMOTION,
     "stale_results": STALE_RESULTS,
     "sources": SOURCES,
+    "close_to": CLOSE_TO,
     "pair_on_task": PAIR_ON_TASK,
     "pair_hazards": PAIR_HAZARDS,
 }
