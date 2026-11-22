@@ -14,7 +14,12 @@ that writes to the graph, and it links every run and check to its `Source`, so a
 where its proof lives. A bridge never touches the graph, and the loader never parses a source's files, so another
 source of the same kind of evidence plugs in by handing back the same shape.
 
-The bridge shipped today is `gladiator`. It reads two kinds of record:
+Two bridges ship. `epoch` reads one file of published scores (`data/epoch/eci_scores.csv`, Epoch AI's Capabilities
+Index, CC BY 4.0) and adds `display_name`, `organization`, `weights` (`open`, `closed`, `other`) and `released` to
+each `Model` it names. A model is joined to a Gladiator model id only when the names match exactly
+(`ledger/bridges/epoch.py`); every other Epoch model gets the key `epoch:<name>` and has no matches yet.
+
+`gladiator` reads two kinds of record:
 
 - **Run records** (`runs/<run_id>/record.json`, Gladiator's `docs/RUN_RECORD.md`): one match between two models on
   a suite. The graph is built from this public file only. The private half beside it (`operator.json`, the
@@ -36,6 +41,7 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 | `TestVersion` | `id@version:sha12` | test_id, version, version_rank, content_sha256, status (at run time), forked_from | challenge provenance (the exact sealed package) |
 | `Hazard` | `name` | | grader counters, validation players |
 | `Source` | `name` (the bridge, e.g. `gladiator`) | description | the bridge that read the evidence |
+| `Benchmark` | `name` (e.g. `Epoch Capabilities Index`) | publisher, url | the epoch bridge |
 | `ValidationRun` | `version/seal/level/player` | level, player, role (`reference`, `corner-cutting`), seeds, passed_seeds, ok, record_valid, engine_commit, validated_at | one check in a validation record |
 
 ## Relationships
@@ -43,6 +49,8 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 | Relationship | Meaning |
 |---|---|
 | `(Run)-[:FROM]->(Source)`, `(ValidationRun)-[:FROM]->(Source)` | which bridge the evidence came from |
+| `(Benchmark)-[:FROM]->(Source)` | which bridge a benchmark's scores came from |
+| `(Model)-[:SCORED {score, low, high}]->(Benchmark)` | a published score and its range. Used only to find models that score close to each other (`close_to`), never to rank |
 | `(Match)-[:PART_OF]->(Run)` | the record a pair came from |
 | `(Match)-[:USED]->(TestVersion)` | the exact sealed package played |
 | `(TestVersion)-[:VERSION_OF]->(Test)` | which workflow a version belongs to |

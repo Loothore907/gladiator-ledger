@@ -11,7 +11,9 @@ Graph (docs/SCHEMA.md):
   (:Match)          one paired attempt: both models played the same generated world
   (:Attempt)        one side of a match
   (:Model) (:Test) (:TestVersion) (:Hazard)
-  (Run)-[:FROM]->(Source)            (ValidationRun)-[:FROM]->(Source)
+  (:Benchmark)      a published benchmark or index (from the epoch bridge)
+  (Run)-[:FROM]->(Source)            (ValidationRun)-[:FROM]->(Source)   (Benchmark)-[:FROM]->(Source)
+  (Model)-[:SCORED {score, low, high}]->(Benchmark)   a published score; used only to find close opponents
   (Match)-[:PART_OF]->(Run)          (Match)-[:USED]->(TestVersion)    (TestVersion)-[:VERSION_OF]->(Test)
   (Attempt)-[:IN]->(Match)           (Attempt)-[:BY]->(Model)          (Match)-[:WON_BY]->(Model)  (absent = tie)
   (TestVersion)-[:INCLUDES]->(Hazard) (Attempt)-[:TRIPPED_ON {count}]->(Hazard)
@@ -25,7 +27,7 @@ from pathlib import Path
 
 import relate
 
-from ledger.bridges import Evidence, gladiator
+from ledger.bridges import Evidence, epoch, gladiator
 from ledger.bridges.gladiator import seal_ok  # noqa: F401  (re-exported: the seal check other modules use)
 
 SCHEMA = [
@@ -38,6 +40,7 @@ SCHEMA = [
     "CREATE CONSTRAINT hazard_name IF NOT EXISTS FOR (n:Hazard) REQUIRE n.name IS UNIQUE",
     "CREATE CONSTRAINT validation_key IF NOT EXISTS FOR (n:ValidationRun) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT source_name IF NOT EXISTS FOR (n:Source) REQUIRE n.name IS UNIQUE",
+    "CREATE CONSTRAINT benchmark_name IF NOT EXISTS FOR (n:Benchmark) REQUIRE n.name IS UNIQUE",
 ]
 
 WRITE_VALIDATIONS = """
@@ -93,6 +96,20 @@ FOREACH (_ IN CASE WHEN h.count > 0 THEN [1] ELSE [] END |
 """
 
 
+WRITE_SCORES = """
+UNWIND $scores AS s
+MERGE (b:Benchmark {name: s.benchmark})
+SET b += s.benchmark_props
+MERGE (src:Source {name: $source.name})
+SET src.description = $source.description
+MERGE (b)-[:FROM]->(src)
+MERGE (m:Model {name: s.model})
+SET m += s.model_props
+MERGE (m)-[r:SCORED]->(b)
+SET r += s.props
+"""
+
+
 def write(evidence: Evidence, store: str) -> dict:
     """Write one bridge's evidence to the store. Safe to repeat: the second time creates nothing."""
     stats = {}
@@ -104,6 +121,8 @@ def write(evidence: Evidence, store: str) -> dict:
             stats["runs"] = conn.execute(WRITE, {"runs": evidence.runs, "source": source}).stats
         if evidence.checks:
             stats["checks"] = conn.execute(WRITE_VALIDATIONS, {"checks": evidence.checks, "source": source}).stats
+        if evidence.scores:
+            stats["scores"] = conn.execute(WRITE_SCORES, {"scores": evidence.scores, "source": source}).stats
     return stats
 
 
@@ -124,6 +143,13 @@ def load_validations(root: Path, store: str) -> dict:
         "skipped_bad_seal": evidence.skipped,
         "stats": stats.get("checks", {}),
     }
+
+
+def load_scores(root: Path, store: str) -> dict:
+    """Load published scores (Epoch's Capabilities Index file under root)."""
+    evidence = epoch.read_scores(root)
+    stats = write(evidence, store)
+    return {"loaded": len(evidence.scores), "skipped": evidence.skipped, "stats": stats.get("scores", {})}
 
 
 def link_forks(store: str) -> None:

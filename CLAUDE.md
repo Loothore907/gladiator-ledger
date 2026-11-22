@@ -21,6 +21,9 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   fresh world per attempt (`instances: generator`), only through `ledger import` (which checks it against the
   fingerprint in the record), and **never for a holdout or fixed test**. The graph is still built from `record.json`
   and Gladiator's `validations/*.json` only.
+- **Published scores only pick opponents.** The `epoch` bridge loads Epoch AI's Capabilities Index (CC BY 4.0,
+  credited in `data/epoch/README.md`). Never rank or recommend by a published score, and join an Epoch name to a
+  Gladiator model id only when it is an exact match (`MODEL_IDS` in `ledger/bridges/epoch.py`).
 - **Relate is the store and the query engine, not an export target.** Questions are Cypher over the graph.
 - **No made-up winners.** Thin evidence or a level head-to-head means no pick is named, the same as in Gladiator.
 - The graph is a view: records stay the master copy, and the loader must stay safe to re-run.

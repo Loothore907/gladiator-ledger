@@ -24,7 +24,17 @@ def test_shipped_store_matches_shipped_records(tmp_path):
 
     rebuilt = str(tmp_path / "rebuilt.rl")
     cli.main(
-        ["--store", rebuilt, "build", "--records", str(DATA / "records"), "--validations", str(DATA / "validations")]
+        [
+            "--store",
+            rebuilt,
+            "build",
+            "--records",
+            str(DATA / "records"),
+            "--validations",
+            str(DATA / "validations"),
+            "--scores",
+            str(DATA / "epoch"),
+        ]
     )
     count = "MATCH (n) RETURN labels(n)[0] AS kind, count(*) AS n ORDER BY kind"
     assert cli.rows(rebuilt, count) == cli.rows(str(STORE), count)
