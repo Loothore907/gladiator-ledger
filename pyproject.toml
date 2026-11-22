@@ -5,7 +5,10 @@ description = "Load Gladiator run records into a Relate graph and ask which mode
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-dependencies = ["relate-db"]
+dependencies = [
+    "mcp>=2.3,<3",
+    "relate-db",
+]
 
 [project.scripts]
 ledger = "ledger.cli:main"

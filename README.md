@@ -21,6 +21,25 @@ python3 -m http.server --directory site 8000    # then open http://localhost:800
 ```
 A check (`node site/check.cjs`, run in CI) proves the page gives the same answers as the command line.
 
+## Ask it through your own AI assistant
+Ledger is also an MCP server, so an assistant can walk the loop for you in plain language: "I need a model for
+handling refund requests; I'm using Haiku 5.5, what should I compare it with, and which is better at this?"
+
+```bash
+uv run ledger mcp        # serves data/ledger.rl on stdio, read-only
+```
+Point any MCP client at that command. This repository's `.mcp.json` already does it for clients that read project
+configuration (open the folder in Claude Code and the `ledger` tools appear). For others, add:
+
+```json
+{"mcpServers": {"ledger": {"command": "uv", "args": ["run", "--directory", "/path/to/gladiator-ledger", "ledger", "mcp"]}}}
+```
+The tools are `find_flows`, `who_has_played`, `suggest_opponents`, `verdict`, `write_spec`, `describe_graph` and
+`read_graph` (read-only Cypher, for anything the others do not cover). They return what the command line returns,
+from the same code. The server also sends the assistant Ledger's rules: task claims only, "leaning" stays
+"leaning", and no winner is named that the evidence does not name. No API key is needed by Ledger itself; the
+assistant is yours.
+
 ## Setup (under five minutes)
 Needs Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
