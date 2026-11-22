@@ -5,6 +5,7 @@ ledger ask hazard_profile
 ledger ask best_under_budget --param test_id=gladiator/refund-queue --param budget=0.05
 ledger recommend refund-queue --budget 0.05
 ledger verify
+ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash
 """
 
 import argparse
@@ -18,6 +19,7 @@ import relate
 from ledger import load, publish, questions
 
 DEFAULT_STORE = "data/ledger.rl"
+GOOD_ENOUGH = 0.8  # default bar for "good enough for this task": share of attempts passed
 MIN_PAIRS = 8  # fewer judged pairs than this for a model on a workflow is "not enough evidence"
 CLEAR_P = 0.05  # sign-test p-value below which a head-to-head lead counts as clear
 
@@ -154,6 +156,139 @@ def recommend(
     return dict(result, pick=pick, verdict=verdict, evidence=evidence, caveats=caveats)
 
 
+def _side(pairs: list[dict], side: str) -> dict:
+    n = len(pairs)
+    passed = sum(1 for p in pairs if p[f"{side}_passed"])
+    return {
+        "attempts": n,
+        "passed": passed,
+        "pass_rate": passed / n,
+        "cost_per_attempt": sum(p[f"{side}_cost"] or 0 for p in pairs) / n,
+        "seconds_per_attempt": sum(p[f"{side}_time"] or 0 for p in pairs) / n,
+        "mistakes": sum(p[f"{side}_mistakes"] or 0 for p in pairs) / n,
+        "effort": sorted({str(p[f"{side}_effort"]) for p in pairs}),
+    }
+
+
+def verdict(
+    store: str,
+    workflow: str,
+    a: str,
+    b: str,
+    suite: str | None = None,
+    all_versions: bool = False,
+    bar: float = GOOD_ENOUGH,
+    min_pairs: int = MIN_PAIRS,
+) -> dict:
+    """A task claim: which of two models did THIS task better when they played the same worlds, how sure that is,
+    and whether either is good enough. Only the pairs where these two met count. Never a claim about a model in
+    general, and no winner is named on thin evidence or a level score."""
+    test = test_id(workflow)
+    version = None if all_versions else current_version(store, test)
+    params = {"test_id": test, "a": a, "b": b, "suite": suite, "version_key": version}
+    pairs = rows(store, questions.PAIR_ON_TASK, params)
+    out = {"task": test, "version": version or "all versions", "suite": suite, "a": a, "b": b, "bar": bar}
+    if not pairs:
+        return dict(out, verdict="no data", better=None, pairs=0, notes=[f"{a} and {b} never met on {test}."])
+    wins_a = sum(1 for p in pairs if p["winner"] == a)
+    wins_b = sum(1 for p in pairs if p["winner"] == b)
+    ties = len(pairs) - wins_a - wins_b
+    decided_by = {}
+    for p in pairs:
+        decided_by[p["rule"]] = decided_by.get(p["rule"], 0) + 1
+    stats = {a: _side(pairs, "a"), b: _side(pairs, "b")}
+    p_value = sign_test_p(wins_a, wins_b)
+    notes, better = [], None
+    if len(pairs) < min_pairs:
+        kind = "not enough evidence"
+        notes.append(f"Only {len(pairs)} judged pairs (fewer than {min_pairs}): too few to call.")
+    elif wins_a == wins_b:
+        kind = "no real difference shown"
+        notes.append(f"The pairs split {wins_a}-{wins_b}: neither did this task better.")
+    else:
+        better, lead, trail = (a, wins_a, wins_b) if wins_a > wins_b else (b, wins_b, wins_a)
+        if p_value < CLEAR_P:
+            kind = "better"
+        else:
+            kind = "leaning"
+            notes.append(
+                f"A {lead}-{trail} split happens by chance {p_value:.0%} of the time between equal models: "
+                "a lean, not a settled result."
+            )
+    for s in stats.values():
+        s["good_enough"] = s["pass_rate"] >= bar
+    if better and not stats[better]["good_enough"]:
+        notes.append(
+            f"{better} did better here, but passed only {stats[better]['pass_rate']:.0%} of attempts "
+            f"(bar {bar:.0%}): better than the other one is not the same as good enough."
+        )
+    if not any(s["good_enough"] for s in stats.values()):
+        notes.append(f"Neither model reaches the bar of {bar:.0%} passed on this task.")
+    efforts = {tuple(s["effort"]) for s in stats.values()}
+    if len(efforts) > 1 or any(len(e) > 1 for e in efforts):
+        notes.append("The two models did not play under one identical effort setting in every pair.")
+    hazards = rows(store, questions.PAIR_HAZARDS, params)
+    runs = {}
+    for p in pairs:
+        runs[p["run"]] = {"run": p["run"], "seal_sha256": p["seal"], "engine_commit": p["engine"], "suite": p["suite"]}
+    return dict(
+        out,
+        verdict=kind,
+        better=better,
+        pairs=len(pairs),
+        wins={a: wins_a, b: wins_b},
+        ties=ties,
+        p_value=round(p_value, 4),
+        decided_by=decided_by,
+        models=stats,
+        hazards=[h for h in hazards if h["tripped"]],
+        evidence=sorted(runs.values(), key=lambda r: r["run"]),
+        notes=notes,
+    )
+
+
+def print_verdict(v: dict) -> None:
+    a, b = v["a"], v["b"]
+    scope = f"  suite {v['suite']}" if v.get("suite") else ""
+    print(f"Task: {v['task']}  ({v['version']}){scope}")
+    print(f"{a}  vs  {b}")
+    if v["verdict"] == "no data":
+        print(f"\nNo verdict: {v['notes'][0]}")
+        return
+    line = {
+        "better": f"{v['better']} does this task better",
+        "leaning": f"Leaning {v['better']}",
+        "no real difference shown": "No real difference shown",
+        "not enough evidence": "Not enough evidence",
+    }[v["verdict"]]
+    print(f"\nVerdict: {line}")
+    print(
+        f"  {v['pairs']} judged pairs on the same generated worlds: {a} won {v['wins'][a]}, {b} won {v['wins'][b]}, "
+        f"{v['ties']} tied (sign test p = {v['p_value']})"
+    )
+    how = ", ".join(f"{n} on {rule}" for rule, n in sorted(v["decided_by"].items(), key=lambda kv: -kv[1]))
+    print(f"  decided: {how}")
+    width = max(len(a), len(b), 5)
+    print(f"\n  {'model':{width}}  passed   $/attempt  sec/attempt  mistakes  good enough (bar {v['bar']:.0%})")
+    for name in (a, b):
+        s = v["models"][name]
+        print(
+            f"  {name:{width}}  {s['passed']:>2}/{s['attempts']:<3}  {money(s['cost_per_attempt']):>9}  "
+            f"{s['seconds_per_attempt']:11.0f}  {s['mistakes']:8.1f}  {'yes' if s['good_enough'] else 'no'}"
+        )
+    if v["hazards"]:
+        print("\nWhere they tripped on this task:")
+        for h in v["hazards"]:
+            print(f"  - {h['model']}: {h['hazard']} in {h['tripped']} of {h['exposed']} attempts")
+    if v["notes"]:
+        print("\nNotes:")
+        for n in v["notes"]:
+            print(f"  - {n}")
+    print("\nEvidence (sealed match records):")
+    for e in v["evidence"]:
+        print(f"  - {e['run']}  seal {str(e['seal_sha256'])[:12]}  engine {str(e['engine_commit'])[:7]}")
+
+
 def money(x):
     return "-" if x is None else f"${x:.4f}"
 
@@ -245,6 +380,17 @@ def main(argv=None):
     r.add_argument("--all-versions", action="store_true", help="also count results from older test versions")
     r.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
     r.add_argument("--json", action="store_true")
+    v = sub.add_parser(
+        "verdict", parents=[common], help="one task, two models: which did it better, how sure, and is it good enough"
+    )
+    v.add_argument("workflow", help="test id, e.g. refund-queue or gladiator/refund-queue")
+    v.add_argument("--a", required=True, help="first model, e.g. anthropic:claude-haiku-5-5")
+    v.add_argument("--b", required=True, help="second model")
+    v.add_argument("--suite", help="only pairs played in this suite (suites can set different budgets)")
+    v.add_argument("--all-versions", action="store_true", help="also count pairs on older versions of the test")
+    v.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that counts as good enough")
+    v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
+    v.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
 
     if args.cmd == "build":
@@ -296,6 +442,14 @@ def main(argv=None):
             print(json.dumps(result, indent=1, default=str))
         else:
             print_recommendation(result)
+    elif args.cmd == "verdict":
+        result = verdict(
+            args.store, args.workflow, args.a, args.b, args.suite, args.all_versions, args.bar, args.min_pairs
+        )
+        if args.json:
+            print(json.dumps(result, indent=1, default=str))
+        else:
+            print_verdict(result)
     return 0
 
 

@@ -175,3 +175,44 @@ def test_store_option_works_after_the_subcommand_and_ask_prints_a_table(tmp_path
     assert out[0].split() == ["version", "a", "b", "a_wins", "b_wins", "pairs"]
     _, a, b, a_wins, b_wins, pairs = out[1].split()
     assert {(a, a_wins), (b, b_wins)} == {("p:a", "2"), ("p:b", "0")} and pairs == "2"
+
+
+def test_verdict_is_a_task_claim_between_two_models_only(tmp_path, capsys):
+    runs = tmp_path / "runs"
+    # a beats b 9-0 on t/x (a passes every time); a also loses to c elsewhere, which must not count here.
+    run(runs, "r1", "p:a", "p:b", [(True, False, 0.01, 0.02)] * 9)
+    run(runs, "r2", "p:c", "p:a", [(True, False, 0.03, 0.01)] * 9)
+    store = str(tmp_path / "s.rl")
+    load.load(runs, store)
+    v = cli.verdict(store, "t/x", "p:a", "p:b")
+    assert (v["verdict"], v["better"], v["pairs"]) == ("better", "p:a", 9)
+    assert v["wins"] == {"p:a": 9, "p:b": 0} and v["decided_by"] == {"success": 9}
+    assert v["models"]["p:a"]["good_enough"] and not v["models"]["p:b"]["good_enough"]
+    assert [e["run"] for e in v["evidence"]] == ["r1"]  # only the match where these two met
+
+    # the same question asked the other way round gives the same answer
+    assert cli.verdict(store, "t/x", "p:b", "p:a")["better"] == "p:a"
+    # models that never met: no verdict, and no winner is made up
+    none = cli.verdict(store, "t/x", "p:b", "p:c")
+    assert (none["verdict"], none["better"]) == ("no data", None)
+
+    assert cli.main(["verdict", "t/x", "--a", "p:a", "--b", "p:b", "--store", store]) == 0
+    out = capsys.readouterr().out
+    assert "p:a does this task better" in out and "Evidence" in out
+
+
+def test_verdict_names_no_winner_on_thin_or_level_evidence_and_says_when_better_is_not_good_enough(tmp_path):
+    runs = tmp_path / "runs"
+    run(runs, "r1", "p:a", "p:b", [(True, False, 0.01, 0.02)] * 3)  # too few pairs
+    run(runs, "r2", "p:c", "p:d", [(True, False, 0.01, 0.02)] * 4 + [(False, True, 0.01, 0.02)] * 4)  # level
+    # e beats f on cost in every pair, but neither ever passes
+    run(runs, "r3", "p:e", "p:f", [(False, False, 0.01, 0.05)] * 9)
+    store = str(tmp_path / "s.rl")
+    load.load(runs, store)
+    thin = cli.verdict(store, "t/x", "p:a", "p:b")
+    assert (thin["verdict"], thin["better"]) == ("not enough evidence", None)
+    level = cli.verdict(store, "t/x", "p:c", "p:d")
+    assert (level["verdict"], level["better"]) == ("no real difference shown", None)
+    poor = cli.verdict(store, "t/x", "p:e", "p:f")
+    assert not any(m["good_enough"] for m in poor["models"].values())
+    assert any("Neither model reaches the bar" in n for n in poor["notes"])
