@@ -10,3 +10,5 @@ operator.json
 !data/records/*/operator.json
 # Local rebuilds (the shipped store is data/ledger.rl)
 /*.rl
+# Installed only to run site/check.cjs
+node_modules/

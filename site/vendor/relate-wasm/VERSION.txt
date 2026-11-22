@@ -1,0 +1,10 @@
+Package: @relate/relate-wasm
+Version: 1.2.0
+Licence: Apache-2.0 (as declared in the package's package.json; the package ships no separate licence file)
+Source:  https://github.com/relatedb/relate
+
+Vendored unchanged from the npm package. Only the files the demo page loads are copied:
+  relate.js                                          the JavaScript glue (an ES module)
+  relate_bg.wasm                                     the engine
+  snippets/relate-wasm-dd0c6225f894802b/js/opfs.js   imported by relate.js (the page itself uses an in-memory store)
+  README.md                                          the package's own README

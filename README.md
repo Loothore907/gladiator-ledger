@@ -11,6 +11,16 @@ names no winner.
 > between 12 models** (closed and open-weights), so every answer below reproduces from a clean clone with **no API
 > keys and no cost**.
 
+## Try it in the browser
+The `site/` folder is a static page that builds the same graph in your browser with Relate's WebAssembly build and
+walks the whole loop: describe a flow, pick two models, read the verdict and download the spec. No server, no keys,
+nothing leaves the tab. Serve the folder with any static file server:
+
+```bash
+python3 -m http.server --directory site 8000    # then open http://localhost:8000
+```
+A check (`node site/check.cjs`, run in CI) proves the page gives the same answers as the command line.
+
 ## Setup (under five minutes)
 Needs Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
