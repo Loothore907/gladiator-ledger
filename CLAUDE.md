@@ -1,8 +1,10 @@
 # Working on Gladiator Ledger (instructions for Claude sessions)
 
 Ledger is the owner's entry for the Relate hackathon (deadline **Dec 11, 2026, 6:00 PM PST**; target submission
-Dec 10). It loads Gladiator's run records into a Relate graph and answers "which model for this workflow, under
-this budget", with the matches behind the answer. The owner directs and approves; Claude does the hands-on work.
+Dec 10). It loads Gladiator's run records into a Relate graph and answers "of these two models, which does this
+task better, how sure is that, and what should I build", with the matches behind the answer. It makes task claims,
+never general rankings. The same loop (flows, opponents, verdict, spec) runs from the command line, a static
+browser page (`site/`) and an MCP server (`ledger mcp`). The owner directs and approves; Claude does the hands-on work.
 The owner prefers plain-English summaries.
 
 ## Standing permissions (owner, 2026-11-21)

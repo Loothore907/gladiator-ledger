@@ -1,7 +1,7 @@
 [project]
 name = "gladiator-ledger"
 version = "0.1.0"
-description = "Load Gladiator run records into a Relate graph and ask which model wins a workflow under a budget."
+description = "Which of two AI models does this task better, how sure is that, and what to build: head-to-head evidence in a Relate graph."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
