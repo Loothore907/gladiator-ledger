@@ -129,8 +129,42 @@ async function main() {
       same(pick(want), pick(got), `${where} candidates in order`);
       same(want, got, where);
     }
+    // Click through the page itself, the way a visitor does: every flow, every first model, every second model.
+    // The comparisons above call the page's functions; this proves the buttons lead to a drawn verdict, including
+    // for pairs where no winner is named.
+    let clicked = 0;
+    const flowCount = await page.locator('#flow-cards button').count();
+    if (!flowCount) problems.push('the page lists no flows to click');
+    const values = (list) => page.locator(`#${list} input:not([disabled])`).evaluateAll((inputs) => inputs.map((x) => x.value));
+    for (let f = 0; f < flowCount; f += 1) {
+      await page.locator('#flow-cards button').nth(f).click();
+      const firsts = await values('first-list');
+      if (!firsts.length) problems.push(`flow ${f}: no first model to pick`);
+      for (const a of firsts) {
+        // empty the list first, so what is read next is this model's opponents and not the previous model's
+        await page.evaluate(() => document.getElementById('second-list').replaceChildren());
+        await page.locator(`#first-list input[value="${a}"]`).check();
+        await page.waitForFunction(() => document.querySelectorAll('#second-list input').length > 0, null, { timeout: 5000 });
+        for (const b of await values('second-list')) {
+          await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
+          await page.locator(`#second-list input[value="${b}"]`).check();
+          const drawn = await page
+            .waitForFunction(
+              () => !document.getElementById('step-verdict').hidden && document.getElementById('verdict-body').innerText.trim().length > 200,
+              null,
+              { timeout: 5000 },
+            )
+            .then(() => true, () => false);
+          if (!drawn) problems.push(`clicking flow ${f}, ${a} vs ${b}: no verdict was drawn`);
+          // a broken page fails every pair the same way: stop early instead of waiting out each one
+          if (problems.length >= 5) throw new Error(`stopped after ${problems.length} problems:\n  - ${problems.join('\n  - ')}`);
+          clicked += 1;
+        }
+      }
+    }
+    if (!clicked) problems.push('no pair of models could be clicked: the click-through tested nothing');
     await page.close();
-    return { stats, requests };
+    return { stats, requests, clicked };
   } finally {
     await browser.close();
     server.close();
@@ -138,7 +172,7 @@ async function main() {
 }
 
 main().then(
-  ({ stats, requests }) => {
+  ({ stats, requests, clicked }) => {
     if (!compared) problems.push('nothing was compared');
     if (problems.length) {
       console.error(`FAILED: ${problems.length} problem(s)`);
@@ -152,7 +186,7 @@ main().then(
     console.log(
       `Graph: ${stats.matches} matches, ${stats.pairs} judged pairs, ${stats.models} models; ready in ` +
         `${Math.round(stats.total_ms)} ms (fetch and start ${Math.round(stats.fetch_ms)} ms, build ${Math.round(stats.build_ms)} ms). ` +
-        `${requests} requests, all to this folder.`,
+        `${requests} requests, all to this folder. Clicked through ${clicked} pairs of models; each drew a verdict.`,
     );
   },
   (error) => {

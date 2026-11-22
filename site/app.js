@@ -90,7 +90,8 @@ let ledger;
 let turn = 0; // guards against a slow answer landing after a newer choice
 let searchTurn = 0;
 
-const shortName = (id) => names.get(id) || id.split(':').pop().split('/').pop();
+// id is null when no winner is named: the caller's sentence then does not use the name
+const shortName = (id) => (id ? names.get(id) || id.split(':').pop().split('/').pop() : '');
 const modelLabel = (id) => [el('span', { class: 'name' }, shortName(id)), el('span', { class: 'id' }, id)];
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
