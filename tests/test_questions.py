@@ -162,3 +162,16 @@ def test_top_two_that_never_met_is_a_lean_not_a_pick(tmp_path):
     load.load(runs, store)
     rec = cli.recommend(store, "t/x", budget=1.0)
     assert rec["verdict"] == "leaning" and any("never played each other" in c for c in rec["caveats"])
+
+
+def test_store_option_works_after_the_subcommand_and_ask_prints_a_table(tmp_path, capsys):
+    runs = tmp_path / "runs"
+    run(runs, "r1", "p:a", "p:b", [(True, False, 0.01, 0.01)] * 2)
+    store = str(tmp_path / "s.rl")
+    cli.main(["build", "--records", str(runs), "--store", store])
+    capsys.readouterr()
+    cli.main(["ask", "beats", "--store", store])
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].split() == ["version", "a", "b", "a_wins", "b_wins", "pairs"]
+    _, a, b, a_wins, b_wins, pairs = out[1].split()
+    assert {(a, a_wins), (b, b_wins)} == {("p:a", "2"), ("p:b", "0")} and pairs == "2"

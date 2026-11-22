@@ -39,3 +39,40 @@ jobs:
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --frozen
       - run: uv run pytest -v
+
+  readme:
+    name: README commands, clean clone (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv sync --frozen
+      - name: Every README command works with no API keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run ledger recommend --suite small-tier --budget 0.05
+          uv run ledger recommend --suite small-tier --budget 0.005
+          uv run ledger recommend --suite mid-tier --budget 0.1
+          uv run ledger recommend refund-queue --budget 0.05
+          for q in best_under_budget hazard_profile beat_cycles beats promotion stale_results; do
+            uv run ledger ask "$q" --param test_id=gladiator/refund-queue --param budget=0.05 > /dev/null
+          done
+          uv run ledger ask hazard_profile --json > /dev/null
+      - name: Rebuilding the store from the shipped records gives the same answers
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run ledger build --records data/records --validations data/validations --store rebuilt.rl
+          uv run ledger recommend --suite small-tier --budget 0.05 > shipped.txt
+          uv run ledger recommend --suite small-tier --budget 0.05 --store rebuilt.rl > rebuilt.txt
+          diff shipped.txt rebuilt.txt
+          rm -f rebuilt.rl shipped.txt rebuilt.txt
+      - name: The checkout is untouched (nothing ships dirty)
+        shell: bash
+        run: git status --porcelain && test -z "$(git status --porcelain)"

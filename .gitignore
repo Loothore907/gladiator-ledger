@@ -6,3 +6,5 @@ __pycache__/
 # Raw downloaded run folders (operator.json is private and must never be committed)
 runs/
 operator.json
+# Local rebuilds (the shipped store is data/ledger.rl)
+/*.rl
