@@ -17,7 +17,8 @@ source of the same kind of evidence plugs in by handing back the same shape.
 The bridge shipped today is `gladiator`. It reads two kinds of record:
 
 - **Run records** (`runs/<run_id>/record.json`, Gladiator's `docs/RUN_RECORD.md`): one match between two models on
-  a suite. Only this public file is read. The private `operator.json` beside it is never opened.
+  a suite. The graph is built from this public file only. The private half beside it (`operator.json`, the
+  answer key) is published for checking but is not loaded into the graph.
 - **Validation records** (`validations/<namespace>/<name>@<version>.json`): the automatic validation of one test
   version, with a reference player and corner-cutting players.
 
