@@ -7,6 +7,14 @@ model evaluation engine, into a [Relate](https://relatedb.ai) graph, and answers
 answer comes with the matches behind it. When the evidence is thin, or the top models are level, it says so and
 names no winner.
 
+> **Data notice (2026-11-22).** A bug in the Gladiator engine affected every match in the shipped store: the
+> tool a model uses to check an action after a timeout was offered without a way to say which request to check,
+> so it always answered "not found". Models that checked were graded as retrying blindly, often with a duplicate
+> effect, and pass rates came out far too low. The bug is fixed
+> ([gladiator-core#2](https://github.com/Loothore907/gladiator-core/pull/2)) and the matches are being re-run.
+> Until the store is rebuilt, read the numbers and example outputs below as a demonstration of how Ledger works,
+> not as findings about these models. In particular, the "ambiguous timeout" hazard rates are not valid.
+
 > Entry for the Relate hackathon (Nov–Dec 2026). The repository ships a Relate store built from **60 real matches
 > between 18 models** (closed and open-weights), so every answer below reproduces from a clean clone with **no API
 > keys and no cost**.
