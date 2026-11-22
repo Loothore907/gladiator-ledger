@@ -137,14 +137,25 @@ async function main() {
     if (!flowCount) problems.push('the page lists no flows to click');
     const values = (list) => page.locator(`#${list} input:not([disabled])`).evaluateAll((inputs) => inputs.map((x) => x.value));
     for (let f = 0; f < flowCount; f += 1) {
+      // each list fills a moment after the click: empty it first and wait, so a stale or half-drawn list is never read
+      await page.evaluate(() => document.getElementById('first-list').replaceChildren());
       await page.locator('#flow-cards button').nth(f).click();
-      const firsts = await values('first-list');
+      const filled = await page
+        .waitForFunction(() => document.querySelectorAll('#first-list input').length > 0, null, { timeout: 5000 })
+        .then(() => true, () => false);
+      const firsts = filled ? await values('first-list') : [];
       if (!firsts.length) problems.push(`flow ${f}: no first model to pick`);
       for (const a of firsts) {
         // empty the list first, so what is read next is this model's opponents and not the previous model's
         await page.evaluate(() => document.getElementById('second-list').replaceChildren());
         await page.locator(`#first-list input[value="${a}"]`).check();
-        await page.waitForFunction(() => document.querySelectorAll('#second-list input').length > 0, null, { timeout: 5000 });
+        const met = await page
+          .waitForFunction(() => document.querySelectorAll('#second-list input').length > 0, null, { timeout: 5000 })
+          .then(() => true, () => false);
+        if (!met) {
+          problems.push(`flow ${f}, ${a}: no second model to pick`);
+          continue;
+        }
         for (const b of await values('second-list')) {
           await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
           await page.locator(`#second-list input[value="${b}"]`).check();
