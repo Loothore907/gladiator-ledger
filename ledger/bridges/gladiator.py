@@ -90,12 +90,45 @@ def attempt_props(res: dict, side: str, effort, efficiency: float | None) -> dic
     }
 
 
+def flow_facts(sides: dict) -> dict:
+    """What a run's records say about each workflow it played, for search and for the spec: its title, the brief
+    and policy the models were given (the lowest-numbered wording seen, so a rebuild picks the same text), its
+    tags, the benchmark it is modelled on, and every tool a model used on it. Keys with no value are left out,
+    so loading never erases a fact another record supplied."""
+    seen: dict[str, dict] = {}
+    for side in sides.values():
+        for res in side["results"]:
+            node = res["node"]
+            flow = seen.setdefault(node, {"wording": None, "tools": set()})
+            flow["tools"].update(t["tool_name"] for t in res.get("turns") or [] if t.get("tool_name"))
+            challenge = res.get("challenge") or {}
+            packet = res.get("public_packet") or {}
+            wording = (res.get("grade_details") or {}).get("wording")
+            wording = wording if isinstance(wording, int) else 0
+            if packet.get("brief") and (flow["wording"] is None or wording < flow["wording"]):
+                flow.update(wording=wording, brief=packet.get("brief"), policy=packet.get("policy"))
+            flow.update(
+                title=res.get("name"),
+                tags=challenge.get("tags"),
+                emulates=challenge.get("emulates"),
+                test_type=challenge.get("test_type"),
+                action_budget=packet.get("action_budget"),
+            )
+    out = {}
+    for node, flow in seen.items():
+        flow["tools"] = sorted(flow["tools"])
+        flow.pop("wording")
+        out[node] = {k: v for k, v in flow.items() if v not in (None, [], "")}
+    return out
+
+
 def run_rows(body: dict, seal: str) -> dict:
     run_id = body["run_id"]
     settings = body.get("settings") or {}
     profile = ((body.get("suite") or {}).get("success") or {}).get("profile") or "balanced"
     sides = body["contestants"]
     by_key = {side: {(r["node"], r.get("attempt", 1)): r for r in sides[side]["results"]} for side in ("A", "B")}
+    flows = flow_facts(sides)
     matches = []
     for node, attempt in by_key["A"]:
         a, b = by_key["A"][(node, attempt)], by_key["B"].get((node, attempt))
@@ -140,6 +173,7 @@ def run_rows(body: dict, seal: str) -> dict:
                     "content_sha256": challenge.get("content_sha256"),
                     "status": challenge.get("status"),
                     "forked_from": challenge.get("forked_from"),
+                    **flows.get(node, {}),
                 },
                 "props": {
                     "run_id": run_id,
@@ -169,6 +203,10 @@ def run_rows(body: dict, seal: str) -> dict:
             "cap_usd": budget.get("cap_usd"),
             "spent_usd": budget.get("spent_usd"),
             "repeats": settings.get("repeats"),
+            "effort": (settings.get("defaults") or {}).get("effort"),
+            "max_output_tokens": (settings.get("defaults") or {}).get("max_output_tokens"),
+            "attempt_budget_usd": (settings.get("defaults") or {}).get("attempt_budget_usd"),
+            "timeout_s": (settings.get("defaults") or {}).get("timeout_s"),
             "model_a": sides["A"]["id"],
             "model_b": sides["B"]["id"],
             "recorded_winner": verdict.get("winner"),

@@ -41,6 +41,8 @@ SCHEMA = [
     "CREATE CONSTRAINT validation_key IF NOT EXISTS FOR (n:ValidationRun) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT source_name IF NOT EXISTS FOR (n:Source) REQUIRE n.name IS UNIQUE",
     "CREATE CONSTRAINT benchmark_name IF NOT EXISTS FOR (n:Benchmark) REQUIRE n.name IS UNIQUE",
+    # Keyword search over what each workflow asks for ("describe your flow, find the closest tested one").
+    "CREATE FULLTEXT INDEX flow_text IF NOT EXISTS FOR (n:TestVersion) ON EACH [n.title, n.brief, n.policy]",
 ]
 
 WRITE_VALIDATIONS = """
