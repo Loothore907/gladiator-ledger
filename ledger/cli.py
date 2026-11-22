@@ -183,22 +183,54 @@ def print_recommendation(r: dict) -> None:
             print(f"  - {c}")
 
 
+def cell(value) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.4f}".rstrip("0").rstrip(".") if abs(value) < 1000 else f"{value:.0f}"
+    if isinstance(value, list):
+        return ", ".join(cell(v) for v in value)
+    return str(value)
+
+
+def print_table(rows: list[dict]) -> None:
+    """Rows as aligned columns (use --json for machine-readable output)."""
+    if not rows:
+        print("(no rows)")
+        return
+    cols = list(rows[0])
+    text = [[cell(r.get(c)) for c in cols] for r in rows]
+    widths = [max(len(c), *(len(t[i]) for t in text)) for i, c in enumerate(cols)]
+    print("  ".join(c.ljust(w) for c, w in zip(cols, widths, strict=True)).rstrip())
+    for t in text:
+        print("  ".join(v.ljust(w) for v, w in zip(t, widths, strict=True)).rstrip())
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ledger", description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--store", default=DEFAULT_STORE, help=f"Relate store (default {DEFAULT_STORE})")
+    # --store also works after the subcommand (ledger build --store x.rl ...).
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--store", default=argparse.SUPPRESS, help=f"Relate store (default {DEFAULT_STORE})")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    b = sub.add_parser("build", help="load Gladiator run records and validation records (safe to re-run)")
+    b = sub.add_parser(
+        "build", parents=[common], help="load Gladiator run records and validation records (safe to re-run)"
+    )
     b.add_argument("--records", type=Path, required=True, help="folder holding runs/<run_id>/record.json")
     b.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
-    i = sub.add_parser("import", help="copy Gladiator's sealed public records into data/ (never operator.json)")
+    i = sub.add_parser(
+        "import", parents=[common], help="copy Gladiator's sealed public records into data/ (never operator.json)"
+    )
     i.add_argument("--records", type=Path, help="folder holding runs/<run_id>/record.json")
     i.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
     i.add_argument("--data", type=Path, default=Path("data"), help="destination (default data/)")
-    a = sub.add_parser("ask", help="run one of the fixed questions")
+    a = sub.add_parser("ask", parents=[common], help="run one of the fixed questions")
     a.add_argument("question", choices=sorted(questions.ALL))
     a.add_argument("--param", action="append", default=[], help="name=value (numbers are parsed)")
     a.add_argument("--json", action="store_true")
-    r = sub.add_parser("recommend", help="which model for this workflow under this budget, with evidence")
+    r = sub.add_parser(
+        "recommend", parents=[common], help="which model for this workflow under this budget, with evidence"
+    )
     r.add_argument("workflow", nargs="?", help="test id, e.g. refund-queue or gladiator/refund-queue")
     r.add_argument("--suite", help="recommend across every workflow in a Gladiator suite, e.g. small-tier")
     r.add_argument("--budget", type=float, required=True, help="USD you can pay per attempt")
@@ -235,8 +267,7 @@ def main(argv=None):
         if args.json:
             print(json.dumps(result, indent=1, default=str))
         else:
-            for row in result:
-                print(row)
+            print_table(result)
     elif args.cmd == "recommend":
         if not (args.workflow or args.suite):
             ap.error("recommend needs a workflow or --suite")

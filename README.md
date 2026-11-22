@@ -112,10 +112,11 @@ See [docs/SCHEMA.md](docs/SCHEMA.md).
 `data/records/` holds the sealed public run records (`record.json`) of every match: two models, the same generated
 worlds, every action, grade and cost. `data/validations/` holds the sealed validation records of each test version.
 Gladiator's private `operator.json` files (hidden simulator state) are never included. A test fails if the store and
-the records ever disagree. To rebuild the store yourself:
+the records ever disagree. To rebuild the store yourself and check it gives the same answers:
 
 ```bash
-uv run ledger build --records data/records --validations data/validations
+uv run ledger build --records data/records --validations data/validations --store rebuilt.rl
+uv run ledger recommend --suite small-tier --budget 0.05 --store rebuilt.rl
 ```
 
 Known limits: most pairings have 8–12 judged pairs, so many answers are leans rather than picks; that is the honest
