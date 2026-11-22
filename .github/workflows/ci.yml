@@ -60,7 +60,7 @@ jobs:
           uv run ledger recommend --suite small-tier --budget 0.005
           uv run ledger recommend --suite mid-tier --budget 0.1
           uv run ledger recommend refund-queue --budget 0.05
-          for q in best_under_budget hazard_profile beat_cycles beats promotion stale_results; do
+          for q in best_under_budget hazard_profile beat_cycles beats promotion stale_results sources; do
             uv run ledger ask "$q" --param test_id=gladiator/refund-queue --param budget=0.05 > /dev/null
           done
           uv run ledger ask hazard_profile --json > /dev/null

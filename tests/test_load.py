@@ -69,6 +69,33 @@ def test_load_judges_pairs_links_hazards_and_is_idempotent(tmp_path):
         assert [(r["h"], r["n"]) for r in tripped] == [("ambiguous timeout (retried without checking)", 2)]
         includes = conn.execute("MATCH (tv:TestVersion)-[:INCLUDES]->(:Hazard) RETURN count(tv) AS n").single()
         assert includes["n"] == 2  # both test versions can generate the hazard
+        # every run is linked to the bridge it came from, and loading twice made one source, not two
+        sources = conn.execute("MATCH (r:Run)-[:FROM]->(s:Source) RETURN s.name AS s, count(r) AS n").fetchall()
+        assert [(r["s"], r["n"]) for r in sources] == [("gladiator", 1)]
+        assert conn.execute("MATCH (s:Source) RETURN count(s) AS n").single()["n"] == 1
+
+
+def test_any_bridge_that_hands_back_the_shared_shape_can_be_written(tmp_path):
+    """The loader knows nothing about Gladiator's files: rows in the shared shape from another source load too,
+    and the graph keeps the two sources apart."""
+    from ledger.bridges import gladiator
+    from ledger.load import write
+
+    write_record(tmp_path / "runs", "r1", [attempt("x", True, 0.01)], [attempt("x", False, 0.01)])
+    store = str(tmp_path / "s.rl")
+    load(tmp_path / "runs", store)
+    other = gladiator.read_records(tmp_path / "runs")
+    other.source, other.description = "another-harness", "a second source in the same shape"
+    other.runs[0]["run_id"] = "other-1"
+    for m in other.runs[0]["matches"]:
+        m["key"] = "other-1/" + m["key"].split("/", 1)[1]
+        m["props"]["run_id"] = "other-1"
+        for a in m["attempts"]:
+            a["key"] = "other-1/" + a["key"].split("/", 1)[1]
+    write(other, store)
+    with relate.connect(store, read_only=True) as conn:
+        got = conn.execute("MATCH (r:Run)-[:FROM]->(s:Source) RETURN s.name AS s, r.run_id AS r ORDER BY s").fetchall()
+        assert [(r["s"], r["r"]) for r in got] == [("another-harness", "other-1"), ("gladiator", "r1")]
 
 
 def test_tampered_record_is_skipped(tmp_path):

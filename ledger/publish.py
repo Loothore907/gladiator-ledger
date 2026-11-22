@@ -11,7 +11,7 @@ import json
 import shutil
 from pathlib import Path
 
-from ledger.load import seal_ok
+from ledger.bridges.gladiator import seal_ok
 
 
 def _sealed(path: Path) -> dict | None:

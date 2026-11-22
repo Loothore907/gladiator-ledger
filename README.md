@@ -90,7 +90,7 @@ uv run ledger ask stale_results
 Matches played on a test version that has since been replaced. `recommend` uses current versions by default.
 
 All questions: `best_under_budget`, `head_to_head`, `hazard_profile`, `beat_cycles`, `beats`, `promotion`,
-`stale_results` (`uv run ledger ask <name> --json` for machine-readable output).
+`stale_results`, `sources` (`uv run ledger ask <name> --json` for machine-readable output).
 
 ## How and why Relate is used
 Relate is the store and the query engine, not an export target.
@@ -105,7 +105,12 @@ Relate is the store and the query engine, not an export target.
 - **Safe to rebuild:** the loader `MERGE`s on stable keys behind uniqueness constraints, so loading the same records
   again changes nothing. The records stay the master copy, and the store is a view of them.
 
-Graph: 8 kinds of node (Run, Match, Attempt, Model, Test, TestVersion, Hazard, ValidationRun) and 11 relationships.
+- **Bridges:** evidence reaches the graph through a bridge (`ledger/bridges/`): a source reads its own files and
+  hands back rows in one shared shape, and the loader links every run to its `Source`. Gladiator is the first
+  bridge; another source of the same kind of evidence plugs in the same way (`uv run ledger ask sources`).
+
+Graph: 9 kinds of node (Source, Run, Match, Attempt, Model, Test, TestVersion, Hazard, ValidationRun) and 12
+relationships.
 See [docs/SCHEMA.md](docs/SCHEMA.md).
 
 ## What's in the data

@@ -5,7 +5,16 @@ those records. Nothing is typed in by hand. The loader writes with `MERGE` on st
 records again changes nothing, and the store can be rebuilt from the records at any time. **The records stay the
 master copy and the graph is a view of them.**
 
-Two kinds of source record are read:
+## Bridges: where evidence comes from
+
+Ledger's subject is fixed: evidence about which model does a given task better. A **bridge** is one source of that
+evidence (`ledger/bridges/`). It reads its own files and hands back plain rows in a shared shape: head-to-head
+runs (matches, attempts, who won and why) and validation checks. The loader (`ledger/load.py`) is the only code
+that writes to the graph, and it links every run and check to its `Source`, so an answer can always be traced to
+where its proof lives. A bridge never touches the graph, and the loader never parses a source's files, so another
+source of the same kind of evidence plugs in by handing back the same shape.
+
+The bridge shipped today is `gladiator`. It reads two kinds of record:
 
 - **Run records** (`runs/<run_id>/record.json`, Gladiator's `docs/RUN_RECORD.md`): one match between two models on
   a suite. Only this public file is read. The private `operator.json` beside it is never opened.
@@ -25,12 +34,14 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 | `Test` | `id` (e.g. `gladiator/refund-queue`) | | challenge provenance |
 | `TestVersion` | `id@version:sha12` | test_id, version, version_rank, content_sha256, status (at run time), forked_from | challenge provenance (the exact sealed package) |
 | `Hazard` | `name` | | grader counters, validation players |
+| `Source` | `name` (the bridge, e.g. `gladiator`) | description | the bridge that read the evidence |
 | `ValidationRun` | `version/seal/level/player` | level, player, role (`reference`, `corner-cutting`), seeds, passed_seeds, ok, record_valid, engine_commit, validated_at | one check in a validation record |
 
 ## Relationships
 
 | Relationship | Meaning |
 |---|---|
+| `(Run)-[:FROM]->(Source)`, `(ValidationRun)-[:FROM]->(Source)` | which bridge the evidence came from |
 | `(Match)-[:PART_OF]->(Run)` | the record a pair came from |
 | `(Match)-[:USED]->(TestVersion)` | the exact sealed package played |
 | `(TestVersion)-[:VERSION_OF]->(Test)` | which workflow a version belongs to |
