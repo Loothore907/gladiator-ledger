@@ -288,7 +288,7 @@ The contest opened on Nov 11, 2026. Everything in this repository was written af
   OpenAI, Google, OpenRouter or any model maker. Model names appear only to identify what was tested, and the match
   transcripts in `data/` are AI-generated.
 
-Full statement: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
+Full statement: [docs/DISCLOSURE.md](docs/DISCLOSURE.md). The organizers' answer on eligibility: [docs/ELIGIBILITY.md](docs/ELIGIBILITY.md).
 
 ## License
 Apache-2.0.
