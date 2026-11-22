@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gladiator Ledger: which model does this task better?</title>
+<meta name="description" content="Pick a workflow and two AI models. Ledger shows which did that task better in head-to-head matches, how sure that is, and what to build.">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <p class="brand">Gladiator Ledger</p>
+  <h1>Of these two models, which does <em>this</em> task better?</h1>
+  <p class="lede">Ledger answers from head-to-head matches: two models play the same freshly generated worlds of a
+    tool-using workflow, and each pair of attempts is judged. It makes a claim about one task, never a general
+    ranking, and it names no winner when the evidence is thin or level.</p>
+  <p id="status" class="status" role="status" aria-live="polite">Building the graph in your browser…</p>
+</header>
+
+<main>
+  <section id="step-flow" class="step" aria-labelledby="h-flow">
+    <h2 id="h-flow"><span class="num">1</span> Describe or pick a flow</h2>
+    <form id="flow-form" class="search" autocomplete="off">
+      <label for="flow-text">Describe what your agent has to do</label>
+      <div class="search-row">
+        <input id="flow-text" type="text" placeholder="for example: decide refund requests for damaged orders" disabled>
+        <button type="submit" id="flow-go" disabled>Find</button>
+      </div>
+    </form>
+    <p id="flow-note" class="note" role="status" aria-live="polite"></p>
+    <div id="flow-cards" class="cards"></div>
+  </section>
+
+  <section id="step-models" class="step" aria-labelledby="h-models" hidden>
+    <h2 id="h-models"><span class="num">2</span> Pick two models</h2>
+    <p id="models-intro" class="note"></p>
+    <fieldset id="first-model" class="pick">
+      <legend>First model</legend>
+      <div id="first-list" class="options"></div>
+    </fieldset>
+    <div id="suggest" class="suggest" hidden>
+      <h3>Closest on paper</h3>
+      <p id="suggest-intro" class="note"></p>
+      <label class="check"><input type="checkbox" id="open-only"> Open weights only</label>
+      <div id="suggest-body"></div>
+      <p class="note">A close score only makes the match fair. Which one does your task better is what the match shows.</p>
+    </div>
+    <fieldset id="second-model" class="pick" hidden>
+      <legend>Second model</legend>
+      <p id="second-intro" class="note"></p>
+      <div id="second-list" class="options"></div>
+    </fieldset>
+  </section>
+
+  <section id="step-verdict" class="step" aria-labelledby="h-verdict" hidden>
+    <h2 id="h-verdict"><span class="num">3</span> Verdict and spec</h2>
+    <div id="verdict-body"></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>The data is a fixed set of finished matches: this page cannot run new ones. Everything runs locally in this
+    browser tab; nothing you type is sent anywhere.</p>
+  <p>Published scores are used only to suggest a fair opponent, never to rank or recommend. They come from Epoch AI,
+    “Capabilities &amp; benchmarking” (the Epoch Capabilities Index), epoch.ai/benchmarks, licensed CC BY 4.0.</p>
+  <p><a href="https://github.com/Loothore907/gladiator-ledger">Gladiator Ledger on GitHub</a></p>
+</footer>
+
+<noscript><p class="foot">This page needs JavaScript: it builds a small graph database in your browser.</p></noscript>
+<script type="module" src="app.js"></script>
+</body>
+</html>
