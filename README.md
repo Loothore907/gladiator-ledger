@@ -7,16 +7,8 @@ model evaluation engine, into a [Relate](https://relatedb.ai) graph, and answers
 answer comes with the matches behind it. When the evidence is thin, or the top models are level, it says so and
 names no winner.
 
-> **Data notice (2026-11-22).** A bug in the Gladiator engine affected every match in the shipped store: the
-> tool a model uses to check an action after a timeout was offered without a way to say which request to check,
-> so it always answered "not found". Models that checked were graded as retrying blindly, often with a duplicate
-> effect, and pass rates came out far too low. The bug is fixed
-> ([gladiator-core#2](https://github.com/Loothore907/gladiator-core/pull/2)) and the matches are being re-run.
-> Until the store is rebuilt, read the numbers and example outputs below as a demonstration of how Ledger works,
-> not as findings about these models. In particular, the "ambiguous timeout" hazard rates are not valid.
-
-> Entry for the Relate hackathon (Nov–Dec 2026). The repository ships a Relate store built from **60 real matches
-> between 18 models** (closed and open-weights), so every answer below reproduces from a clean clone with **no API
+> Entry for the Relate hackathon (Nov–Dec 2026). The repository ships a Relate store built from **24 real matches
+> between 12 models** (closed and open-weights), so every answer below reproduces from a clean clone with **no API
 > keys and no cost**.
 
 ## Setup (under five minutes)
@@ -42,39 +34,41 @@ difference is a tie. Ledger re-judges every pair with that rule.
 uv run ledger recommend --suite small-tier --budget 0.05
 ```
 ```text
-Leaning: openrouter:minimax/minimax-m3.1-flash
+Pick: openrouter:deepseek/deepseek-v4.1-flash-1017
 
-  model                                        pairs  won  passed  $/attempt  $/clean  mistakes
-  openrouter:minimax/minimax-m3.1-flash           40   33       5    $0.0065  $0.0517       5.1
-  openrouter:deepseek/deepseek-v4.1-flash-1017    40   33       9    $0.0066  $0.0292       4.4
-  anthropic:claude-haiku-5-5                      52   33       3    $0.0187  $0.3233       3.8
+  model                                        pairs  won  ties  passed  $/attempt  $/clean  mistakes
+  openrouter:deepseek/deepseek-v4.1-flash-1017    72   52     1      59    $0.0065  $0.0079       0.5
+  anthropic:claude-haiku-5-5                      96   55     0      83    $0.0187  $0.0216       0.5
+  openrouter:minimax/minimax-m3.1-flash           72   40     0      47    $0.0095  $0.0145       1.8
   ...
-Head to head vs deepseek: 6-2 (sign test p = 0.29)
+Head to head vs anthropic:claude-haiku-5-5: 20-4 (sign test p = 0.0015)
 Caveats:
-  - minimax leads deepseek 6-2, but a split like that happens by chance 29% of the time between equal models:
-    a lean, not a settled result.
-  - Beat cycles (3): claude-haiku-5-5 > minimax > deepseek > claude-haiku-5-5 (2-0, 2-0, 2-0); ...
+  - Beat cycles (2): claude-haiku-5-5 > gemini-3.1-flash-lite > gpt-6-luna > claude-haiku-5-5 (4-0, 2-1, 3-2); ...
 ```
-Two open-weights models win as often as Claude Haiku at about a third of the cost. DeepSeek has the cheapest clean
-result ($0.03 per pass). Haiku still makes the fewest mistakes. Ledger calls this **a lean, not a pick**, and shows
-why.
+An open-weights model, DeepSeek, is the pick: it won 20 of the 24 pairs it played directly against Claude Haiku, at
+about a third of the cost per attempt. A 20-4 split almost never happens between equal models, so Ledger calls it
+**a pick** and shows the head-to-head behind it. Haiku passes at least as often and makes as few mistakes; it loses on
+what each success costs.
 
-Change the budget and the answer changes:
+Change the budget or the scope and the answer changes:
 ```bash
 uv run ledger recommend --suite small-tier --budget 0.005   # Pick: gpt-6-luna, the only model that fits
-uv run ledger recommend --suite mid-tier --budget 0.1       # Leaning: claude-haiku-5-5, ahead of Sonnet, Terra, Gemini
-uv run ledger recommend refund-queue --budget 0.05          # one workflow: no winner named (top two went 1-1)
+uv run ledger recommend --suite mid-tier --budget 0.1       # Leaning: claude-haiku-5-5 (7-5 against Terra: a lean)
+uv run ledger recommend refund-queue --budget 0.05          # one workflow: a lean only (the top two never met)
 ```
+The last two show the other half of the rule: when the lead is small, or the top two never played each other,
+Ledger says **leaning** and names no settled winner.
 
 ### 2. "Where do models fail?" (hazard profile)
 ```bash
 uv run ledger ask hazard_profile
 ```
-The hazard "ambiguous timeout": an action's result is unknown and the model must check before retrying. Small and
-mid-tier models retry blindly on **62–100% of the attempts** where it can happen. Frontier models (gpt-6.2 sol and
-astra) do so on about **23%**, even though they mostly played harder, expert-level worlds. That is the single
-biggest gap between tiers in the data (it pools different matches and difficulty levels, so read it as a pattern,
-not a head-to-head result).
+For each model and each hazard a test can generate: how many attempts met the hazard, and how many fell for it.
+The commonest slip is **acting without reading**: deciding a request before looking up the records it depends on
+(DeepSeek in 12 of 72 attempts, Gemini 3.1 Flash-Lite in 7 of 40; only one model never did it). By contrast, after
+an **ambiguous timeout** (an action's result is unknown and must be checked before retrying) ten of the twelve
+models never retried blindly. This pools matches across the two suites, so read it as a pattern, not a
+head-to-head result.
 
 ### 3. "Is the ranking even a ladder?" (beat cycles)
 ```bash
@@ -89,13 +83,14 @@ uv run ledger ask promotion
 ```
 For each test version: did it pass Gladiator's automatic validation (the reference player passes and every
 corner-cutting player is caught), how many distinct models played it, and how often a pair had a clear winner. The
-four current workflow versions each have 12 models, 60 pairs and 97–100% decisive pairs.
+four current workflow versions each have 12 models, 75 pairs and 99–100% decisive pairs.
 
 ### 5. "Which results are out of date?" (stale results)
 ```bash
 uv run ledger ask stale_results
 ```
-Matches played on a test version that has since been replaced. `recommend` uses current versions by default.
+Matches played on a test version that has since been replaced. `recommend` uses current versions by default. The
+shipped store holds current versions only, so this returns no rows today; it fills as tests get new versions.
 
 All questions: `best_under_budget`, `head_to_head`, `hazard_profile`, `beat_cycles`, `beats`, `promotion`,
 `stale_results`, `sources` (`uv run ledger ask <name> --json` for machine-readable output).
@@ -132,8 +127,8 @@ uv run ledger build --records data/records --validations data/validations --stor
 uv run ledger recommend --suite small-tier --budget 0.05 --store rebuilt.rl
 ```
 
-Known limits: most pairings have 8–12 judged pairs, so many answers are leans rather than picks; that is the honest
-reading. A single-workflow answer pools every suite that played that workflow version (suites can differ in
+Known limits: most pairings have 8–24 judged pairs across four workflows (2–6 per workflow), so suite-level answers
+can be picks while single-workflow answers are mostly leans; that is the honest reading. A single-workflow answer pools every suite that played that workflow version (suites can differ in
 per-attempt budget); `--suite` answers keep suites apart.
 
 ## Disclosure

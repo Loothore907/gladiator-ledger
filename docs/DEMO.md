@@ -6,11 +6,11 @@ Everything shown runs from a clean clone with no API keys. Record at a large ter
 | Time | On screen | Say (roughly) |
 |---|---|---|
 | 0:00–0:12 | README title | "Which model should run my workflow, on my budget, and what's the proof? Ledger answers that from real head-to-head matches, using a Relate graph." |
-| 0:12–0:25 | `git clone`, `uv sync` (pre-warmed) | "Clone it, sync, done. It ships a Relate store built from 60 real matches between 18 models, so there are no keys and no cost." |
-| 0:25–0:50 | `uv run ledger recommend --suite small-tier --budget 0.05` | "Two open-weights models win as often as Claude Haiku at a third of the cost. But look: Ledger says *leaning*, not *pick*. MiniMax beat DeepSeek 6–2, and that happens by chance 29% of the time. It won't make up a winner." |
-| 0:50–1:02 | Same command with `--budget 0.005` | "Tighten the budget and the answer changes: only Luna fits, and it says so." |
-| 1:02–1:20 | `uv run ledger ask hazard_profile`, highlight the ambiguous-timeout rows | "Where do models fail? When an action's result is unknown, small and mid-tier models retry without checking on 62 to 100 percent of attempts. Frontier models do it about a quarter of the time, on harder worlds. That's the biggest gap in the data." |
-| 1:20–1:35 | `uv run ledger ask beat_cycles` | "And the ranking isn't always a ladder: Haiku beat MiniMax, MiniMax beat DeepSeek, DeepSeek beat Haiku. That's a cycle in the graph, which a leaderboard would hide." |
+| 0:12–0:25 | `git clone`, `uv sync` (pre-warmed) | "Clone it, sync, done. It ships a Relate store built from 24 real matches between 12 models, so there are no keys and no cost." |
+| 0:25–0:50 | `uv run ledger recommend --suite small-tier --budget 0.05` | "For these four workflows under five cents an attempt, the pick is DeepSeek, an open-weights model. It beat Claude Haiku 20 to 4 on the same worlds at a third of the cost. That split almost never happens by chance, so Ledger calls it a pick, and shows the head-to-head." |
+| 0:50–1:02 | Same command with `--suite mid-tier --budget 0.1` | "Ask about the mid-tier models and it says *leaning*: Haiku leads Terra 7 to 5, which happens by chance three times in four. It won't make up a winner." |
+| 1:02–1:20 | `uv run ledger ask hazard_profile`, highlight the "acted without reading" rows | "Where do models fail? The commonest slip is deciding before reading the records: DeepSeek in 12 of 72 attempts. After a timeout, though, ten of twelve models always checked before retrying." |
+| 1:20–1:35 | `uv run ledger ask beat_cycles` | "And the ranking isn't always a ladder: on refunds, Haiku beat Gemini Flash-Lite, which beat Luna, which beat Haiku. That's a cycle in the graph, which a leaderboard would hide." |
 | 1:35–1:50 | `docs/SCHEMA.md` diagram/table, then `ledger/questions.py` | "Every answer is one Cypher query over the graph: runs, matches, models, test versions, hazards and validation evidence. Records stay sealed; the store rebuilds from them." |
 | 1:50–2:00 | README "Disclosure" | "Built during the contest on my earlier Gladiator engine, written by Claude under my direction. Apache-2.0." |
 
