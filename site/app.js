@@ -87,6 +87,7 @@ const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1).trimE
 const state = { flows: null, task: null, flow: null, models: [], a: null, b: null, partners: new Map(), scores: new Map(), openOnly: false };
 const names = new Map(); // model id -> display name, as the graph has it
 let ledger;
+let rules;
 let turn = 0; // guards against a slow answer landing after a newer choice
 let searchTurn = 0;
 
@@ -215,19 +216,24 @@ function onPaper(model) {
   return { gap, text: `${fixed(gap, 1)} points apart on paper, ranges ${overlap ? 'overlap' : 'do not overlap'}` };
 }
 
-// Second model: the opponents this page can answer for (they have played the first model on this flow), closest
-// on paper first. Published scores only order the list; the match decides.
+// Second model: the opponents this page can answer for (they have played the first model on this flow), the ones
+// with the most head-to-head evidence first. Published scores only break ties and say how fair the match is.
 function drawSecond() {
   $('second-model').hidden = false;
   const mine = state.scores.get(state.a);
   const met = state.models
     .filter((m) => m.model !== state.a && state.partners.has(m.model))
     .map((m) => ({ ...m, paper: onPaper(m.model) }))
-    .sort((x, y) => (x.paper.gap ?? Infinity) - (y.paper.gap ?? Infinity) || (x.model < y.model ? -1 : 1));
+    .map((m) => ({ ...m, met: state.partners.get(m.model) }))
+    .sort((x, y) => y.met - x.met || (x.paper.gap ?? Infinity) - (y.paper.gap ?? Infinity) || (x.model < y.model ? -1 : 1));
+  const enough = met.filter((m) => m.met >= rules.min_pairs).length;
   $('second-intro').textContent =
     `${plural(met.length, 'model')} ${met.length === 1 ? 'has' : 'have'} played ${shortName(state.a)} on this flow` +
-    (mine ? `, listed closest on paper first (${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index). ` : '. ') +
-    'A close score only makes the match fair; which one does your task better is what the match shows.';
+    ', listed with the most head-to-head evidence first. ' +
+    (enough
+      ? `${enough} of them ${enough === 1 ? 'has' : 'have'} the ${rules.min_pairs} judged pairs a verdict needs. `
+      : `None has the ${rules.min_pairs} judged pairs a verdict needs yet, so no winner will be named. `) +
+    (mine ? `${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index; a close score only makes the match fair.` : '');
   $('second-list').className = 'options';
   $('second-list').replaceChildren(
     ...met.map((m) =>
@@ -236,7 +242,8 @@ function drawSecond() {
         m.model,
         m.model === state.b,
         false,
-        `${plural(state.partners.get(m.model), 'judged pair')} against ${shortName(state.a)} · ${m.paper.text}`,
+        `${plural(m.met, 'judged pair')} against ${shortName(state.a)}: ` +
+          `${m.met >= rules.min_pairs ? 'enough for a verdict' : 'too few for a verdict yet'} · ${m.paper.text}`,
         () => chooseSecond(m.model),
       ),
     ),
@@ -583,12 +590,49 @@ function pathFigure(spec, scores) {
   );
 }
 
+// ---- the example ------------------------------------------------------------------------------------------------
+
+// Walks the three steps for a flow and pair of models with the most head-to-head evidence in the graph (a settled
+// verdict if one of them has it), so a first-time visitor sees a full verdict and spec. Nothing is hard-coded: more matches can change the example.
+async function showExample() {
+  const button = $('example');
+  button.disabled = true;
+  try {
+    $('flow-text').value = '';
+    await searchFlows();
+    const found = [];
+    for (const flow of state.flows.flows) {
+      for (const m of await ledger.modelsOnFlow(flow.test)) {
+        for (const p of await ledger.partnersOnFlow(flow.test, m.model)) {
+          if (m.model < p.model) found.push({ flow, a: m.model, b: p.model, pairs: p.pairs });
+        }
+      }
+    }
+    found.sort((x, y) => y.pairs - x.pairs);
+    // among the pairs with the most evidence, prefer one whose verdict is settled; otherwise the most evidence
+    let best = found[0];
+    for (const c of found.slice(0, 12)) {
+      if ((await ledger.verdict(c.flow.test, c.a, c.b)).verdict === 'better') {
+        best = c;
+        break;
+      }
+    }
+    if (!best) return;
+    await chooseFlow(best.flow);
+    await chooseFirst(best.a);
+    drawFirst();
+    await chooseSecond(best.b);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ---- start --------------------------------------------------------------------------------------------------
 
 async function start() {
   const status = $('status');
   try {
-    ({ ledger } = await ledgerReady);
+    ({ ledger, rules } = await ledgerReady);
     const stats = await graphReady;
     status.textContent =
       `Ready: ${stats.matches} matches (${stats.pairs} judged pairs), ${stats.models} models, built in ${Math.round(stats.total_ms)} ms.`;
@@ -599,6 +643,8 @@ async function start() {
   }
   $('flow-text').disabled = false;
   $('flow-go').disabled = false;
+  $('example').disabled = false;
+  $('example').addEventListener('click', showExample);
   let timer = 0;
   $('flow-text').addEventListener('input', () => {
     clearTimeout(timer);
