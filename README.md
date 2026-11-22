@@ -203,23 +203,22 @@ if both succeed, the more efficient wins; and no real difference is a tie. Ledge
 uv run ledger recommend --suite small-tier --budget 0.05
 ```
 ```text
-Leaning: openrouter:deepseek/deepseek-v4.1-flash-1017
+No winner named: tie
 
   model                                        pairs  won  ties  passed  $/attempt  $/clean  mistakes
-  openrouter:deepseek/deepseek-v4.1-flash-1017    72   52     1      59    $0.0065  $0.0079       0.5
-  openrouter:minimax/minimax-m3.1-flash          108   61     0      69    $0.0075  $0.0117       1.7
-  anthropic:claude-haiku-5-5                     132   70     0     118    $0.0185  $0.0207       0.4
+  openrouter:deepseek/deepseek-v4.1-flash-1017   272  196     3     218    $0.0065  $0.0082       0.9
+  openrouter:minimax/minimax-m3.1-flash          228  145     0     152    $0.0060  $0.0090       1.8
+  anthropic:claude-haiku-5-5                     216  108     0     189    $0.0184  $0.0210       0.4
   ...
-Head to head vs openrouter:minimax/minimax-m3.1-flash: 14-10 (sign test p = 0.5413)
 Caveats:
-  - deepseek leads minimax 14-10, but a split like that happens by chance 54% of the time between equal
-    models: a lean, not a settled result.
-  - Beat cycles (2): claude-haiku-5-5 > gemini-3.1-flash-lite > gpt-6-luna > claude-haiku-5-5 (4-0, 2-1, 3-2); ...
+  - deepseek ranks first overall but went 32-32 against minimax: no clear winner, so none is named.
+  - Beat cycles (4): deepseek > minimax > glm-5.3 > deepseek (4-2, 9-3, 7-5); ...
 ```
-Two open-weights models lead Claude Haiku on these four workflows at well under half the cost per attempt. Between
-the two leaders, DeepSeek is ahead of MiniMax 14-10 head to head, which is too close to call, so Ledger says
-**leaning** and shows why. A suite-wide answer pools different opponents, which is why the pair-by-pair verdict
-above is the claim to rely on.
+Two open-weights models lead Claude Haiku on these four workflows at about a third of the cost per attempt. Between
+the two leaders, DeepSeek and MiniMax split their 64 head-to-head pairs 32-32, so Ledger names **no winner** and
+shows why. Task by task the same two are not level: MiniMax leans ahead on refunds, DeepSeek on incident triage
+and inventory transfers. A suite-wide answer pools different tasks and opponents, which is why the pair-by-pair
+verdict above is the claim to rely on.
 
 **Where models slip** (`uv run ledger ask hazard_profile`). For each model and each hazard a test can generate:
 how many attempts met it, and how many fell for it. The commonest slip is acting without reading: deciding a
@@ -248,7 +247,7 @@ now that the match is over. Each public record carries a fingerprint of its priv
 the two belong together and re-grade a match themselves:
 
 ```bash
-uv run ledger verify     # 25 match records, every seal checked; 25 private halves checked against their fingerprint
+uv run ledger verify     # 33 match records, every seal checked; 33 private halves checked against their fingerprint
 ```
 A private half is published only for tests that generate a fresh world on every attempt, so the answers cannot help
 anyone on a later match. A test fails if the store and the records ever disagree. To rebuild the store yourself and
@@ -259,9 +258,9 @@ uv run ledger build --records data/records --validations data/validations --scor
 uv run ledger recommend --suite small-tier --budget 0.05 --store rebuilt.rl
 ```
 
-**Known limits.** Most pairs of models have met on 2 to 6 worlds per workflow, which is too few for a verdict;
-only Haiku and MiniMax have 15. So most verdicts today read "not enough evidence", and that is the honest reading:
-more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
+**Known limits.** Evidence is uneven. Nine pairings of small models have 12 to 16 judged pairs on every workflow,
+enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read "not enough evidence", which is
+the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
 that only resembles one of these four needs its own test. The page and the assistant work over this fixed set of
 finished matches and cannot run new ones.
 
