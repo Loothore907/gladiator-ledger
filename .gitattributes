@@ -1,3 +1,4 @@
 # The shipped store and sealed records must reach every checkout byte for byte (Windows included).
 *.rl binary
+*.wasm binary
 data/**/*.json -text

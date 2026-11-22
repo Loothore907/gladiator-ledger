@@ -48,6 +48,9 @@ AI's Benchmarking Hub (https://epoch.ai/benchmarks), retrieved 2026-11-22 and us
 Attribution 4.0 licence. Ledger uses it only to suggest which models are close enough on paper to be worth
 matching; it makes no claim from it.
 
+**Third-party code.** `site/vendor/relate-wasm/` is a copy of the `@relate/relate-wasm` package (version in
+`VERSION.txt` there), Relate's own WebAssembly build, used unmodified by the browser demo.
+
 ## Relate capabilities used
 - **Embedded Python library** `relate-db` 1.2.0, imported as `relate`, with no server.
 - **Single-file store** (`data/ledger.rl`), opened read-only for every question.
@@ -56,6 +59,10 @@ matching; it makes no claim from it.
   `FOREACH` with `CASE` for conditional relationships.
 - **Reads:** multi-hop `MATCH` patterns, `OPTIONAL MATCH`, aggregation (`count`, `sum`, `avg`, `collect`),
   `EXISTS { MATCH ... }` subqueries, list construction and indexing, and parameters on every query.
+- **Full-text index** (`CREATE FULLTEXT INDEX`, `SEARCH ... IN (FULLTEXT INDEX ...) SCORE AS`) over each workflow's
+  title, brief and rules, for "describe your flow".
+- **WebAssembly build** (`@relate/relate-wasm`), in-memory, in a browser worker: the demo page in `site/` builds the
+  whole graph client-side with the same Cypher as the command line.
 - **Python API:** `relate.connect`, the cursor `stats` counters (used in tests to prove re-loading creates nothing),
   and dict-style result rows.
 

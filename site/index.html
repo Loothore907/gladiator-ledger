@@ -39,17 +39,16 @@
       <legend>First model</legend>
       <div id="first-list" class="options"></div>
     </fieldset>
-    <div id="suggest" class="suggest" hidden>
-      <h3>Closest on paper</h3>
-      <p id="suggest-intro" class="note"></p>
-      <label class="check"><input type="checkbox" id="open-only"> Open weights only</label>
-      <div id="suggest-body"></div>
-      <p class="note">A close score only makes the match fair. Which one does your task better is what the match shows.</p>
-    </div>
     <fieldset id="second-model" class="pick" hidden>
       <legend>Second model</legend>
       <p id="second-intro" class="note"></p>
       <div id="second-list" class="options"></div>
+      <details id="suggest" class="suggest">
+        <summary id="suggest-summary">Close on paper, not matched on this flow yet</summary>
+        <p id="suggest-intro" class="note"></p>
+        <label class="check"><input type="checkbox" id="open-only"> Open weights only</label>
+        <div id="suggest-body"></div>
+      </details>
     </fieldset>
   </section>
 

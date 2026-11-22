@@ -84,7 +84,7 @@ const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1).trimE
 
 // ---- state ----------------------------------------------------------------------------------------------------
 
-const state = { flows: null, task: null, flow: null, models: [], a: null, b: null, partners: new Map(), openOnly: false };
+const state = { flows: null, task: null, flow: null, models: [], a: null, b: null, partners: new Map(), scores: new Map(), openOnly: false };
 const names = new Map(); // model id -> display name, as the graph has it
 let ledger;
 let turn = 0; // guards against a slow answer landing after a newer choice
@@ -161,26 +161,32 @@ async function chooseFlow(flow) {
     `${plural(models.length, 'model')} have judged pairs on ${flow.title} (version ${flow.version}). ` +
     'Pick the two you are choosing between.';
   drawFirst();
-  $('suggest').hidden = true;
   $('second-model').hidden = true;
   $('step-models').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ---- step 2: models -----------------------------------------------------------------------------------------
 
-function option(group, id, checked, disabled, sub, onpick) {
+function option(group, id, checked, disabled, sub, onpick, compact = false) {
+  // compact: the name and one fact on a card; the full model id is the card's tooltip
+  const text = compact
+    ? el('span', { class: 'text' }, el('span', { class: 'name' }, shortName(id)), el('span', { class: 'sub' }, sub))
+    : el('span', { class: 'text' }, modelLabel(id), el('span', { class: 'sub' }, sub));
   return el(
     'label',
-    { class: `option${disabled ? ' off' : ''}` },
+    { class: `option${disabled ? ' off' : ''}${compact ? ' compact' : ''}`, title: compact ? id : null },
     el('input', { type: 'radio', name: group, value: id, checked, disabled, onchange: onpick }),
-    el('span', { class: 'text' }, modelLabel(id), el('span', { class: 'sub' }, sub)),
+    text,
   );
 }
 
+// First model: every model with judged pairs on this flow, most evidence first, as compact cards.
 function drawFirst() {
+  const models = [...state.models].sort((x, y) => y.pairs - x.pairs || (x.model < y.model ? -1 : 1));
+  $('first-list').className = 'options compact';
   $('first-list').replaceChildren(
-    ...state.models.map((m) =>
-      option('first', m.model, m.model === state.a, false, `${plural(m.pairs, 'judged pair')} on this flow`, () => chooseFirst(m.model)),
+    ...models.map((m) =>
+      option('first', m.model, m.model === state.a, false, plural(m.pairs, 'judged pair'), () => chooseFirst(m.model), true),
     ),
   );
 }
@@ -190,41 +196,84 @@ async function chooseFirst(model) {
   Object.assign(state, { a: model, b: null });
   $('step-verdict').hidden = true;
   const partners = await ledger.partnersOnFlow(state.task, model);
+  const scores = await ledger.scoresOf([model, ...partners.map((p) => p.model)]);
   if (mine !== turn) return;
   state.partners = new Map(partners.map((p) => [p.model, p.pairs]));
+  state.scores = new Map(scores.map((s) => [s.model, s]));
   drawSecond();
   await drawSuggestions(mine);
 }
 
+// How close a model that has played the first one is to it on paper, in words; null gap when either has no score.
+function onPaper(model) {
+  const mine = state.scores.get(state.a);
+  const theirs = state.scores.get(model);
+  if (!mine || !theirs) return { gap: null, text: 'no published score to compare' };
+  const gap = Math.abs(theirs.score - mine.score);
+  const overlap = theirs.low <= mine.high && mine.low <= theirs.high;
+  return { gap, text: `${fixed(gap, 1)} points apart on paper, ranges ${overlap ? 'overlap' : 'do not overlap'}` };
+}
+
+// Second model: the opponents this page can answer for (they have played the first model on this flow), closest
+// on paper first. Published scores only order the list; the match decides.
+function drawSecond() {
+  $('second-model').hidden = false;
+  const mine = state.scores.get(state.a);
+  const met = state.models
+    .filter((m) => m.model !== state.a && state.partners.has(m.model))
+    .map((m) => ({ ...m, paper: onPaper(m.model) }))
+    .sort((x, y) => (x.paper.gap ?? Infinity) - (y.paper.gap ?? Infinity) || (x.model < y.model ? -1 : 1));
+  $('second-intro').textContent =
+    `${plural(met.length, 'model')} ${met.length === 1 ? 'has' : 'have'} played ${shortName(state.a)} on this flow` +
+    (mine ? `, listed closest on paper first (${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index). ` : '. ') +
+    'A close score only makes the match fair; which one does your task better is what the match shows.';
+  $('second-list').className = 'options';
+  $('second-list').replaceChildren(
+    ...met.map((m) =>
+      option(
+        'second',
+        m.model,
+        m.model === state.b,
+        false,
+        `${plural(state.partners.get(m.model), 'judged pair')} against ${shortName(state.a)} · ${m.paper.text}`,
+        () => chooseSecond(m.model),
+      ),
+    ),
+  );
+}
+
+// Worth testing next: models close on paper that have NOT played the first one on this flow. The page cannot run
+// new matches, so these are shown as candidates, folded away under the list of opponents it can answer for.
 async function drawSuggestions(mine = turn) {
   const found = await ledger.opponents(state.a, state.openOnly);
   if (mine !== turn) return;
   for (const c of found.candidates) if (c.display_name) names.set(c.model, c.display_name);
-  $('suggest').hidden = false;
   const body = $('suggest-body');
+  $('suggest').hidden = false;
   if (found.note) {
+    $('suggest-summary').textContent = 'Close on paper, not matched on this flow yet';
     $('suggest-intro').textContent = found.note;
     body.replaceChildren();
     return;
   }
-  const s = found.score;
+  const untested = found.candidates.filter((c) => !state.partners.has(c.model));
+  $('suggest-summary').textContent = `Worth testing next: ${plural(untested.length, 'model')} close on paper with no match against ${shortName(state.a)} on this flow`;
   $('suggest-intro').textContent =
-    `${shortName(state.a)} scores ${fixed(s.score, 1)} on the ${found.benchmark} (range ${fixed(s.low, 1)} to ` +
-    `${fixed(s.high, 1)}). These models score closest to it${found.open_only ? ', open weights only' : ''}.`;
-  if (!found.candidates.length) {
-    body.replaceChildren(el('p', { class: 'note' }, 'No model with a published score fits.'));
+    `These score closest to ${shortName(state.a)}${found.open_only ? ' among open-weights models' : ''} but have not ` +
+    'played it on this flow, so there is no verdict to show. This page cannot run new matches.';
+  if (!untested.length) {
+    body.replaceChildren(el('p', { class: 'note' }, 'Every close model has already played it on this flow: see the list above.'));
     return;
   }
   body.replaceChildren(
     el(
       'ul',
       { class: 'cands' },
-      found.candidates.map((c) => {
-        const here = state.partners.get(c.model);
+      untested.map((c) => {
         const gap = `${c.gap >= 0 ? '+' : '-'}${fixed(Math.abs(c.gap), 2)}`;
-        let played = 'no matches yet';
-        if (c.pairs_played) played = `${plural(c.pairs_played, 'pair')} already played against it`;
-        else if (c.has_matches) played = 'has matches, none against it';
+        let known = 'no matches in Ledger yet';
+        if (c.pairs_played) known = `${plural(c.pairs_played, 'pair')} against it on other flows`;
+        else if (c.has_matches) known = 'has matches, none against it';
         return el(
           'li',
           null,
@@ -236,37 +285,12 @@ async function drawSuggestions(mine = turn) {
               'span',
               { class: 'sub' },
               `score ${fixed(c.score, 1)} (gap ${gap}) · ranges ${c.ranges_overlap ? 'overlap' : 'do not overlap'} · ` +
-                `${c.weights || 'unknown'} weights · ${played}`,
+                `${c.weights || 'unknown'} weights · ${known}`,
             ),
           ),
-          here
-            ? el('button', { type: 'button', class: 'small quiet', onclick: () => chooseSecond(c.model) }, `Pick (${plural(here, 'pair')} on this flow)`)
-            : el('span', { class: 'sub off' }, 'no match played yet on this flow'),
         );
       }),
     ),
-  );
-}
-
-function drawSecond() {
-  $('second-model').hidden = false;
-  $('second-intro').textContent =
-    `Only models that have played ${shortName(state.a)} on this flow can be picked: this page cannot run new matches.`;
-  const others = state.models.filter((m) => m.model !== state.a);
-  const met = others.filter((m) => state.partners.has(m.model));
-  const unmet = others.filter((m) => !state.partners.has(m.model));
-  $('second-list').replaceChildren(
-    ...met.map((m) =>
-      option(
-        'second',
-        m.model,
-        m.model === state.b,
-        false,
-        `${plural(state.partners.get(m.model), 'judged pair')} against ${shortName(state.a)}`,
-        () => chooseSecond(m.model),
-      ),
-    ),
-    ...unmet.map((m) => option('second', m.model, false, true, 'no match played yet on this flow', null)),
   );
 }
 

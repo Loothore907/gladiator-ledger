@@ -81,3 +81,20 @@ jobs:
       - name: The checkout is untouched (nothing ships dirty)
         shell: bash
         run: git status --porcelain && test -z "$(git status --porcelain)"
+
+  demo-page:
+    name: Demo page matches the command line
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install the browser used for the check
+        working-directory: site
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: The page gives the same verdicts, specs, flow searches and opponents as the command line
+        run: node site/check.cjs
