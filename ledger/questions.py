@@ -9,6 +9,8 @@ because each one follows connections across runs: models, matches, test versions
   promotion          Q4  Which test versions are validated, played by enough models, and separate them?
   stale_results      Q5  Which results were earned on a version that has since been replaced or forked?
 
+  pair_on_task           One task, two models: every pair where they met, with both sides' facts.
+  pair_hazards           The hazards each of those two models met and tripped on, in those pairs.
   sources                Where the evidence came from: each bridge, and how much it contributed.
 
 Judged pairs exclude attempts that ended for reasons outside the models' control (outages, run caps).
@@ -139,6 +141,40 @@ RETURN old.key AS version, matches, newer_versions, forks
 ORDER BY version
 """
 
+# One task, two models: every judged pair where exactly these two met on this task, with both sides' facts.
+# This is the unit Ledger's claims are made of: a task claim ("A does this task better than B"), never a
+# general claim about a model.
+PAIR_ON_TASK = """
+MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
+      (mt)<-[:IN]-(xa:Attempt)-[:BY]->(:Model {name: $a}),
+      (mt)<-[:IN]-(xb:Attempt)-[:BY]->(:Model {name: $b})
+WHERE NOT mt.excluded
+  AND ($suite IS NULL OR r.suite = $suite)
+  AND ($version_key IS NULL OR tv.key = $version_key)
+OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
+RETURN mt.key AS match, r.run_id AS run, r.seal_sha256 AS seal, r.engine_commit AS engine, r.suite AS suite,
+       tv.key AS version, mt.difficulty AS difficulty, mt.rule AS rule, coalesce(w.name, 'tie') AS winner,
+       xa.passed AS a_passed, xa.cost_usd AS a_cost, xa.wall_s AS a_time, xa.mistakes AS a_mistakes,
+       xa.effort AS a_effort,
+       xb.passed AS b_passed, xb.cost_usd AS b_cost, xb.wall_s AS b_time, xb.mistakes AS b_mistakes,
+       xb.effort AS b_effort
+ORDER BY mt.key
+"""
+
+# The hazards each of the two models met and tripped on, in those same pairs only.
+PAIR_HAZARDS = """
+MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
+      (mt)<-[:IN]-(x:Attempt)-[:BY]->(m:Model), (mt)<-[:IN]-(:Attempt)-[:BY]->(o:Model)
+WHERE NOT mt.excluded AND m.name IN [$a, $b] AND o.name IN [$a, $b] AND m.name <> o.name
+  AND ($suite IS NULL OR r.suite = $suite)
+  AND ($version_key IS NULL OR tv.key = $version_key)
+MATCH (tv)-[:INCLUDES]->(h:Hazard)
+OPTIONAL MATCH (x)-[tr:TRIPPED_ON]->(h)
+WITH m.name AS model, h.name AS hazard, count(x) AS exposed, count(tr) AS tripped
+RETURN model, hazard, exposed, tripped
+ORDER BY hazard, model
+"""
+
 # Where the evidence came from: each bridge (source), with how much it contributed.
 SOURCES = """
 MATCH (s:Source)
@@ -158,4 +194,6 @@ ALL = {
     "promotion": PROMOTION,
     "stale_results": STALE_RESULTS,
     "sources": SOURCES,
+    "pair_on_task": PAIR_ON_TASK,
+    "pair_hazards": PAIR_HAZARDS,
 }
