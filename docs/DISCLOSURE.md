@@ -63,11 +63,15 @@ matching; it makes no claim from it.
   title, brief and rules, for "describe your flow".
 - **WebAssembly build** (`@relate/relate-wasm`), in-memory, in a browser worker: the demo page in `site/` builds the
   whole graph client-side with the same Cypher as the command line.
+- **Read-only access for agents:** `ledger mcp` opens the single-file store read-only and serves it to AI
+  assistants over the Model Context Protocol, including a tool for free-form read-only Cypher.
 - **Python API:** `relate.connect`, the cursor `stats` counters (used in tests to prove re-loading creates nothing),
   and dict-style result rows.
 
 ## Third-party tools
 - Python 3.12+, [uv](https://github.com/astral-sh/uv) (environment and lock file), pytest, ruff.
+- The [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp`), for the assistant server.
+- Node.js and Playwright, only to check the browser demo page in CI.
 - GitHub Actions for CI (Linux and Windows).
 - The match data was produced by calling commercial and open-weights model APIs (Anthropic, OpenAI, Google, and
   OpenRouter) from the Gladiator engine.

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ledger": {
+      "command": "uv",
+      "args": ["run", "ledger", "mcp"]
+    }
+  }
+}
