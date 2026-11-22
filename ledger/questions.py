@@ -9,6 +9,8 @@ because each one follows connections across runs: models, matches, test versions
   promotion          Q4  Which test versions are validated, played by enough models, and separate them?
   stale_results      Q5  Which results were earned on a version that has since been replaced or forked?
 
+  sources                Where the evidence came from: each bridge, and how much it contributed.
+
 Judged pairs exclude attempts that ended for reasons outside the models' control (outages, run caps).
 """
 
@@ -137,6 +139,16 @@ RETURN old.key AS version, matches, newer_versions, forks
 ORDER BY version
 """
 
+# Where the evidence came from: each bridge (source), with how much it contributed.
+SOURCES = """
+MATCH (s:Source)
+OPTIONAL MATCH (r:Run)-[:FROM]->(s)
+WITH s, count(r) AS runs
+OPTIONAL MATCH (v:ValidationRun)-[:FROM]->(s)
+RETURN s.name AS source, s.description AS description, runs, count(v) AS validation_checks
+ORDER BY source
+"""
+
 ALL = {
     "best_under_budget": BEST_UNDER_BUDGET,
     "head_to_head": HEAD_TO_HEAD,
@@ -145,4 +157,5 @@ ALL = {
     "beats": BEATS,
     "promotion": PROMOTION,
     "stale_results": STALE_RESULTS,
+    "sources": SOURCES,
 }
