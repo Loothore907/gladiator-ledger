@@ -68,10 +68,11 @@ ORDER BY hazard, rate DESC, model
 """
 
 # Q3. Beat cycles: per test version, who beat whom by pair majority (ties dropped), then 3-cycles among them,
-# with each edge's pair score (a cycle of 2-1 wins is weak evidence; one of 6-0 wins is not).
+# with each edge's pair score (a cycle of 2-1 wins is weak evidence; one of 6-0 wins is not). $suite limits it to
+# matches from one suite (suites can share test versions but play them under different settings).
 BEAT_CYCLES = """
-MATCH (tv:TestVersion)<-[:USED]-(mt:Match)<-[:IN]-(:Attempt)-[:BY]->(m:Model)
-WHERE NOT mt.excluded
+MATCH (tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run), (mt)<-[:IN]-(:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded AND ($suite IS NULL OR r.suite = $suite)
 WITH tv, mt, collect(m) AS p
 OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
 WITH tv, p[0] AS x, p[1] AS y,

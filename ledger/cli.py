@@ -121,7 +121,7 @@ def recommend(
                     f"{p:.0%} of the time between equal models: a lean, not a settled result."
                 )
     in_scope = {v for r in table for v in r["versions"]}
-    cycles = [c for c in rows(store, questions.BEAT_CYCLES) if c["version"] in in_scope]
+    cycles = [c for c in rows(store, questions.BEAT_CYCLES, {"suite": suite}) if c["version"] in in_scope]
     if cycles:
         narrow = all(max(c["leads"]) <= 1 for c in cycles)
         detail = "; ".join(
