@@ -1,6 +1,6 @@
 """Gladiator's pair-judging rules, copied so Ledger judges every pair exactly as Gladiator does.
 
-REUSED CODE (disclosed): taken verbatim from the Gladiator engine (Apache-2.0, written before this project),
+REUSED CODE (disclosed): taken verbatim from the Gladiator engine (Apache-2.0, a separate project started first),
 scorers/efficiency.py and scorers/outcome.py at commit c3dac6f. Only the per-pair functions are kept.
 
 A pair is judged in this order: one side succeeded -> it wins ("success"); neither succeeded -> the one that got

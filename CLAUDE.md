@@ -13,8 +13,9 @@ is green** on the current head (squash merge), without asking. Fix red CI first;
 get green. Ask first before merging a PR Claude did not open, or changing repo settings or secrets.
 
 ## Rules
-- **Ledger is new work, started 2026-11-21.** Gladiator (the engine, Apache-2.0, started Oct 21 2026) is disclosed
-  earlier code. Never copy Gladiator code into Ledger without marking it as reused in the file header and in the
+- **Ledger is new work, started 2026-11-21.** Gladiator (the engine, Apache-2.0) is disclosed separate work: the
+  idea dates from October 2026, its first code was committed on 2026-11-18 (owner, 2026-11-22; never write that
+  Gladiator code predates the contest, which opened Nov 11), and the engine Ledger's data uses was built Nov 20-22. Never copy Gladiator code into Ledger without marking it as reused in the file header and in the
   disclosure statement. `ledger/scoring.py` is the one copied file so far.
 - **Ledger reads Gladiator's output; it never runs matches.** Matches and their budgets live in the Gladiator repo
   (`CLAUDE.md` there). Ledger itself costs nothing to run, and judges need no API keys.

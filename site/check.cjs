@@ -2,7 +2,7 @@
 //   node site/check.cjs
 // Serves this folder on a local port, opens the page in headless Chromium, and compares every verdict, spec,
 // flow search and opponents answer. Exits non-zero, printing what differed, on any mismatch, console error,
-// failed request or request to another host.
+// failed request, or request outside the page's own folder (it is served from a sub-folder, as on GitHub Pages).
 
 const http = require('http');
 const fs = require('fs');
@@ -10,6 +10,9 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const ROOT = __dirname;
+// The page is hosted under a sub-folder (GitHub Pages serves it at /gladiator-ledger/), so the check serves it
+// from one too: an absolute path such as "/data/graph.json" would then miss and fail the check.
+const BASE = '/gladiator-ledger/';
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -22,9 +25,10 @@ const TYPES = {
 
 function serve() {
   const server = http.createServer((req, res) => {
-    const name = decodeURIComponent(req.url.split('?')[0]).replace(/\/$/, '/index.html');
-    const file = path.join(ROOT, name);
-    if (!file.startsWith(ROOT + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    const asked = decodeURIComponent(req.url.split('?')[0]);
+    const name = asked.startsWith(BASE) ? asked.slice(BASE.length - 1).replace(/\/$/, '/index.html') : null;
+    const file = name === null ? null : path.join(ROOT, name);
+    if (!file || !file.startsWith(ROOT + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       res.writeHead(404);
       return res.end('not found');
     }
@@ -82,14 +86,14 @@ async function main() {
     page.on('request', (r) => {
       requests += 1;
       const url = r.url();
-      if (!url.startsWith(origin) && !url.startsWith('data:') && !url.startsWith('blob:')) {
-        problems.push(`request to another host: ${url}`);
+      if (!url.startsWith(origin + BASE) && !url.startsWith('data:') && !url.startsWith('blob:')) {
+        problems.push(`request outside the page's own folder: ${url}`);
       }
     });
     page.on('response', (r) => {
       if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`);
     });
-    await page.goto(`${origin}/`);
+    await page.goto(`${origin}${BASE}`);
     const stats = await page.evaluate(() => window.ledgerDemo.ready());
     if (!(stats.matches > 0 && stats.models > 0)) problems.push(`the page reports an empty graph: ${JSON.stringify(stats)}`);
 

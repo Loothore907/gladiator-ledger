@@ -1,0 +1,47 @@
+# Publishes the browser demo page (site/) to GitHub Pages.
+# Runs only after the CI workflow has finished green on main, so the page that goes live is one whose answers were
+# checked against the command line (the "Demo page matches the command line" job). It can also be started by hand.
+# One-time setup by the owner: repository Settings -> Pages -> Source: "GitHub Actions".
+# The page is then served at https://<owner>.github.io/gladiator-ledger/ (all of its links are relative).
+name: Publish demo page
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy site/ to GitHub Pages
+    # After CI: only when it passed, and only for a push to main (never for a pull request's run).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # the exact commit CI checked, not whatever main has moved to since
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
