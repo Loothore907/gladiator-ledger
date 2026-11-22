@@ -207,12 +207,12 @@ No winner named: tie
 
   model                                        pairs  won  ties  passed  $/attempt  $/clean  mistakes
   openrouter:deepseek/deepseek-v4.1-flash-1017   272  196     3     218    $0.0065  $0.0082       0.9
-  openrouter:minimax/minimax-m3.1-flash          228  145     0     152    $0.0060  $0.0090       1.8
+  openrouter:minimax/minimax-m3.1-flash          268  173     0     177    $0.0059  $0.0089       1.8
   anthropic:claude-haiku-5-5                     216  108     0     189    $0.0184  $0.0210       0.4
   ...
 Caveats:
   - deepseek ranks first overall but went 32-32 against minimax: no clear winner, so none is named.
-  - Beat cycles (4): deepseek > minimax > glm-5.3 > deepseek (4-2, 9-3, 7-5); ...
+  - Beat cycles (2): deepseek > minimax > glm-5.3 > deepseek (4-2, 9-3, 7-5); ...
 ```
 Two open-weights models lead Claude Haiku on these four workflows at about a third of the cost per attempt. Between
 the two leaders, DeepSeek and MiniMax split their 64 head-to-head pairs 32-32, so Ledger names **no winner** and
@@ -247,7 +247,7 @@ now that the match is over. Each public record carries a fingerprint of its priv
 the two belong together and re-grade a match themselves:
 
 ```bash
-uv run ledger verify     # 33 match records, every seal checked; 33 private halves checked against their fingerprint
+uv run ledger verify     # 37 match records, every seal checked; 37 private halves checked against their fingerprint
 ```
 A private half is published only for tests that generate a fresh world on every attempt, so the answers cannot help
 anyone on a later match. A test fails if the store and the records ever disagree. To rebuild the store yourself and
@@ -258,7 +258,7 @@ uv run ledger build --records data/records --validations data/validations --scor
 uv run ledger recommend --suite small-tier --budget 0.05 --store rebuilt.rl
 ```
 
-**Known limits.** Evidence is uneven. Nine pairings of small models have 12 to 16 judged pairs on every workflow,
+**Known limits.** Evidence is uneven. Thirteen pairings of small models have 12 to 16 judged pairs on every workflow,
 enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read "not enough evidence", which is
 the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
 that only resembles one of these four needs its own test. The page and the assistant work over this fixed set of
