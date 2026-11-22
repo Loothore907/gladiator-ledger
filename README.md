@@ -8,6 +8,12 @@ tool-using task, and answers with a **task claim**: who did this task better, ho
 good enough, and a **spec** you can build from. It never ranks models in general, and when the evidence is thin or
 level it names no winner.
 
+**Where Relate comes in.** [Relate](https://relatedb.ai) is the store and the query engine, not an export target.
+The match records are loaded into one Relate graph, and every answer is a Cypher query over it. A Relate full-text
+index finds the workflow you describe. Storage mode: the embedded Python library with a single-file store
+(`data/ledger.rl`), opened read-only; the browser demo runs Relate's WebAssembly build with an in-memory store
+built from the same statements; and an MCP server gives AI assistants the same graph, read-only.
+
 > Entry for the Relate by Neo4j hackathon (Nov–Dec 2026). The repository ships a Relate store built from **25 real
 > matches between 12 models** (closed and open-weights), so everything below reproduces from a clean clone with
 > **no API keys and no cost**.
@@ -32,7 +38,8 @@ All three walk the same loop over the same graph and give the same answers (the 
 command line in CI).
 
 ### 1. In your browser
-The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
+**Live: https://loothore907.github.io/gladiator-ledger/** (published from this repository after every change that
+passes the checks). The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
 the loop: describe a flow, pick two models, read the verdict, download the spec. No server, no keys, nothing leaves
 the tab.
 
@@ -56,7 +63,7 @@ Code and the `ledger` tools appear). For others, add:
 The tools are `find_flows`, `who_has_played`, `suggest_opponents`, `verdict`, `write_spec`, `describe_graph` and
 `read_graph` (read-only Cypher). They call the same code as the command line. The server also sends the assistant
 Ledger's rules: task claims only, "leaning" stays "leaning", and no winner the evidence does not name. Ledger needs
-no API key; the assistant is yours.
+no API key; the assistant is yours. Step-by-step setup: [docs/ASSISTANT.md](docs/ASSISTANT.md).
 
 ### 3. From the command line
 Needs Python 3.12+ and [uv](https://docs.astral.sh/uv/). Under five minutes; works the same on Linux, macOS and
@@ -261,10 +268,27 @@ finished matches and cannot run new ones.
 `data/epoch/` holds one file from Epoch AI's Benchmarking Hub (the Capabilities Index), used under the Creative
 Commons Attribution licence; see [data/epoch/README.md](data/epoch/README.md) for the credit.
 
-## Disclosure
-Ledger was started during the contest. It reads output from Gladiator, the owner's earlier engine, and copies one
-small piece of its scoring code (marked in `ledger/scoring.py`). Code was written by Claude (Anthropic) under the
-owner's direction. Full statement: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
+## Before and during the contest
+The contest opened on Nov 11, 2026. Everything in this repository was written after that.
+
+| When | What | Where |
+|---|---|---|
+| October 2026 | The idea for Gladiator: head-to-head tests of two models on the same task. No code. | Not in any repository |
+| Nov 18–20 | Gladiator's first code: a pilot runner and ten fixed test cases (its first commit is dated Nov 18). **Ledger does not use this version or its tests.** | Private history |
+| Nov 20–22 | The Gladiator engine as Ledger's data uses it: the rebuilt match engine, the tool-workflow test type, the four workflow tests, automatic validation, the test suites, and every match in `data/`. Also two fixes found while building Ledger: the check tool's missing argument, and records naming the engine's own version. | [gladiator-core](https://github.com/Loothore907/gladiator-core), published Nov 22 with a fresh history |
+| Nov 21 onward | **All of Ledger**: the bridges and loader, the graph schema, every Cypher question, the commands (`flows`, `opponents`, `verdict`, `spec`, `verify`, `recommend`), the MCP server, the browser demo page, the tests and the shipped store. | This repository |
+
+- **What Ledger takes from Gladiator.** It reads Gladiator's output files (the sealed match and validation
+  records). It imports no Gladiator code. One small file is copied from it and marked as such:
+  `ledger/scoring.py`, the rule that judges a pair of attempts.
+- **Who wrote it.** The code, tests and documentation in both projects were written by Claude (Anthropic) working
+  as a coding agent under the owner's direction. The owner set the goals and made the product, budget and
+  publishing decisions.
+- **Not affiliated.** Ledger is independent. It is not affiliated with, sponsored by or endorsed by Anthropic,
+  OpenAI, Google, OpenRouter or any model maker. Model names appear only to identify what was tested, and the match
+  transcripts in `data/` are AI-generated.
+
+Full statement: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
 
 ## License
 Apache-2.0.

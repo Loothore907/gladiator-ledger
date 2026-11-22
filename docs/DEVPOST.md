@@ -54,18 +54,27 @@ python3 -m http.server --directory site 8000     # the browser page
 ```
 No API keys and no cost. Linux, macOS and Windows.
 
-## Disclosure (short form; the full statement is docs/DISCLOSURE.md)
-- Ledger was started on 2026-11-21, inside the contest period. It reads the output of Gladiator, the author's
-  earlier evaluation engine (Apache-2.0, public at github.com/Loothore907/gladiator-core), and reuses one small
-  scoring file from it, marked in the source.
+## Before and during the contest (the contest opened Nov 11, 2026)
+| When | What |
+|---|---|
+| October 2026 | The idea for Gladiator, a head-to-head model evaluation engine. No code. |
+| Nov 18–20 | Gladiator's first code: a pilot runner and ten fixed test cases. Ledger does not use them. |
+| Nov 20–22 | The Gladiator engine as Ledger's data uses it (match engine, tool-workflow tests, validation, suites, all matches), public as github.com/Loothore907/gladiator-core. |
+| Nov 21 onward | All of Ledger: bridges and loader, graph schema, Cypher questions, commands, MCP server, browser demo page, tests and the shipped store. |
+
+No code in either project predates the contest. Ledger imports no Gladiator code; it reads Gladiator's output files
+and copies one small scoring file, marked in the source. The full statement is `docs/DISCLOSURE.md`.
+
+## Capabilities, tools and AI use
 - Product capabilities used: listed under "How Relate is used" above.
 - Third-party tools and data: Python, uv, pytest, ruff, the MCP Python SDK, Node.js and Playwright (to check the
-  page), GitHub Actions; Epoch AI's Capabilities Index (CC BY 4.0); model APIs from Anthropic, OpenAI, Google and
-  OpenRouter to play the matches.
+  page), GitHub Actions and GitHub Pages; Epoch AI's Capabilities Index (CC BY 4.0); model APIs from Anthropic,
+  OpenAI, Google and OpenRouter to play the matches.
 - AI tools: the code, tests and documentation were written by Claude (Anthropic) working as a coding agent under
   the author's direction. The author set the goals and made the product, budget and publishing decisions.
+- Ledger is independent: not affiliated with or endorsed by any model provider.
 
 ## Links to fill in
 - Repository: https://github.com/Loothore907/gladiator-ledger
-- Working demo: (the hosted page's address, once it is live)
+- Working demo: https://loothore907.github.io/gladiator-ledger/ (once the owner has turned GitHub Pages on)
 - Video: (if recorded)

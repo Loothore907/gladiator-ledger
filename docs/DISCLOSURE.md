@@ -1,31 +1,36 @@
 # Disclosure statement
 
-## What was built during the contest
-Gladiator Ledger was started on **2026-11-21**, after the contest opened on Nov 11. Everything in this repository
-was written during the contest period: the loader, the graph schema, the Cypher questions, the `recommend`, `ask`,
-`build` and `import` commands, the tests, the documentation, and the shipped store with its data.
+## Before and during the contest
+The contest opened on 2026-11-11.
 
-## Earlier work this project uses
-**[Gladiator](https://github.com/Loothore907/gladiator-core)**, the author's head-to-head AI model evaluation engine
-(Apache-2.0), started on 2026-10-21, before the contest. Its code was published on 2026-11-22 as a new repository
-with a fresh history; the earlier development history, and the commit ids cited below, are in the author's private
-repository. Ledger does not include or run the engine. It reads the engine's output files:
+| When | What | Where |
+|---|---|---|
+| October 2026 | The idea for Gladiator: head-to-head tests of two models on the same task. No code. | Not in any repository |
+| Nov 18–20 | Gladiator's first code: a pilot runner and ten fixed test cases. Its first commit is dated 2026-11-18. Ledger does not use this version or its tests. | The author's private repository |
+| Nov 20–22 | The Gladiator engine as Ledger's data uses it: the rebuilt match engine, the tool-workflow test type, the four workflow tests, automatic validation and validation records, the small-tier and mid-tier suites, and every match in `data/`. | Public since 2026-11-22 as [gladiator-core](https://github.com/Loothore907/gladiator-core), with a fresh history; the earlier history is in the author's private repository |
+| Nov 21 onward | All of Gladiator Ledger: the bridges and loader, the graph schema, the Cypher questions, the commands, the MCP server, the browser demo page, the tests, the documentation and the shipped store. | This repository |
 
-- **Run records** (`record.json`): sealed, versioned results of matches between two models.
-- **Validation records**: sealed evidence that each test version passed automatic validation.
+So no code in either project predates the contest; only the idea does. Gladiator is still disclosed here as
+separate, earlier work, because Ledger was started after it and builds on its output.
 
-**Copied code.** One small piece of Gladiator code is copied into Ledger and marked in its file header:
-`ledger/scoring.py`, the per-pair judging rule (from Gladiator's `scorers/efficiency.py` and `scorers/outcome.py`,
-commit `c3dac6f`). It is copied so Ledger judges every pair exactly as Gladiator does. Everything else in Ledger is
-new.
+## What Ledger takes from Gladiator
+- **Its output files.** Run records (`record.json`, with the private half `operator.json`): sealed, versioned
+  results of matches between two models. Validation records: sealed evidence that each test version passed
+  automatic validation.
+- **No imported code.** Ledger does not include, import or run the engine.
+- **One copied file**, marked in its header: `ledger/scoring.py`, the per-pair judging rule (from Gladiator's
+  `scorers/efficiency.py` and `scorers/outcome.py`, commit `c3dac6f` in the private history). It is copied so
+  Ledger judges every pair exactly as Gladiator does.
 
-**Gladiator changes made during the contest** (in the Gladiator repository, for Ledger's data):
+## Gladiator changes made for Ledger
+In the Gladiator repositories, during the contest:
 - validation records (`gladiator validate --write`), so test trust can be loaded into the graph;
 - a mid-tier test suite (`suites/mid_tier.yaml`);
-- calibration matches run for the data: small-tier, mid-tier and open-weights round-robins with fill-in repeats,
-  direct link matches, and replacing one open-weights model that the API provider rate-limited.
-- a fix to the engine's workflow tools (the check tool's missing argument, above), found while preparing this
-  entry, and a fix so each record names the engine's own commit.
+- the matches themselves: small-tier and mid-tier sets on the fixed engine, and repeats for the demo pair;
+- a fix to the engine's workflow tools (the check tool's missing argument, described under "The data"), found
+  while preparing this entry;
+- a fix so each record names the engine's own commit;
+- the public release of the engine as gladiator-core.
 
 ## The data
 `data/` holds 25 sealed public match records (12 models: Anthropic, OpenAI and Google models through their APIs,
@@ -75,6 +80,11 @@ matching; it makes no claim from it.
 - GitHub Actions for CI (Linux and Windows).
 - The match data was produced by calling commercial and open-weights model APIs (Anthropic, OpenAI, Google, and
   OpenRouter) from the Gladiator engine.
+
+## Independence
+Gladiator Ledger is an independent project. It is not affiliated with, sponsored by or endorsed by Anthropic,
+OpenAI, Google, OpenRouter, Epoch AI or any model maker. Model names are used only to identify what was tested. The
+match transcripts in `data/records/` are AI-generated: they are the models' own tool calls and text during the tests.
 
 ## AI tools
 The code, tests and documentation in this repository were written by **Claude** (Anthropic), working as a coding

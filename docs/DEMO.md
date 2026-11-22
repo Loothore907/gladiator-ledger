@@ -13,7 +13,7 @@ The rules also accept a link to a working demo in place of a video. If the page 
 | 0:50–1:15 | Step 3: the verdict, the graph picture, the guardrail table; click Download spec | "Fifteen pairs on the same generated worlds: MiniMax won twelve. That is a settled result, and both are good enough. The spec is the build plan: the job and rules as tested, the settings, and one guardrail to build, because MiniMax acted before reading in two of fifteen attempts." |
 | 1:15–1:30 | Same two models on incident triage (page or `ledger verdict incident-triage ...`) | "Ask about a different task and it says *leaning* Haiku: eleven to four, which could still be chance. It won't make up a winner." |
 | 1:30–1:45 | An assistant with the `ledger` tools: ask the refund question in plain words | "The same graph is an MCP server, so your own assistant can walk the loop, read-only, with the same rules." |
-| 1:45–2:00 | `uv run ledger verify`, then README "Disclosure" | "Every match is sealed, both halves are published, and anyone can check them. Built during the contest on my earlier Gladiator engine, written by Claude under my direction. Apache-2.0." |
+| 1:45–2:00 | `uv run ledger verify`, then README "Disclosure" | "Every match is sealed, both halves are published, and anyone can check them. Built during the contest, on my Gladiator engine, written by Claude under my direction. Apache-2.0." |
 
 ## Before recording
 - Serve the page (`python3 -m http.server --directory site 8000`) and load it once so the graph is built.
