@@ -11,6 +11,9 @@ because each one follows connections across runs: models, matches, test versions
 
   pair_on_task           One task, two models: every pair where they met, with both sides' facts.
   pair_hazards           The hazards each of those two models met and tripped on, in those pairs.
+  find_flow              Describe your flow: the tested workflows whose text matches your words best.
+  flows                  Every tested workflow (newest versions).
+  flow_as_tested         The text, tools and settings a workflow was tested with (what a spec is built from).
   close_to               Which models score closest to this one on a published benchmark (to pick an opponent).
   sources                Where the evidence came from: each bridge, and how much it contributed.
 
@@ -195,6 +198,44 @@ ORDER BY abs(theirs.score - mine.score), model
 LIMIT 25
 """
 
+# Describe your flow: keyword search over each tested workflow's title, brief and policy (a full-text index), then
+# out along the graph to what is known about it: how many models have played it and how many judged pairs exist.
+# Only the newest version of each test is returned. $q is the words to look for (cli.search_words drops filler).
+FIND_FLOW = """
+MATCH (tv:TestVersion)
+SEARCH tv IN (FULLTEXT INDEX flow_text FOR $q LIMIT 20) SCORE AS score
+MATCH (tv)-[:VERSION_OF]->(t:Test)
+WHERE NOT EXISTS { MATCH (t)<-[:VERSION_OF]-(newer:TestVersion) WHERE newer.version_rank > tv.version_rank }
+OPTIONAL MATCH (tv)<-[:USED]-(mt:Match)<-[:IN]-(:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded
+RETURN t.id AS test, tv.title AS title, tv.version AS version, score, tv.brief AS brief, tv.emulates AS emulates,
+       tv.tools AS tools, count(DISTINCT m) AS models, count(DISTINCT mt) AS pairs
+ORDER BY score DESC
+"""
+
+# Every tested workflow (newest versions), for when nothing is typed.
+FLOWS = """
+MATCH (t:Test)<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)<-[:IN]-(:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded
+  AND NOT EXISTS { MATCH (t)<-[:VERSION_OF]-(newer:TestVersion) WHERE newer.version_rank > tv.version_rank }
+RETURN t.id AS test, tv.title AS title, tv.version AS version, tv.brief AS brief, tv.emulates AS emulates,
+       tv.tools AS tools, count(DISTINCT m) AS models, count(DISTINCT mt) AS pairs
+ORDER BY test
+"""
+
+# What a workflow was tested as: the text and tools, and the settings of the runs in $runs (the matches a spec's
+# decision rests on, so the settings it prints are the ones its result was earned under).
+FLOW_AS_TESTED = """
+MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion {key: $version_key})
+OPTIONAL MATCH (tv)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run)
+WHERE r.run_id IN $runs
+RETURN tv.key AS version, tv.title AS title, tv.brief AS brief, tv.policy AS policy, tv.tools AS tools,
+       tv.emulates AS emulates, tv.tags AS tags, tv.content_sha256 AS content_sha256, tv.action_budget AS action_budget,
+       collect(DISTINCT mt.difficulty) AS difficulty, collect(DISTINCT r.effort) AS effort,
+       collect(DISTINCT r.max_output_tokens) AS max_output_tokens,
+       collect(DISTINCT r.attempt_budget_usd) AS attempt_budget_usd, collect(DISTINCT r.suite) AS suites
+"""
+
 # Where the evidence came from: each bridge (source), with how much it contributed.
 SOURCES = """
 MATCH (s:Source)
@@ -218,6 +259,9 @@ ALL = {
     "stale_results": STALE_RESULTS,
     "sources": SOURCES,
     "close_to": CLOSE_TO,
+    "find_flow": FIND_FLOW,
+    "flows": FLOWS,
+    "flow_as_tested": FLOW_AS_TESTED,
     "pair_on_task": PAIR_ON_TASK,
     "pair_hazards": PAIR_HAZARDS,
 }

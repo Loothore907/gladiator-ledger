@@ -62,6 +62,19 @@ uv run ledger recommend refund-queue --budget 0.05          # one workflow: a le
 The first is a **pick** because only one model fits the budget; the other two are leans, because the lead is small
 or the top two never played each other.
 
+### The loop: describe a flow, pick a pair, get a verdict and a spec
+```bash
+uv run ledger flows "an agent that handles refund requests for damaged orders"   # finds the closest tested workflow
+uv run ledger opponents "haiku 5.5" --open-only                                  # suggests a fair opponent
+uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1              # which does this task better
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --out spec.md   # the build plan
+```
+`flows` is a keyword search (a Relate full-text index over each workflow's title, brief and rules) that then walks
+the graph to what is known about each match. `spec` writes one document in three layers: the **decision** (who did
+the task better, how sure, good enough or not), the **blueprint** (the job and rules as tested, the tools, the
+settings the result holds for, and a guardrail for every hazard the chosen model tripped on) and the **evidence**
+(the sealed records behind it). Sections 2 and 3 below show the middle two steps.
+
 ### 2. "Who is a fair opponent?" (published scores, only to pick the pair)
 ```bash
 uv run ledger opponents "haiku 5.5" --open-only
@@ -134,7 +147,7 @@ Matches played on a test version that has since been replaced. `recommend` uses 
 shipped store holds current versions only, so this returns no rows today; it fills as tests get new versions.
 
 All questions: `best_under_budget`, `head_to_head`, `hazard_profile`, `beat_cycles`, `beats`, `promotion`,
-`stale_results`, `sources`, `close_to`, `pair_on_task`, `pair_hazards` (`uv run ledger ask <name> --json` for machine-readable output).
+`stale_results`, `sources`, `close_to`, `pair_on_task`, `pair_hazards`, `find_flow`, `flows`, `flow_as_tested` (`uv run ledger ask <name> --json` for machine-readable output).
 
 ## How and why Relate is used
 Relate is the store and the query engine, not an export target.

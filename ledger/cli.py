@@ -5,7 +5,9 @@ ledger ask hazard_profile
 ledger ask best_under_budget --param test_id=gladiator/refund-queue --param budget=0.05
 ledger recommend refund-queue --budget 0.05
 ledger verify
+ledger flows "refunds with policy exceptions"
 ledger opponents "haiku 5.5" --open-only
+ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --out spec.md
 ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash
 """
 
@@ -17,7 +19,7 @@ from pathlib import Path
 
 import relate
 
-from ledger import load, publish, questions
+from ledger import load, publish, questions, spec
 from ledger.bridges import epoch
 
 DEFAULT_STORE = "data/ledger.rl"
@@ -156,6 +158,101 @@ def recommend(
         if any(s["version"].startswith(test + "@") for s in stale):
             caveats.append("Includes results from older versions of this test.")
     return dict(result, pick=pick, verdict=verdict, evidence=evidence, caveats=caveats)
+
+
+# Words that say nothing about a flow: dropped before a keyword search so they cannot match by accident.
+FILLER = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "can",
+    "do",
+    "for",
+    "from",
+    "have",
+    "how",
+    "i",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "me",
+    "my",
+    "of",
+    "on",
+    "or",
+    "our",
+    "so",
+    "that",
+    "the",
+    "their",
+    "then",
+    "this",
+    "to",
+    "up",
+    "we",
+    "what",
+    "when",
+    "which",
+    "who",
+    "will",
+    "with",
+    "you",
+    "your",
+    "need",
+    "needs",
+    "want",
+    "wants",
+    "flow",
+    "workflow",
+    "task",
+    "agent",
+    "model",
+    "models",
+    "handle",
+    "handles",
+    "handling",
+    "process",
+}
+
+
+def search_words(text: str) -> str:
+    """The words worth searching for in a described flow (lower case, letters and digits only, filler removed)."""
+    words = [w for w in "".join(c.lower() if c.isalnum() else " " for c in text).split() if w not in FILLER]
+    # The index matches whole words, so add the singular of a plural ("refunds" also searches "refund").
+    words += [w[:-1] for w in words if len(w) > 3 and w.endswith("s") and not w.endswith("ss")]
+    return " ".join(dict.fromkeys(words))
+
+
+def find_flows(store: str, described: str | None) -> dict:
+    """Describe your flow: the tested workflows whose title, brief and policy match your words best. With nothing
+    to search for (or nothing found), every tested workflow is listed and the result says so."""
+    words = search_words(described or "")
+    found = rows(store, questions.FIND_FLOW, {"q": words}) if words else []
+    if found:
+        return {"described": described, "searched_for": words, "matched": True, "flows": found}
+    return {"described": described, "searched_for": words, "matched": False, "flows": rows(store, questions.FLOWS)}
+
+
+def print_flows(f: dict) -> None:
+    if f["described"] and f["matched"]:
+        print(f"Closest tested workflows to: {f['described']!r}  (searched for: {f['searched_for']})")
+    elif f["described"]:
+        print(f"Nothing tested matches {f['described']!r}. Every tested workflow:")
+    else:
+        print("Every tested workflow:")
+    for flow in f["flows"]:
+        score = f"  match {flow['score']:.2f}" if flow.get("score") is not None else ""
+        print(f"\n  {flow['test']}  ({flow['title']}, version {flow['version']}){score}")
+        print(f"    {flow['models']} models, {flow['pairs']} judged pairs; modelled on {flow.get('emulates') or '-'}")
+        print(f"    {(flow.get('brief') or '')[:160]}...")
+    print("\nNext: ledger opponents <model>, then ledger verdict <task> --a <model> --b <model>")
 
 
 def resolve_model(store: str, name: str) -> str | None:
@@ -453,6 +550,19 @@ def main(argv=None):
     v.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that counts as good enough")
     v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
     v.add_argument("--json", action="store_true")
+    fl = sub.add_parser("flows", parents=[common], help="describe your flow: find the closest tested workflows")
+    fl.add_argument("described", nargs="?", help="what the flow does, in your own words")
+    fl.add_argument("--json", action="store_true")
+    sp = sub.add_parser(
+        "spec", parents=[common], help="the build plan from one task and two models: decision, blueprint, evidence"
+    )
+    sp.add_argument("workflow", help="test id, e.g. refund-queue")
+    sp.add_argument("--a", required=True, help="first model")
+    sp.add_argument("--b", required=True, help="second model")
+    sp.add_argument("--suite", help="only pairs played in this suite")
+    sp.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that is good enough")
+    sp.add_argument("--out", type=Path, help="write the spec to this file (Markdown) instead of printing it")
+    sp.add_argument("--json", action="store_true", help="print the spec as JSON only")
     o = sub.add_parser(
         "opponents", parents=[common], help="models that score close to one you name: candidates for a fair match"
     )
@@ -516,6 +626,24 @@ def main(argv=None):
             print(json.dumps(result, indent=1, default=str))
         else:
             print_recommendation(result)
+    elif args.cmd == "flows":
+        result = find_flows(args.store, args.described)
+        if args.json:
+            print(json.dumps(result, indent=1, default=str))
+        else:
+            print_flows(result)
+    elif args.cmd == "spec":
+        a = resolve_model(args.store, args.a) or args.a
+        b = resolve_model(args.store, args.b) or args.b
+        found = verdict(args.store, args.workflow, a, b, args.suite, bar=args.bar)
+        found["suite"] = args.suite
+        built = spec.build(lambda q, p: rows(args.store, q, p), found)
+        text = json.dumps(built, indent=1, default=str) if args.json else spec.markdown(built)
+        if args.out:
+            args.out.write_text(text, encoding="utf-8")
+            print(f"Spec written to {args.out}")
+        else:
+            print(text)
     elif args.cmd == "opponents":
         result = opponents(args.store, args.model, args.open_only, args.n)
         if args.json:
@@ -523,9 +651,9 @@ def main(argv=None):
         else:
             print_opponents(result)
     elif args.cmd == "verdict":
-        result = verdict(
-            args.store, args.workflow, args.a, args.b, args.suite, args.all_versions, args.bar, args.min_pairs
-        )
+        a = resolve_model(args.store, args.a) or args.a
+        b = resolve_model(args.store, args.b) or args.b
+        result = verdict(args.store, args.workflow, a, b, args.suite, args.all_versions, args.bar, args.min_pairs)
         if args.json:
             print(json.dumps(result, indent=1, default=str))
         else:
