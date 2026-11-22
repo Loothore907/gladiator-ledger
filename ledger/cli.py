@@ -14,7 +14,7 @@ from pathlib import Path
 
 import relate
 
-from ledger import load, questions
+from ledger import load, publish, questions
 
 DEFAULT_STORE = "data/ledger.rl"
 MIN_PAIRS = 8  # fewer judged pairs than this for a model on a workflow is "not enough evidence"
@@ -190,6 +190,10 @@ def main(argv=None):
     b = sub.add_parser("build", help="load Gladiator run records and validation records (safe to re-run)")
     b.add_argument("--records", type=Path, required=True, help="folder holding runs/<run_id>/record.json")
     b.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
+    i = sub.add_parser("import", help="copy Gladiator's sealed public records into data/ (never operator.json)")
+    i.add_argument("--records", type=Path, help="folder holding runs/<run_id>/record.json")
+    i.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
+    i.add_argument("--data", type=Path, default=Path("data"), help="destination (default data/)")
     a = sub.add_parser("ask", help="run one of the fixed questions")
     a.add_argument("question", choices=sorted(questions.ALL))
     a.add_argument("--param", action="append", default=[], help="name=value (numbers are parsed)")
@@ -210,6 +214,13 @@ def main(argv=None):
         if args.validations:
             out["validations"] = load.load_validations(args.validations, args.store)
         print(json.dumps({k: {x: v[x] for x in v if x != "stats"} for k, v in out.items()}, indent=1))
+    elif args.cmd == "import":
+        out = {}
+        if args.records:
+            out["records"] = publish.import_records(args.records, args.data / "records")
+        if args.validations:
+            out["validations"] = publish.import_validations(args.validations, args.data / "validations")
+        print(json.dumps({k: dict(v, copied=len(v["copied"])) for k, v in out.items()}, indent=1))
     elif args.cmd == "ask":
         params = {}
         for kv in args.param:

@@ -21,8 +21,10 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
 - **Relate is the store and the query engine, not an export target.** Questions are Cypher over the graph.
 - **No made-up winners.** Thin evidence or a level head-to-head means no pick is named, the same as in Gladiator.
 - The graph is a view: records stay the master copy, and the loader must stay safe to re-run.
-- Match data for named commercial models gets committed (the shipped store) only once the owner approves publishing
-  it.
+- **Publishing approved (owner, 2026-11-22):** real match results and costs for named models are committed in
+  `data/` (the shipped store). Add records only with `ledger import` (copies sealed `record.json` and validation
+  records, never `operator.json`), then rebuild `data/ledger.rl` with `ledger build`; `tests/test_shipped_store.py`
+  fails if the store and the records disagree.
 
 ## How work lands
 - Feature branch, PR into `main`, CI green (lint and tests on Linux and Windows), squash merge.
