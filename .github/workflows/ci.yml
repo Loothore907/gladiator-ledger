@@ -64,6 +64,7 @@ jobs:
             uv run ledger ask "$q" --param test_id=gladiator/refund-queue --param budget=0.05 > /dev/null
           done
           uv run ledger ask hazard_profile --json > /dev/null
+          uv run ledger verify
       - name: Rebuilding the store from the shipped records gives the same answers
         shell: bash
         run: |

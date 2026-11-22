@@ -4,6 +4,7 @@ ledger build --records runs/ --validations validations/ [--store data/ledger.rl]
 ledger ask hazard_profile
 ledger ask best_under_budget --param test_id=gladiator/refund-queue --param budget=0.05
 ledger recommend refund-queue --budget 0.05
+ledger verify
 ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash
 """
 
@@ -354,11 +355,18 @@ def main(argv=None):
     b.add_argument("--records", type=Path, required=True, help="folder holding runs/<run_id>/record.json")
     b.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
     i = sub.add_parser(
-        "import", parents=[common], help="copy Gladiator's sealed public records into data/ (never operator.json)"
+        "import",
+        parents=[common],
+        help="copy Gladiator's sealed records into data/ (both halves of a finished match on fresh-world tests)",
     )
     i.add_argument("--records", type=Path, help="folder holding runs/<run_id>/record.json")
     i.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
     i.add_argument("--data", type=Path, default=Path("data"), help="destination (default data/)")
+    i.add_argument("--public-only", action="store_true", help="copy record.json only, never the private half")
+    vf = sub.add_parser(
+        "verify", parents=[common], help="check every shipped match: its seal, and its private half's fingerprint"
+    )
+    vf.add_argument("--data", type=Path, default=Path("data"), help="data folder (default data/)")
     a = sub.add_parser("ask", parents=[common], help="run one of the fixed questions")
     a.add_argument("question", choices=sorted(questions.ALL))
     a.add_argument("--param", action="append", default=[], help="name=value (numbers are parsed)")
@@ -395,10 +403,22 @@ def main(argv=None):
     elif args.cmd == "import":
         out = {}
         if args.records:
-            out["records"] = publish.import_records(args.records, args.data / "records")
+            out["records"] = publish.import_records(args.records, args.data / "records", not args.public_only)
         if args.validations:
             out["validations"] = publish.import_validations(args.validations, args.data / "validations")
-        print(json.dumps({k: dict(v, copied=len(v["copied"])) for k, v in out.items()}, indent=1))
+        short = {k: {x: (len(y) if x.endswith("copied") else y) for x, y in v.items()} for k, v in out.items()}
+        print(json.dumps(short, indent=1))
+    elif args.cmd == "verify":
+        result = publish.verify(args.data / "records")
+        print(
+            f"{result['records']} match records, every seal checked; "
+            f"{result['private_halves']} private halves checked against their record's fingerprint."
+        )
+        for problem in result["problems"]:
+            print(f"PROBLEM  {problem}")
+        if result["problems"]:
+            return 1
+        print("All match.")
     elif args.cmd == "ask":
         params = {}
         for kv in args.param:

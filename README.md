@@ -7,7 +7,7 @@ model evaluation engine, into a [Relate](https://relatedb.ai) graph, and answers
 answer comes with the matches behind it. When the evidence is thin, or the top models are level, it says so and
 names no winner.
 
-> Entry for the Relate hackathon (Nov–Dec 2026). The repository ships a Relate store built from **24 real matches
+> Entry for the Relate hackathon (Nov–Dec 2026). The repository ships a Relate store built from **25 real matches
 > between 12 models** (closed and open-weights), so every answer below reproduces from a clean clone with **no API
 > keys and no cost**.
 
@@ -34,21 +34,24 @@ difference is a tie. Ledger re-judges every pair with that rule.
 uv run ledger recommend --suite small-tier --budget 0.05
 ```
 ```text
-Pick: openrouter:deepseek/deepseek-v4.1-flash-1017
+Leaning: openrouter:deepseek/deepseek-v4.1-flash-1017
 
   model                                        pairs  won  ties  passed  $/attempt  $/clean  mistakes
   openrouter:deepseek/deepseek-v4.1-flash-1017    72   52     1      59    $0.0065  $0.0079       0.5
-  anthropic:claude-haiku-5-5                      96   55     0      83    $0.0187  $0.0216       0.5
-  openrouter:minimax/minimax-m3.1-flash           72   40     0      47    $0.0095  $0.0145       1.8
+  openrouter:minimax/minimax-m3.1-flash          108   61     0      69    $0.0075  $0.0117       1.7
+  anthropic:claude-haiku-5-5                     132   70     0     118    $0.0185  $0.0207       0.4
   ...
-Head to head vs anthropic:claude-haiku-5-5: 20-4 (sign test p = 0.0015)
+Head to head vs openrouter:minimax/minimax-m3.1-flash: 14-10 (sign test p = 0.5413)
 Caveats:
+  - deepseek leads minimax 14-10, but a split like that happens by chance 54% of the time between equal
+    models: a lean, not a settled result.
   - Beat cycles (2): claude-haiku-5-5 > gemini-3.1-flash-lite > gpt-6-luna > claude-haiku-5-5 (4-0, 2-1, 3-2); ...
 ```
-An open-weights model, DeepSeek, is the pick: it won 20 of the 24 pairs it played directly against Claude Haiku, at
-about a third of the cost per attempt. A 20-4 split almost never happens between equal models, so Ledger calls it
-**a pick** and shows the head-to-head behind it. Haiku passes at least as often and makes as few mistakes; it loses on
-what each success costs.
+Two open-weights models lead Claude Haiku on these four workflows at well under half the cost per attempt. Haiku
+passes most often (118 of 132) and makes the fewest mistakes; it loses pairs on what each success costs. Between the
+two leaders, DeepSeek is ahead of MiniMax 14-10 head to head, which is too close to call, so Ledger says
+**leaning**, names no settled winner, and shows why. (DeepSeek against Haiku directly is 20-4, a clear result:
+`uv run ledger ask head_to_head --param suite=small-tier --param a=... --param b=...`.)
 
 Change the budget or the scope and the answer changes:
 ```bash
@@ -56,8 +59,8 @@ uv run ledger recommend --suite small-tier --budget 0.005   # Pick: gpt-6-luna, 
 uv run ledger recommend --suite mid-tier --budget 0.1       # Leaning: claude-haiku-5-5 (7-5 against Terra: a lean)
 uv run ledger recommend refund-queue --budget 0.05          # one workflow: a lean only (the top two never met)
 ```
-The last two show the other half of the rule: when the lead is small, or the top two never played each other,
-Ledger says **leaning** and names no settled winner.
+The first is a **pick** because only one model fits the budget; the other two are leans, because the lead is small
+or the top two never played each other.
 
 ### 2. "Where do models fail?" (hazard profile)
 ```bash
@@ -83,7 +86,7 @@ uv run ledger ask promotion
 ```
 For each test version: did it pass Gladiator's automatic validation (the reference player passes and every
 corner-cutting player is caught), how many distinct models played it, and how often a pair had a clear winner. The
-four current workflow versions each have 12 models, 75 pairs and 99–100% decisive pairs.
+four current workflow versions each have 12 models, 84 pairs and 99–100% decisive pairs.
 
 ### 5. "Which results are out of date?" (stale results)
 ```bash
@@ -119,15 +122,22 @@ See [docs/SCHEMA.md](docs/SCHEMA.md).
 ## What's in the data
 `data/records/` holds the sealed public run records (`record.json`) of every match: two models, the same generated
 worlds, every action, grade and cost. `data/validations/` holds the sealed validation records of each test version.
-Gladiator's private `operator.json` files (hidden simulator state) are never included. A test fails if the store and
-the records ever disagree. To rebuild the store yourself and check it gives the same answers:
+Beside each record sits its **private half** (`operator.json`): the answer key of every generated world, published
+now that the match is over. Each public record carries a fingerprint of its private half, so anyone can check that
+the two belong together and re-grade a match themselves:
+
+```bash
+uv run ledger verify     # 25 match records, every seal checked; 25 private halves checked against their fingerprint
+```
+A private half is published only for tests that generate a fresh world on every attempt, so the answers cannot help
+anyone on a later match. A test fails if the store and the records ever disagree. To rebuild the store yourself and check it gives the same answers:
 
 ```bash
 uv run ledger build --records data/records --validations data/validations --store rebuilt.rl
 uv run ledger recommend --suite small-tier --budget 0.05 --store rebuilt.rl
 ```
 
-Known limits: most pairings have 8–24 judged pairs across four workflows (2–6 per workflow), so suite-level answers
+Known limits: most pairings have 8–24 judged pairs across four workflows (2–15 per workflow), so suite-level answers
 can be picks while single-workflow answers are mostly leans; that is the honest reading. A single-workflow answer pools every suite that played that workflow version (suites can differ in
 per-attempt budget); `--suite` answers keep suites apart.
 

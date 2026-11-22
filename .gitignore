@@ -3,8 +3,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
-# Raw downloaded run folders (operator.json is private and must never be committed)
+# Raw downloaded run folders. A private half (operator.json) is committed only under data/records/, where
+# `ledger import` puts it after checking it against its record (see CLAUDE.md).
 runs/
 operator.json
+!data/records/*/operator.json
 # Local rebuilds (the shipped store is data/ledger.rl)
 /*.rl
