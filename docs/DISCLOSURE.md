@@ -6,8 +6,10 @@ was written during the contest period: the loader, the graph schema, the Cypher 
 `build` and `import` commands, the tests, the documentation, and the shipped store with its data.
 
 ## Earlier work this project uses
-**Gladiator**, the author's head-to-head AI model evaluation engine (Apache-2.0), started on 2026-10-21, before the
-contest. Ledger does not include or run the engine. It reads the engine's output files:
+**[Gladiator](https://github.com/Loothore907/gladiator-core)**, the author's head-to-head AI model evaluation engine
+(Apache-2.0), started on 2026-10-21, before the contest. Its code was published on 2026-11-22 as a new repository
+with a fresh history; the earlier development history, and the commit ids cited below, are in the author's private
+repository. Ledger does not include or run the engine. It reads the engine's output files:
 
 - **Run records** (`record.json`): sealed, versioned results of matches between two models.
 - **Validation records**: sealed evidence that each test version passed automatic validation.

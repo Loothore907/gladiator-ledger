@@ -2,7 +2,7 @@
 
 **Which model should run this workflow, within my budget, and what's the evidence?**
 
-Ledger loads the sealed run records of [Gladiator](https://github.com/Loothore907/gladiator), a head-to-head AI
+Ledger loads the sealed run records of [Gladiator](https://github.com/Loothore907/gladiator-core), a head-to-head AI
 model evaluation engine, into a [Relate](https://relatedb.ai) graph, and answers that question with Cypher. Every
 answer comes with the matches behind it. When the evidence is thin, or the top models are level, it says so and
 names no winner.
