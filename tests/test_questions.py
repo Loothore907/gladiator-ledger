@@ -44,7 +44,7 @@ def build(tmp_path):
 
 def test_beat_cycle_is_found_and_reported(tmp_path):
     store, _ = build(tmp_path)
-    cycles = cli.rows(store, questions.BEAT_CYCLES)
+    cycles = cli.rows(store, questions.BEAT_CYCLES, {"suite": None})
     assert len(cycles) == 1 and {cycles[0]["a"], cycles[0]["b"], cycles[0]["c"]} == {"p:a", "p:b", "p:c"}
     rec = cli.recommend(store, "t/x", budget=1.0, min_pairs=5)
     assert any("cycle" in c for c in rec["caveats"])
@@ -146,3 +146,9 @@ def test_only_model_in_budget_says_so(tmp_path):
     load.load(runs, store)
     rec = cli.recommend(store, "t/x", budget=0.1)
     assert rec["pick"] == "p:a" and any("only model" in c for c in rec["caveats"])
+
+
+def test_cycles_are_limited_to_the_suite_in_scope(tmp_path):
+    store, _runs = build(tmp_path)  # the a > b > c > a cycle is in suite "s"
+    assert len(cli.rows(store, questions.BEAT_CYCLES, {"suite": "s"})) == 1
+    assert cli.rows(store, questions.BEAT_CYCLES, {"suite": "other"}) == []
