@@ -174,6 +174,20 @@ async function main() {
       }
     }
     if (!clicked) problems.push('no pair of models could be clicked: the click-through tested nothing');
+    // The example button must walk all three steps on its own and end on a drawn verdict with enough evidence.
+    await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
+    await page.locator('#example').click();
+    const example = await page
+      .waitForFunction(
+        () => !document.getElementById('step-verdict').hidden && document.getElementById('verdict-body').innerText.trim().length > 200,
+        null,
+        { timeout: 15000 },
+      )
+      .then(() => true, () => false);
+    if (!example) problems.push('the example button did not end on a drawn verdict');
+    else if (!(await page.locator('#verdict-body').innerText()).includes('does this task better')) {
+      problems.push('the example button did not end on a settled verdict (the data has one)');
+    }
     await page.close();
     return { stats, requests, clicked };
   } finally {
