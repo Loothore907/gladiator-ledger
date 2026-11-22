@@ -5,7 +5,9 @@ Sources (both sealed with a SHA-256 over the body; a file whose seal does not ma
                               the Gladiator repository). Each pair of attempts is re-judged here with Gladiator's
                               own rule (ledger/scoring.py).
   validations/**/*.json       the evidence that a test version passed automatic validation.
-Only public files are read: operator.json (private simulator state) is never opened.
+The graph is built from these public files only. The private half of a match (operator.json: the answer key of
+each generated world) is published beside its record once the match is over (ledger/publish.py) so anyone can
+check a result, but it is not loaded into the graph.
 """
 
 import hashlib
@@ -40,12 +42,16 @@ PLAYER_HAZARDS = {
 }
 
 
-def seal_ok(record: dict) -> bool:
-    body = record.get("body")
+def canonical_sha256(value) -> str:
+    """Gladiator's seal: SHA-256 over the value as canonical JSON (sorted keys, no spaces)."""
     canonical = json.dumps(
-        body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False, default=str
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False, default=str
     ).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest() == record.get("sha256")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def seal_ok(record: dict) -> bool:
+    return canonical_sha256(record.get("body")) == record.get("sha256")
 
 
 def version_rank(version) -> int:

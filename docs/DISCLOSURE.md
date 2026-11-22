@@ -28,11 +28,12 @@ new.
   entry, and a fix so each record names the engine's own commit.
 
 ## The data
-`data/` holds 24 sealed public match records (12 models: Anthropic, OpenAI and Google models through their APIs,
+`data/` holds 25 sealed public match records (12 models: Anthropic, OpenAI and Google models through their APIs,
 and open-weights models through OpenRouter) and 20 validation records. The matches were played on Nov 22, 2026 and
-cost $11.94 in API usage in total (the sum of the records' own cost figures), paid from the author's provider
+cost $12.72 in API usage in total (the sum of the records' own cost figures), paid from the author's provider
 accounts and plan credits. Each record includes its exact model ids, prices and costs, and the commit of the public Gladiator engine
-that played it. Gladiator's private simulator records (`operator.json`) are never included.
+that played it. Each match's private half (`operator.json`, the answer key of its generated worlds) is published
+beside the record now that the match is over; `ledger verify` checks it against the fingerprint in the record.
 
 **Data replaced on 2026-11-22.** The store first shipped with 60 matches played on Nov 20 to 22 ($51.49). A bug in
 the Gladiator engine was then found: the tool a model uses to check an action after a timeout was offered without

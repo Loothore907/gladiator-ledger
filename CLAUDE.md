@@ -16,14 +16,17 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   disclosure statement. `ledger/scoring.py` is the one copied file so far.
 - **Ledger reads Gladiator's output; it never runs matches.** Matches and their budgets live in the Gladiator repo
   (`CLAUDE.md` there). Ledger itself costs nothing to run, and judges need no API keys.
-- **Never commit `operator.json`** (private simulator state) or anything from it. Only `record.json` and Gladiator's
-  `validations/*.json` are inputs.
+- **Private halves (owner, 2026-11-22):** a match's `operator.json` (the answer key of its generated worlds) is
+  published beside its record once the match is over, so anyone can re-grade it. Only for tests that generate a
+  fresh world per attempt (`instances: generator`), only through `ledger import` (which checks it against the
+  fingerprint in the record), and **never for a holdout or fixed test**. The graph is still built from `record.json`
+  and Gladiator's `validations/*.json` only.
 - **Relate is the store and the query engine, not an export target.** Questions are Cypher over the graph.
 - **No made-up winners.** Thin evidence or a level head-to-head means no pick is named, the same as in Gladiator.
 - The graph is a view: records stay the master copy, and the loader must stay safe to re-run.
 - **Publishing approved (owner, 2026-11-22):** real match results and costs for named models are committed in
-  `data/` (the shipped store). Add records only with `ledger import` (copies sealed `record.json` and validation
-  records, never `operator.json`), then rebuild `data/ledger.rl` with `ledger build`; `tests/test_shipped_store.py`
+  `data/` (the shipped store). Add records only with `ledger import` (copies sealed records, their private halves
+  under the rule above, and validation records), then rebuild `data/ledger.rl` with `ledger build`; `tests/test_shipped_store.py`
   fails if the store and the records disagree.
 
 ## How work lands
