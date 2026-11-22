@@ -104,7 +104,11 @@ def recommend(
         losses = sum(1 for r in h2h if r["winner"] == second["model"])
         evidence = h2h
         if not h2h:
-            caveats.append(f"{top['model']} and {second['model']} never played each other: the order is indirect.")
+            verdict = "leaning"
+            caveats.append(
+                f"{top['model']} and {second['model']} never played each other: the order is indirect, so it is a "
+                "lean, not a pick."
+            )
         elif wins <= losses:
             pick, verdict = None, "tie"
             caveats.append(
@@ -162,11 +166,12 @@ def print_recommendation(r: dict) -> None:
     else:
         print(f"No winner named: {r['verdict']}")
     if r.get("models"):
-        print("\n  model                                   pairs  won  ties  passed  $/attempt  $/clean  mistakes")
+        width = max(38, *(len(m["model"]) for m in r["models"]))
+        print(f"\n  {'model':{width}} pairs  won  ties  passed  $/attempt  $/clean  mistakes")
         for m in r["models"]:
             flag = "" if m["within_budget"] else "  (over budget)"
             print(
-                f"  {m['model']:38} {m['attempts']:5} {m['pair_wins']:4} {m['ties']:5} {m['passed']:7}  "
+                f"  {m['model']:{width}} {m['attempts']:5} {m['pair_wins']:4} {m['ties']:5} {m['passed']:7}  "
                 f"{money(m['cost_per_attempt']):>9} {money(m['cost_per_clean']):>8} {m['mistakes']:9.1f}{flag}"
             )
     if r.get("head_to_head"):

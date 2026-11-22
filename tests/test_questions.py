@@ -152,3 +152,13 @@ def test_cycles_are_limited_to_the_suite_in_scope(tmp_path):
     store, _runs = build(tmp_path)  # the a > b > c > a cycle is in suite "s"
     assert len(cli.rows(store, questions.BEAT_CYCLES, {"suite": "s"})) == 1
     assert cli.rows(store, questions.BEAT_CYCLES, {"suite": "other"}) == []
+
+
+def test_top_two_that_never_met_is_a_lean_not_a_pick(tmp_path):
+    runs = tmp_path / "runs"
+    run(runs, "r1", "p:a", "p:c", [(True, False, 0.01, 0.01)] * 9)  # a beats c
+    run(runs, "r2", "p:b", "p:d", [(True, False, 0.01, 0.01)] * 9)  # b beats d; a and b never meet
+    store = str(tmp_path / "s.rl")
+    load.load(runs, store)
+    rec = cli.recommend(store, "t/x", budget=1.0)
+    assert rec["verdict"] == "leaning" and any("never played each other" in c for c in rec["caveats"])
