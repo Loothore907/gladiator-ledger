@@ -550,6 +550,9 @@ def main(argv=None):
     v.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that counts as good enough")
     v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
     v.add_argument("--json", action="store_true")
+    st = sub.add_parser("site", parents=[common], help="export the data the browser demo loads (site/data/)")
+    st.add_argument("--data", type=Path, default=Path("data"), help="data folder (default data/)")
+    st.add_argument("--out", type=Path, default=Path("site/data"), help="where to write (default site/data/)")
     fl = sub.add_parser("flows", parents=[common], help="describe your flow: find the closest tested workflows")
     fl.add_argument("described", nargs="?", help="what the flow does, in your own words")
     fl.add_argument("--json", action="store_true")
@@ -626,6 +629,12 @@ def main(argv=None):
             print(json.dumps(result, indent=1, default=str))
         else:
             print_recommendation(result)
+    elif args.cmd == "site":
+        from ledger import site
+
+        sizes = site.export(args.data, args.store, args.out)
+        for name, size in sizes.items():
+            print(f"{args.out / name}: {size / 1024:.0f} KB")
     elif args.cmd == "flows":
         result = find_flows(args.store, args.described)
         if args.json:
