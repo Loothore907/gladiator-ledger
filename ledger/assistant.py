@@ -14,7 +14,7 @@ from typing import Any
 import relate
 from mcp.server.mcpserver import MCPServer
 
-from ledger import cli, questions, spec
+from ledger import cli, policy, questions, spec
 
 INSTRUCTIONS = """\
 Gladiator Ledger answers one question: of two AI models, which does THIS task better, how sure is that, and what
@@ -26,9 +26,14 @@ Walk the person through this loop, one step at a time:
    exists. Never pretend a workflow matches.
 2. who_has_played and suggest_opponents: help them pick two models. suggest_opponents uses a published index only
    to find models that are close on paper, so the head-to-head is fair.
-3. verdict: which of the two did this task better. Report the verdict word exactly as returned: "better" is a
-   settled result; "leaning" is ahead but could be chance; "no real difference shown" and "not enough evidence"
-   name no winner. Always give the pair counts, and say whether each model is good enough against the bar.
+3. verdict: first whether each model is fit for this task at all, then which did it better head to head. Lead
+   with `headline` exactly as returned: it already reads the head to head through fitness (a model can win head
+   to head and still not be fit). Fitness depends on whose tolerance applies: ask whether this is for a business
+   running it unattended (enterprise) or for one person (personal), and whether any fault is unforgivable for
+   them; pass those as `tolerance` and `own_levels`. Give each model's reasons and counts ("in 1 of 54
+   attempts"). For the head to head, report the verdict word exactly: "better" is settled; "leaning" is ahead but
+   could be chance; "no real difference shown" and "not enough evidence" name no winner. When neither is fit,
+   offer the models in `fit_on_task`; if that is empty, say no tested model is fit and do not guess at one.
 4. spec: the build plan (decision, blueprint, evidence) as Markdown. Offer it once there is a verdict.
 
 Rules that are not optional:
@@ -125,19 +130,52 @@ def build(store: str) -> MCPServer:
         return cli.opponents(store, model, open_weights_only, max(1, min(how_many, 25)))
 
     @server.tool(title="Verdict: which of two models did this task better")
-    def verdict(task: str, model_a: str, model_b: str, good_enough_bar: float = cli.GOOD_ENOUGH) -> dict[str, Any]:
-        """Counts only the pairs where these two models met on this task. Returns the verdict (better, leaning, no
-        real difference shown, not enough evidence, or no data), pair counts, how the pairs were decided, each
-        model's pass rate, cost, time and mistakes, whether each is good enough against the bar, where each
-        tripped, and the sealed match records behind it."""
-        return cli.verdict(store, task, model_id(model_a), model_id(model_b), bar=good_enough_bar)
+    def verdict(
+        task: str,
+        model_a: str,
+        model_b: str,
+        tolerance: str = policy.DEFAULT_PROFILE,
+        own_levels: dict[str, str] | None = None,
+        good_enough_bar: float = cli.GOOD_ENOUGH,
+    ) -> dict[str, Any]:
+        """Fit first, then head to head. `headline` is the answer to act on and `use` the model to use (null when
+        there is none). `fit` says for each model whether it is fit for the task under `tolerance` (enterprise or
+        personal), counting every attempt it made on the task, with the reasons and each fault's level and count.
+        `own_levels` overrules the level of any fault by name, e.g. {"left undone": "unforgivable"} (levels:
+        unforgivable, serious, minor). The head to head counts only the pairs where these two met: verdict
+        (better, leaning, no real difference shown, not enough evidence, or no data), pair counts, how pairs were
+        decided, cost and time, and the sealed match records. `fit_on_task` lists every tested model that is fit."""
+        return cli.verdict(
+            store,
+            task,
+            model_id(model_a),
+            model_id(model_b),
+            bar=good_enough_bar,
+            profile=tolerance,
+            overrides=own_levels,
+        )
 
     @server.tool(title="Spec: the build plan from one task and two models")
-    def write_spec(task: str, model_a: str, model_b: str, good_enough_bar: float = cli.GOOD_ENOUGH) -> str:
+    def write_spec(
+        task: str,
+        model_a: str,
+        model_b: str,
+        tolerance: str = policy.DEFAULT_PROFILE,
+        own_levels: dict[str, str] | None = None,
+        good_enough_bar: float = cli.GOOD_ENOUGH,
+    ) -> str:
         """One Markdown document in three layers: the decision, the blueprint (the job and rules as tested, the
         tools, the settings the result holds for, a guardrail and an autonomy call for each hazard) and the
         evidence. Ends with the same content as JSON."""
-        found = cli.verdict(store, task, model_id(model_a), model_id(model_b), bar=good_enough_bar)
+        found = cli.verdict(
+            store,
+            task,
+            model_id(model_a),
+            model_id(model_b),
+            bar=good_enough_bar,
+            profile=tolerance,
+            overrides=own_levels,
+        )
         found["suite"] = None
         return spec.markdown(spec.build(lambda q, p: cli.rows(store, q, p), found))
 

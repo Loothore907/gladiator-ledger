@@ -4,9 +4,9 @@
 
 Two models that look alike on a leaderboard can behave very differently on your workflow. Ledger holds head-to-head
 matches in a [Relate](https://relatedb.ai) graph, where two models played the same freshly generated worlds of a
-tool-using task, and answers with a **task claim**: who did this task better, how sure that is, whether either is
-good enough, and a **spec** you can build from. It never ranks models in general, and when the evidence is thin or
-level it names no winner.
+tool-using task, and answers with a **task claim** in two parts: is each model **fit for this task** under your
+tolerance for mistakes, and which one **did it better** head to head. Then it writes a **spec** you can build
+from. It never ranks models in general, and when the evidence is thin or level it names no winner.
 
 **Where Relate comes in.** [Relate](https://relatedb.ai) is the store and the query engine, not an export target.
 The match records are loaded into one Relate graph, and every answer is a Cypher query over it. A Relate full-text
@@ -14,24 +14,25 @@ index finds the workflow you describe. Storage mode: the embedded Python library
 (`data/ledger.rl`), opened read-only; the browser demo runs Relate's WebAssembly build with an in-memory store
 built from the same statements; and an MCP server gives AI assistants the same graph, read-only.
 
-> Entry for the Relate by Neo4j hackathon (Nov–Dec 2026). The repository ships a Relate store built from **25 real
+> Entry for the Relate by Neo4j hackathon (Nov–Dec 2026). The repository ships a Relate store built from **37 real
 > matches between 12 models** (closed and open-weights), so everything below reproduces from a clean clone with
 > **no API keys and no cost**.
 
 ## The idea in one table
-Claude Haiku 5.5 and MiniMax M3.1 Flash, the same two models, on four workflows. Fifteen judged pairs each, played
-on the same generated worlds.
+Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index: a tie on paper.
+Here are the same two models on four workflows, sixteen judged pairs each, played on the same generated worlds.
 
-| Task | Verdict | Pairs won (Haiku / MiniMax) | Attempts passed (Haiku / MiniMax) | Cost per attempt (Haiku / MiniMax) |
+| Task | Pairs won (Haiku / DeepSeek) | Attempts passed on the task (Haiku / DeepSeek) | For one person | For a business running it unattended |
 |---|---|---|---|---|
-| Refund queue | **MiniMax does it better** | 3 / 12 | 15 / 12 of 15 | $0.017 / $0.003 |
-| Access review | leaning MiniMax | 5 / 10 | 15 / 10 | $0.017 / $0.005 |
-| Inventory transfer | leaning MiniMax | 5 / 10 | 12 / 10 | $0.024 / $0.012 |
-| Incident triage | leaning Haiku | 11 / 4 | 13 / 3 | $0.015 / $0.005 |
+| Refund queue | 9 / 7 | 81% / 37% | **Use Haiku**: DeepSeek is not fit | neither is fit |
+| Access review | 1 / 15 | 96% / 96% | **Use DeepSeek** | **Use DeepSeek**: Haiku is not fit |
+| Inventory transfer | 0 / 16 | 85% / 93% | **Use DeepSeek** | neither is fit |
+| Incident triage | 2 / 14 | 87% / 96% | **Use DeepSeek** | neither is fit |
 
-One model is not "better". MiniMax handles refunds as well as you need at a fifth of the cost; on incident triage
-it passes 3 attempts in 15. Only the first row is a settled result, and Ledger says so: the others are **leaning**,
-because a 10–5 split still happens by chance about a third of the time.
+One model is not "better". DeepSeek wins three of these tasks outright at about a third of the cost, and on the
+fourth it fails 43 of 68 attempts by acting before it has read the records. And **the right answer depends on who
+is asking**: a single wrong decision in 54 attempts is tolerable for one person and disqualifying for a business
+moving money or access rights. Ledger makes both calls, shows the count behind each, and lets you change the rule.
 
 ## Three ways to use it
 All three walk the same loop over the same graph and give the same answers (the page is checked against the
@@ -40,7 +41,7 @@ command line in CI).
 ### 1. In your browser
 **Live: https://loothore907.github.io/gladiator-ledger/** (published from this repository after every change that
 passes the checks). The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
-the loop: describe a flow, pick two models, read the verdict, download the spec. No server, no keys, nothing leaves
+the loop: describe a flow, pick two models, choose whose tolerance applies, read the verdict, download the spec. No server, no keys, nothing leaves
 the tab.
 
 ```bash
@@ -87,7 +88,7 @@ Closest tested workflows to: 'an agent that handles refund requests for damaged 
 requests damaged orders request order)      (output wrapped and shortened here)
 
   gladiator/refund-queue  (Refund queue, version 2.2.0)  match 6.03
-    12 models, 84 judged pairs; modelled on tau-bench (style)
+    12 models, 205 judged pairs; modelled on tau-bench (style)
     You run the refund queue for an online shop. Go through every open refund request, look up its order ...
 
   gladiator/inventory-transfer  (Inventory transfer, version 1.2.0)  match 2.54
@@ -108,32 +109,50 @@ Epoch Capabilities Index: 160.3  (range 158.2 to 162.7)
 Closest on paper, open weights only:
   model                                         score     gap  ranges overlap  weights  in Ledger
   epoch:Kimi K3.1 Pro                           161.2   +0.87  yes             open     no matches yet
-  openrouter:deepseek/deepseek-v4.1-flash-1017  159.4   -0.92  yes             open     24 pairs already played against it
+  openrouter:deepseek/deepseek-v4.1-flash-1017  159.4   -0.92  yes             open     64 pairs already played against it
   ...
 ```
 Ledger never ranks models by a published score. It uses one, [Epoch AI's](https://epoch.ai/benchmarks)
 Capabilities Index, for a narrower question: which models are close enough on paper that a head-to-head is worth
 running? Haiku and DeepSeek are less than one point apart, with overlapping ranges. On these workflows DeepSeek won
-20 of their 24 pairs. **Close on paper, clearly different on the task**: that gap is what Ledger is for.
+52 of their 64 pairs. **Close on paper, clearly different on the task**: that gap is what Ledger is for.
 
 ### Step 3. Get the verdict
 ```bash
 uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1
 ```
 ```text
-Verdict: openrouter:minimax/minimax-m3.1-flash does this task better      (output wrapped here to fit)
+openrouter:minimax/minimax-m3.1-flash did it better head to head, but only anthropic:claude-haiku-5-5
+is fit for this task.                                                  (output wrapped and shortened here)
+
+Fit for this task (personal tolerance):
+  anthropic:claude-haiku-5-5: fit. Passed 44 of 54 (81%; bar 80%).
+      tolerated: wrong decision (serious) in 1 of 54
+      tolerated: acted without reading (minor) in 9 of 54
+  openrouter:minimax/minimax-m3.1-flash: NOT fit. Passed 53 of 67 (79%; bar 80%).
+      because: passed 53 of 67 attempts (79%), under the 80% bar
+
+Head to head: openrouter:minimax/minimax-m3.1-flash does this task better
   15 judged pairs on the same generated worlds: anthropic:claude-haiku-5-5 won 3,
   openrouter:minimax/minimax-m3.1-flash won 12, 0 tied (sign test p = 0.0352)
-  decided: 12 on efficiency, 3 on success
-
-  model                                  passed   $/attempt  sec/attempt  mistakes  good enough (bar 80%)
-  anthropic:claude-haiku-5-5             15/15     $0.0174           33       0.0  yes
-  openrouter:minimax/minimax-m3.1-flash  12/15     $0.0032           29       0.3  yes
 ```
-Only the pairs where these two met count. The verdict is one of four: **better** (a settled result), **leaning**
-(ahead, but it could still be chance), **no real difference shown**, or **not enough evidence** (fewer than eight
-pairs). It also says whether each model is good enough against a bar you can set, where each one tripped, and which
-sealed records back it.
+**Fit comes first.** A model is fit for a task when it passes enough of its attempts and stays inside your
+tolerance for faults. Every attempt the model made on the task counts, whoever the opponent was. Each fault has a
+level: **unforgivable** (one attempt with it makes the model unfit, shown with its count), **serious** (fine if
+rare) or **minor** (shown, never decides). The same fault is not equally serious everywhere: paying a refund twice
+breaks a business, paging the on-call twice is an annoyance. Two tolerances ship, and every level can be overruled:
+
+```bash
+uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --profile enterprise
+uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --unforgivable "acted without reading"
+```
+`personal` needs 80% of attempts passed and allows a serious fault in 10% of them; `enterprise` needs 90% and
+allows 2%. The defaults are in [`ledger/policy.py`](ledger/policy.py).
+
+**Then the head to head.** Only the pairs where these two met count. It is one of four: **better** (a settled
+result), **leaning** (ahead, but it could still be chance), **no real difference shown**, or **not enough
+evidence** (fewer than eight pairs). When neither model is fit, Ledger lists the tested models that are, cheapest
+first, or says that none is.
 
 ### Step 4. Get the spec
 ```bash
@@ -141,7 +160,8 @@ uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --out spec.md
 ```
 One document in three layers:
 
-- **Decision.** "Use `openrouter:minimax/minimax-m3.1-flash` for this task", the pair counts, and the comparison.
+- **Decision.** The answer to act on (here: MiniMax did it better head to head, but only Haiku is fit), each
+  model's fitness with its reasons, the pair counts, and the comparison.
 - **Blueprint.** The job and the rules exactly as tested, the tools the flow needs, the settings the result holds
   for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and for every hazard an autonomy call.
   For this pair: MiniMax acted before reading the records in 2 of 15 attempts, so that step **needs a guard**

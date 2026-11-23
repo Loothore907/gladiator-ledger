@@ -64,12 +64,15 @@ jobs:
             uv run ledger ask "$q" --param test_id=gladiator/refund-queue --param budget=0.05 > /dev/null
           done
           uv run ledger ask hazard_profile --json > /dev/null
+          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --profile enterprise > /dev/null
+          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --unforgivable "acted without reading" > /dev/null
           uv run ledger verify
           uv run ledger opponents "haiku 5.5" --open-only > /dev/null
           uv run ledger flows "an agent that handles refund requests for damaged orders" | grep -q "gladiator/refund-queue"
           uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 | grep -q "## 2. Blueprint"
           uv run ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash > /dev/null
           uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 | grep -q "does this task better"
+          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 | grep -q "is fit for this task"
           uv run ledger verdict incident-triage --a "haiku 5.5" --b minimax-m3.1 | grep -q "Leaning"
       - name: Rebuilding the store from the shipped records gives the same answers
         shell: bash

@@ -34,10 +34,16 @@ def test_tools_give_the_command_lines_answers(tmp_path):
     assert met["has_met"] == [{"model": "p:b", "display_name": None, "pairs_against_it": 10}]
 
     answer = call(server, "verdict", {"task": "t/refunds", "model_a": "p:a", "model_b": "p:b"}).structured_content
-    assert answer == cli.verdict(store, "t/refunds", "p:a", "p:b")  # the same function, the same answer
+    # the same function, the same answer: fit first, at personal tolerance unless the person says otherwise
+    assert answer == cli.verdict(store, "t/refunds", "p:a", "p:b", profile="personal")
+    assert answer["headline"] and set(answer["fit"]) == {"p:a", "p:b"}
+    strict = call(
+        server, "verdict", {"task": "t/refunds", "model_a": "p:a", "model_b": "p:b", "tolerance": "enterprise"}
+    ).structured_content
+    assert strict == cli.verdict(store, "t/refunds", "p:a", "p:b", profile="enterprise")
 
     text = call(server, "write_spec", {"task": "t/refunds", "model_a": "p:a", "model_b": "p:b"}).content[0].text
-    expected = cli.verdict(store, "t/refunds", "p:a", "p:b")
+    expected = cli.verdict(store, "t/refunds", "p:a", "p:b", profile="personal")
     expected["suite"] = None
     assert text == spec.markdown(spec.build(lambda q, p: cli.rows(store, q, p), expected))
 

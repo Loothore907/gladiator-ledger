@@ -55,13 +55,14 @@ def test_outcome_reads_the_head_to_head_through_fitness():
         return {"A": {"fit": a}, "B": {"fit": b}}
 
     won = {"a": "A", "b": "B", "better": "B", "verdict": "better"}
-    assert cli.outcome(won, fit(True, True)) == ("use", "Use B: both are fit for this task and it did it better.")
-    code, line = cli.outcome(won, fit(True, False))
+    assert cli.outcome(won, fit(True, True)) == ("use", "Use B: both are fit for this task and it did it better.", "B")
+    code, line, use = cli.outcome(won, fit(True, False))
     assert code == "only one fit" and line == "B did it better head to head, but only A is fit for this task."
-    code, line = cli.outcome(won, fit(False, False))
-    assert code == "neither fit" and "not the same as fit" in line
+    assert use == "A"  # the model to act on is the fit one, not the head-to-head winner
+    code, line, use = cli.outcome(won, fit(False, False))
+    assert code == "neither fit" and "not the same as fit" in line and use is None
     level = {"a": "A", "b": "B", "better": None, "verdict": "no real difference shown"}
-    assert cli.outcome(level, fit(True, True))[0] == "both fit"
+    assert cli.outcome(level, fit(True, True))[::2] == ("both fit", None)
     assert cli.outcome(level, fit(None, True))[0] == "too few attempts"
     lean = {"a": "A", "b": "B", "better": "A", "verdict": "leaning"}
     assert "not settled" in cli.outcome(lean, fit(True, True))[1]

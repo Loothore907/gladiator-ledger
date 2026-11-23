@@ -209,8 +209,37 @@ async function main() {
       )
       .then(() => true, () => false);
     if (!example) problems.push('the example button did not end on a drawn verdict');
-    else if (!(await page.locator('#verdict-body').innerText()).includes('does this task better')) {
-      problems.push('the example button did not end on a settled verdict (the data has one)');
+    else if (!(await page.locator('#verdict-band').getAttribute('class')).includes('win')) {
+      problems.push('the example button did not end on a verdict that names a model to use (the data has one)');
+    } else {
+      // The visitor's own say must move the verdict: stricter tolerance, then one fault made unforgivable.
+      const headline = () => page.locator('#verdict-headline').innerText();
+      const settle = (was) =>
+        page.waitForFunction((old) => document.getElementById('verdict-headline')?.innerText !== old, was, { timeout: 5000 }).then(
+          () => true,
+          () => false,
+        );
+      const personal = await headline();
+      await page.locator('input[name=profile][value=enterprise]').check();
+      if (!(await settle(personal))) problems.push('switching to enterprise tolerance did not change the example verdict');
+      await page.locator('input[name=profile][value=personal]').check();
+      await settle(await headline());
+      if ((await headline()) !== personal) problems.push('switching back to personal tolerance did not restore the verdict');
+      // make every fault unforgivable, one at a time, until the verdict moves; then reset
+      const pickers = await page.locator('select.level').count();
+      let moved = false;
+      for (let i = 0; i < pickers && !moved; i += 1) {
+        const before = await headline();
+        await page.locator('select.level').nth(i).selectOption('unforgivable');
+        moved = await page.waitForFunction((old) => document.getElementById('verdict-headline')?.innerText !== old, before, { timeout: 1500 }).then(() => true, () => false);
+      }
+      if (!pickers) problems.push('the result offers no fault whose level the visitor can set');
+      else if (!moved) problems.push('making every fault unforgivable never changed the example verdict');
+      else {
+        await page.locator('#reset-levels').click();
+        await settle(await headline());
+        if ((await headline()) !== personal) problems.push('resetting the levels did not restore the verdict');
+      }
     }
     await page.close();
     return { stats, requests, clicked };

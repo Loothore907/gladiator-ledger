@@ -31,4 +31,7 @@ def test_export_carries_what_the_page_needs(tmp_path):
     assert graph["rows"]["runs"] and graph["rows"]["checks"] and graph["rows"]["scores"]
     expected = json.loads((tmp_path / "expected.json").read_text(encoding="utf-8"))
     assert len(expected["verdicts"]) == len(expected["specs"]) == len(site.CHECKED)
+    # every checked pair is also read through fitness: both profiles, and once with a reader's own rule
+    assert len(expected["judged"]) == len(expected["judged_specs"]) == 3 * len(site.CHECKED)
+    assert {j["verdict"]["outcome"] for j in expected["judged"]} >= {"neither fit", "only one fit"}
     assert {v["verdict"] for v in expected["verdicts"]} >= {"better"}  # at least one settled answer is checked
