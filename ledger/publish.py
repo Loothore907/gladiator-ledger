@@ -77,6 +77,13 @@ def import_records(src: Path, dest: Path, private: bool = True) -> dict:
             unchanged += 1
         if publish_private and _copy(private_src, Path(dest) / run_id / "operator.json"):
             private_copied.append(run_id)
+        # the charges looked up for this record's calls, if any: only when the file says it belongs to this record
+        billed_src = path.with_name("billed.json")
+        if (
+            billed_src.exists()
+            and json.loads(billed_src.read_text(encoding="utf-8")).get("record_sha256") == record["sha256"]
+        ):
+            _copy(billed_src, Path(dest) / run_id / "billed.json")
     return {
         "copied": copied,
         "unchanged": unchanged,

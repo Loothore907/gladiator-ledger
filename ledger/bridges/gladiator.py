@@ -14,7 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from ledger import scoring
+from ledger import costs, scoring
 from ledger.bridges import Evidence
 
 NAME = "gladiator"
@@ -132,6 +132,7 @@ def attempt_props(res: dict, side: str, effort, efficiency: float | None) -> dic
         "model_errors": res.get("model_errors"),
         "progress": round(scoring.progress(res), 4),
         "cost_usd": float(res.get("cost_usd") or 0),
+        "cost_basis": res.get("cost_basis") or "list",
         "tokens": int((res.get("input_tokens") or 0) + (res.get("output_tokens") or 0)),
         "wall_s": float(res.get("wall_s") or 0),
         "calls": res.get("calls"),
@@ -337,7 +338,9 @@ def read_records(root: Path) -> Evidence:
         if not seal_ok(record):
             out.skipped.append(str(path))
             continue
-        out.runs.append(run_rows(record["body"], record["sha256"]))
+        # costs are corrected as the record is read (ledger/costs.py); the sealed file itself is never changed
+        body = costs.corrected(record["body"], costs.read_billed(path, record["sha256"]))
+        out.runs.append(run_rows(body, record["sha256"]))
     return out
 
 

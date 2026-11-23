@@ -15,6 +15,7 @@ The grade at the end (passed or not, and each fault with its count) is the grade
 import json
 from pathlib import Path
 
+from ledger import costs
 from ledger.bridges import gladiator
 
 READ, CHECK, ACT, END, TALK = "read", "check", "act", "end", "talk"
@@ -119,7 +120,7 @@ def export(records: Path, out: Path) -> dict:
         record = json.loads(path.read_text(encoding="utf-8"))
         if not gladiator.seal_ok(record):
             continue
-        replays = run_replays(record["body"])
+        replays = run_replays(costs.corrected(record["body"], costs.read_billed(path, record["sha256"])))
         target = out / f"{replays['run']}.json"
         target.write_text(json.dumps(replays, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
         sizes[target.name] = target.stat().st_size
