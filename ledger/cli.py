@@ -445,7 +445,14 @@ def verdict(
         out["outcome"], out["headline"], out["use"] = outcome(head, out["fit"])
         # every pair in order: who won it and how (the page draws one square per world)
         out["rounds"] = [
-            {"winner": p["winner"], "rule": p["rule"], "a_passed": p["a_passed"], "b_passed": p["b_passed"]}
+            {
+                "winner": p["winner"],
+                "rule": p["rule"],
+                "a_passed": p["a_passed"],
+                "b_passed": p["b_passed"],
+                "run": p["run"],
+                "match": p["match"],  # run/workflow/attempt: where the page finds this scenario's replay
+            }
             for p in pairs
         ]
         # who else is fit on this task, cheapest first: where to look when neither of these two is
