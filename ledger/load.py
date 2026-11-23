@@ -17,6 +17,11 @@ Graph (docs/SCHEMA.md):
   (Match)-[:PART_OF]->(Run)          (Match)-[:USED]->(TestVersion)    (TestVersion)-[:VERSION_OF]->(Test)
   (Attempt)-[:IN]->(Match)           (Attempt)-[:BY]->(Model)          (Match)-[:WON_BY]->(Model)  (absent = tie)
   (TestVersion)-[:INCLUDES]->(Hazard) (Attempt)-[:TRIPPED_ON {count}]->(Hazard)
+  (:Fault)          something a model did wrong on an attempt: fell for a hazard, a wrong decision, work left
+                    undone, stopped before finishing (kind: trap, decision, mix-up, ending)
+  (TestVersion)-[:CAN_SHOW]->(Fault)  (Attempt)-[:MADE {count}]->(Fault)
+  (Fault)-[:KIND_OF]->(Fault)         a test's specific mix-up is a kind of "wrong decision"
+  (Fault)-[:FALLS_FOR]->(Hazard)      the fault of falling for that hazard
   (TestVersion)-[:FORKED_FROM]->(TestVersion)
   (TestVersion)-[:VALIDATED_BY]->(:ValidationRun)-[:GUARDS]->(Hazard)
      one ValidationRun per level and player of a validation record: the reference player must pass every seed;
@@ -38,6 +43,7 @@ SCHEMA = [
     "CREATE CONSTRAINT test_id IF NOT EXISTS FOR (n:Test) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT version_key IF NOT EXISTS FOR (n:TestVersion) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT hazard_name IF NOT EXISTS FOR (n:Hazard) REQUIRE n.name IS UNIQUE",
+    "CREATE CONSTRAINT fault_key IF NOT EXISTS FOR (n:Fault) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT validation_key IF NOT EXISTS FOR (n:ValidationRun) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT source_name IF NOT EXISTS FOR (n:Source) REQUIRE n.name IS UNIQUE",
     "CREATE CONSTRAINT benchmark_name IF NOT EXISTS FOR (n:Benchmark) REQUIRE n.name IS UNIQUE",
@@ -97,6 +103,30 @@ FOREACH (_ IN CASE WHEN h.count > 0 THEN [1] ELSE [] END |
   MERGE (att)-[t:TRIPPED_ON]->(hz) SET t.count = h.count)
 """
 
+# Faults are written after the runs (WRITE creates the attempts and test versions they attach to): first the
+# faults each test version can show, then the ones each attempt made.
+WRITE_FAULTS = """
+UNWIND $runs AS r
+UNWIND r.can_show AS f
+MATCH (tv:TestVersion {key: f.version_key})
+MERGE (ft:Fault {key: f.key})
+SET ft.name = f.name, ft.kind = f.kind
+MERGE (tv)-[:CAN_SHOW]->(ft)
+FOREACH (t IN CASE WHEN f.test_id IS NULL THEN [] ELSE [f.test_id] END | SET ft.test_id = t)
+FOREACH (p IN CASE WHEN f.kind_of IS NULL THEN [] ELSE [f.kind_of] END |
+  MERGE (parent:Fault {key: p}) MERGE (ft)-[:KIND_OF]->(parent))
+FOREACH (h IN CASE WHEN f.hazard IS NULL THEN [] ELSE [f.hazard] END |
+  MERGE (hz:Hazard {name: h}) MERGE (ft)-[:FALLS_FOR]->(hz))
+"""
+
+WRITE_MADE = """
+UNWIND $runs AS r
+UNWIND r.made AS x
+MATCH (att:Attempt {key: x.attempt})
+MATCH (ft:Fault {key: x.fault})
+MERGE (att)-[made:MADE]->(ft)
+SET made.count = x.count
+"""
 
 WRITE_SCORES = """
 UNWIND $scores AS s
@@ -121,6 +151,10 @@ def write(evidence: Evidence, store: str) -> dict:
         source = {"name": evidence.source, "description": evidence.description}
         if evidence.runs:
             stats["runs"] = conn.execute(WRITE, {"runs": evidence.runs, "source": source}).stats
+            if any(r.get("can_show") for r in evidence.runs):
+                faults = conn.execute(WRITE_FAULTS, {"runs": evidence.runs}).stats
+                made = conn.execute(WRITE_MADE, {"runs": evidence.runs}).stats
+                stats["faults"] = {k: faults[k] + made[k] for k in ("nodes_created", "relationships_created")}
         if evidence.checks:
             stats["checks"] = conn.execute(WRITE_VALIDATIONS, {"checks": evidence.checks, "source": source}).stats
         if evidence.scores:
@@ -132,7 +166,12 @@ def load(records_root: Path, store: str) -> dict:
     """Load every sealed Gladiator match record under records_root. Returns a short summary."""
     evidence = gladiator.read_records(records_root)
     stats = write(evidence, store)
-    return {"loaded": len(evidence.runs), "skipped_bad_seal": evidence.skipped, "stats": stats.get("runs", {})}
+    return {
+        "loaded": len(evidence.runs),
+        "skipped_bad_seal": evidence.skipped,
+        "stats": stats.get("runs", {}),
+        "fault_stats": stats.get("faults", {}),
+    }
 
 
 def load_validations(root: Path, store: str) -> dict:

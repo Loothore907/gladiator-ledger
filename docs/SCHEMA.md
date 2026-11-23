@@ -40,6 +40,7 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 | `Test` | `id` (e.g. `gladiator/refund-queue`) | | challenge provenance |
 | `TestVersion` | `id@version:sha12` | test_id, version, version_rank, content_sha256, status (at run time), forked_from, title, brief, policy (the text the models were given), tools (every tool a model used), tags, emulates, test_type, action_budget | challenge provenance (the exact sealed package) |
 | `Hazard` | `name` | | grader counters, validation players |
+| `Fault` | `key` (the name; a mix-up's key also carries its test id) | name, **kind** (`trap`, `decision`, `mix-up`, `ending`), test_id (mix-ups only) | grader counters, mix-ups and how each attempt ended |
 | `Source` | `name` (the bridge, e.g. `gladiator`) | description | the bridge that read the evidence |
 | `Benchmark` | `name` (e.g. `Epoch Capabilities Index`) | publisher, url | the epoch bridge |
 | `ValidationRun` | `version/seal/level/player` | level, player, role (`reference`, `corner-cutting`), seeds, passed_seeds, ok, record_valid, engine_commit, validated_at | one check in a validation record |
@@ -63,6 +64,10 @@ words of a described flow and then follows the graph to the models and pairs beh
 | `(Match)-[:WON_BY]->(Model)` | the pair's winner. **Absent for a tie or an excluded pair** |
 | `(TestVersion)-[:INCLUDES]->(Hazard)` | the version can generate this hazard (its grader counts it) |
 | `(Attempt)-[:TRIPPED_ON {count}]->(Hazard)` | the model fell for it, `count` times |
+| `(TestVersion)-[:CAN_SHOW]->(Fault)` | the version's grader can report this fault |
+| `(Attempt)-[:MADE {count}]->(Fault)` | the model made it, `count` times. Absent where it could have and did not |
+| `(Fault)-[:KIND_OF]->(Fault)` | a test's specific mix-up (should close, did escalate) is a kind of "wrong decision" |
+| `(Fault)-[:FALLS_FOR]->(Hazard)` | the fault of falling for that hazard |
 | `(TestVersion)-[:VALIDATED_BY]->(ValidationRun)` | evidence that the test itself is sound |
 | `(ValidationRun)-[:GUARDS]->(Hazard)` | the corner-cutting player that stands for this hazard was caught (or not) |
 
@@ -91,6 +96,21 @@ and Ledger applies the current rule to all of them alike. The record's own verdi
 | acted without reading | `acted_without_reading` | `no_reading` |
 | conflicting records | `conflicting` | |
 | wrong amount | `wrong_amounts` | |
+
+## Faults
+A fault is anything a grader says a model did wrong on an attempt. Hazards are what a test plants; faults are what
+a model did. Which faults are unforgivable is the reader's call and depends on the workflow, so the graph records
+every kind and judges none.
+
+| Kind | Faults | From |
+|---|---|---|
+| `trap` | one per hazard above (falling for it) | the hazard counters |
+| `decision` | wrong decision; right decision, wrong details; left undone | `wrong`, `wrong_args`, `missing` |
+| `mix-up` | one per test and pair of outcomes, e.g. "should close, did escalate" | `confusions` (expected->chosen) |
+| `ending` | stopped before finishing; ran out of allowed actions | `termination` (`no_action`, `action_limit`) |
+
+`uv run ledger ask fault_profile --param test_id=gladiator/incident-triage` lists, per model,
+each fault it could show and in how many attempts it showed it.
 
 ## The questions (`ledger/questions.py`)
 

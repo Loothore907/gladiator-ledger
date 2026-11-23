@@ -63,11 +63,15 @@ Nodes: Source{name}, Run{run_id, suite, effort, attempt_budget_usd, engine_commi
 Match{key, rule (success|progress|efficiency|tie|excluded), excluded, difficulty},
 Attempt{key, passed, mistakes, progress, cost_usd, wall_s, tokens, effort}, Model{name, display_name, weights,
 organization}, Test{id}, TestVersion{key, version, version_rank, title, brief, policy, tools, emulates},
-Hazard{name}, ValidationRun{key, level, player, ok}, Benchmark{name}.
+Hazard{name}, Fault{key, name, kind (trap|decision|mix-up|ending), test_id}, ValidationRun{key, level, player, ok},
+Benchmark{name}.
 Relationships: (Run)-[:FROM]->(Source), (Match)-[:PART_OF]->(Run), (Match)-[:USED]->(TestVersion),
 (TestVersion)-[:VERSION_OF]->(Test), (Attempt)-[:IN]->(Match), (Attempt)-[:BY]->(Model),
 (Match)-[:WON_BY]->(Model) (absent for a tie), (TestVersion)-[:INCLUDES]->(Hazard),
-(Attempt)-[:TRIPPED_ON {count}]->(Hazard), (TestVersion)-[:VALIDATED_BY]->(ValidationRun),
+(Attempt)-[:TRIPPED_ON {count}]->(Hazard), (TestVersion)-[:CAN_SHOW]->(Fault), (Attempt)-[:MADE {count}]->(Fault)
+(a fault is anything the grader says the model did wrong: fell for a hazard, a wrong decision, a task-specific
+mix-up, work left undone, stopped before finishing), (Fault)-[:KIND_OF]->(Fault), (Fault)-[:FALLS_FOR]->(Hazard),
+(TestVersion)-[:VALIDATED_BY]->(ValidationRun),
 (ValidationRun)-[:GUARDS]->(Hazard), (Model)-[:SCORED {score, low, high}]->(Benchmark), (Benchmark)-[:FROM]->(Source).
 A Match is one PAIR: both models' attempts on the same generated world. Always filter `NOT mt.excluded`.
 Model names are exact ids such as anthropic:claude-haiku-5-5; models known only from the published index are

@@ -3,17 +3,18 @@ import json
 
 import relate
 
+from ledger import questions
 from ledger.load import load
 
 
-def attempt(node, passed, cost, retries=0, correct=3):
+def attempt(node, passed, cost, retries=0, correct=3, wrong=0, confusions=None, termination="session_ended"):
     return {
         "node": node,
         "attempt": 1,
         "challenge": {"id": f"t/{node}", "version": "1.0.0", "content_sha256": "ab" * 32, "status": "community"},
         "instance": {"seed": 1, "difficulty": "standard"},
         "passed": passed,
-        "termination": "session_ended",
+        "termination": termination,
         "cost_usd": cost,
         "input_tokens": 100,
         "output_tokens": 10,
@@ -21,6 +22,8 @@ def attempt(node, passed, cost, retries=0, correct=3):
         "grade_details": {
             "items": 3,
             "correct": correct,
+            "wrong": wrong,
+            "confusions": confusions or {},
             "missing": 0,
             "error_severity": 0,
             "blind_retries_after_unknown_outcome": retries,
@@ -54,6 +57,8 @@ def test_load_judges_pairs_links_hazards_and_is_idempotent(tmp_path):
     second = load(tmp_path / "runs", store)
     assert first["loaded"] == 1 and first["stats"]["nodes_created"] > 0
     assert second["stats"]["nodes_created"] == 0 and second["stats"]["relationships_created"] == 0
+    assert first["fault_stats"]["nodes_created"] > 0
+    assert second["fault_stats"]["nodes_created"] == 0 and second["fault_stats"]["relationships_created"] == 0
 
     with relate.connect(store, read_only=True) as conn:
         wins = {
@@ -73,6 +78,45 @@ def test_load_judges_pairs_links_hazards_and_is_idempotent(tmp_path):
         sources = conn.execute("MATCH (r:Run)-[:FROM]->(s:Source) RETURN s.name AS s, count(r) AS n").fetchall()
         assert [(r["s"], r["n"]) for r in sources] == [("gladiator", 1)]
         assert conn.execute("MATCH (s:Source) RETURN count(s) AS n").single()["n"] == 1
+
+
+def test_faults_cover_wrong_decisions_mix_ups_and_how_an_attempt_ended(tmp_path):
+    write_record(
+        tmp_path / "runs",
+        "r1",
+        [attempt("x", False, 0.01, correct=1, wrong=2, confusions={"close->escalate": 2})],
+        [attempt("x", False, 0.01, correct=3, termination="no_action")],
+    )
+    store = str(tmp_path / "s.rl")
+    load(tmp_path / "runs", store)
+    with relate.connect(store, read_only=True) as conn:
+        made = {
+            (r["model"], r["fault"]): (r["kind"], r["n"])
+            for r in conn.execute(
+                "MATCH (a:Attempt)-[x:MADE]->(f:Fault), (a)-[:BY]->(m:Model) "
+                "RETURN m.name AS model, f.name AS fault, f.kind AS kind, x.count AS n"
+            )
+        }
+        assert made == {
+            ("p:alpha", "wrong decision"): ("decision", 2),
+            ("p:alpha", "should close, did escalate"): ("mix-up", 2),
+            ("q:beta", "stopped before finishing"): ("ending", 1),
+        }
+        # a mix-up belongs to its test and is a kind of wrong decision
+        mix = conn.execute(
+            "MATCH (f:Fault {kind: 'mix-up'})-[:KIND_OF]->(p:Fault) RETURN f.test_id AS test, p.name AS parent"
+        ).single()
+        assert (mix["test"], mix["parent"]) == ("t/x", "wrong decision")
+        # the version can show faults nobody made (count 0), so a clean sheet can be told from "not measured"
+        can = {r["f"] for r in conn.execute("MATCH (:TestVersion)-[:CAN_SHOW]->(f:Fault) RETURN f.name AS f")}
+        assert {"left undone", "ran out of allowed actions", "ambiguous timeout (retried without checking)"} <= can
+        # the fault of falling for a hazard points at that hazard
+        falls = conn.execute("MATCH (f:Fault)-[:FALLS_FOR]->(h:Hazard) RETURN f.name AS f, h.name AS h").fetchall()
+        timeout = "ambiguous timeout (retried without checking)"
+        assert [(r["f"], r["h"]) for r in falls] == [(timeout, timeout)]
+        profile = conn.execute(questions.FAULT_PROFILE, {"test_id": "t/x", "version_key": None}).fetchall()
+        row = next(r for r in profile if r["model"] == "p:alpha" and r["fault"] == "wrong decision")
+        assert (row["attempts"], row["attempts_with"], row["times"]) == (1, 1, 2)
 
 
 def test_any_bridge_that_hands_back_the_shared_shape_can_be_written(tmp_path):
