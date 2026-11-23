@@ -112,6 +112,14 @@ every kind and judges none.
 `uv run ledger ask fault_profile --param test_id=gladiator/incident-triage` lists, per model,
 each fault it could show and in how many attempts it showed it.
 
+## Fit for the task (`ledger/policy.py`)
+Whether a model is fit for a task is read from the graph by `task_attempts` and `task_faults` (every attempt the
+model made on the test version under the same suite's settings) and judged by a policy: each fault has a level
+(`unforgivable`, `serious`, `minor`), set per fault with per-task exceptions, under a profile (`enterprise`,
+`personal`) that sets the pass bar and how often a serious fault may show. A mix-up takes the level of the fault
+it is a `KIND_OF`. The reader's own levels overrule all of it. The verdict leads with fitness and then gives the
+head to head.
+
 ## The questions (`ledger/questions.py`)
 
 | | Question | What it follows |

@@ -10,7 +10,7 @@ command line, so the page builds the same graph in the visitor's browser and giv
 import json
 from pathlib import Path
 
-from ledger import cli, load, questions, spec
+from ledger import cli, load, policy, questions, spec
 from ledger.bridges import epoch, gladiator
 
 # Pairs the page is checked against: (task, model a, model b).
@@ -20,6 +20,8 @@ CHECKED = [
     ("gladiator/refund-queue", "openrouter:deepseek/deepseek-v4.1-flash-1017", "openrouter:minimax/minimax-m3.1-flash"),
     ("gladiator/access-review", "openai:gpt-6.1-terra", "anthropic:claude-sonnet-5-5"),
 ]
+# A reader's own rule, to check that overrides move the answer the same way on the page.
+OWN_RULE = {"acted without reading": "unforgivable", "duplicate effect": "minor"}
 DESCRIBED = ["an agent that handles refund requests for damaged orders", "page the on-call owner for alerts"]
 
 
@@ -67,6 +69,13 @@ def export(data: Path, store: str, out: Path) -> dict:
                 "guardrails": spec.GUARDRAILS,
                 "unforgivable": spec.UNFORGIVABLE,
                 "reads": list(spec.READS),
+                "policy": {
+                    "levels": list(policy.LEVELS),
+                    "profiles": policy.PROFILES,
+                    "default_profile": policy.DEFAULT_PROFILE,
+                    "fault_levels": policy.FAULT_LEVELS,
+                    "task_levels": policy.TASK_LEVELS,
+                },
             },
         ),
     }
@@ -74,11 +83,18 @@ def export(data: Path, store: str, out: Path) -> dict:
     def ask(q, p):
         return cli.rows(store, q, p)
 
-    expected = {"verdicts": [], "specs": [], "flows": [], "opponents": []}
+    expected = {"verdicts": [], "specs": [], "judged": [], "judged_specs": [], "flows": [], "opponents": []}
     for task, a, b in CHECKED:
         found = cli.verdict(store, task, a, b)
         expected["verdicts"].append(found)
         expected["specs"].append(spec.build(ask, dict(found, suite=None)))
+    # The same pairs read through fitness, under each profile, and once with a reader's own rule.
+    for task, a, b in CHECKED:
+        for profile, overrides in [(p, None) for p in policy.PROFILES] + [(policy.DEFAULT_PROFILE, OWN_RULE)]:
+            found = cli.verdict(store, task, a, b, profile=profile, overrides=overrides)
+            expected["judged"].append({"overrides": overrides, "verdict": found})
+            built = spec.build(ask, dict(found, suite=None))
+            expected["judged_specs"].append({"overrides": overrides, "spec": built, "markdown": spec.markdown(built)})
     for text in DESCRIBED:
         expected["flows"].append(cli.find_flows(store, text))
     expected["flows"].append(cli.find_flows(store, "zebra unicorns"))

@@ -1,7 +1,7 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { createLedger, decidedText } from './ledger.js';
-import { fixed, floatRepr, percent, str } from './pyformat.js';
+import { createLedger } from './ledger.js';
+import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
 
@@ -55,8 +55,15 @@ window.ledgerDemo = {
   },
   flows: async (text) => (await ledgerReady).ledger.findFlows(text),
   opponents: async (model, openOnly) => (await ledgerReady).ledger.opponents(model, Boolean(openOnly)),
-  verdict: async (task, a, b) => (await ledgerReady).ledger.verdict(task, a, b),
-  spec: async (task, a, b) => (await ledgerReady).ledger.spec(task, a, b),
+  verdict: async (task, a, b, profile = null, overrides = null) => {
+    const { ledger, rules } = await ledgerReady;
+    return ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, overrides);
+  },
+  spec: async (task, a, b, profile = null, overrides = null) => (await ledgerReady).ledger.spec(task, a, b, profile, overrides),
+  specMarkdownJudged: async (task, a, b, profile, overrides = null) => {
+    const { ledger } = await ledgerReady;
+    return ledger.markdown(await ledger.spec(task, a, b, profile, overrides));
+  },
   specMarkdown: async (task, a, b) => {
     const { ledger } = await ledgerReady;
     return ledger.markdown(await ledger.spec(task, a, b));
@@ -78,13 +85,23 @@ function fill(node, attrs, children) {
   return node;
 }
 const el = (tag, attrs, ...children) => fill(document.createElement(tag), attrs, children);
-const svg = (tag, attrs, ...children) => fill(document.createElementNS('http://www.w3.org/2000/svg', tag), attrs, children);
 const $ = (id) => document.getElementById(id);
-const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
 // ---- state ----------------------------------------------------------------------------------------------------
 
-const state = { flows: null, task: null, flow: null, models: [], a: null, b: null, partners: new Map(), scores: new Map(), openOnly: false };
+const state = {
+  flows: null,
+  task: null,
+  flow: null,
+  models: [],
+  a: null,
+  b: null,
+  partners: new Map(),
+  scores: new Map(),
+  openOnly: false,
+  profile: null, // whose tolerance decides "fit for the task" (set from the rules once loaded)
+  overrides: {}, // the visitor's own level for a fault, by fault name; kept per task
+};
 const names = new Map(); // model id -> display name, as the graph has it
 let ledger;
 let rules;
@@ -151,7 +168,7 @@ function firstSentence(text) {
 
 async function chooseFlow(flow) {
   const mine = ++turn;
-  Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [] });
+  Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [], overrides: {} });
   drawFlows();
   const models = await ledger.modelsOnFlow(flow.test);
   if (mine !== turn) return;
@@ -304,20 +321,25 @@ async function drawSuggestions(mine = turn) {
 
 async function chooseSecond(model) {
   if (!state.partners.has(model)) return;
-  const mine = ++turn;
   state.b = model;
   drawSecond();
-  const spec = await ledger.spec(state.task, state.a, state.b);
-  const scores = await ledger.scoresOf([state.a, state.b]);
+  await showVerdict(true);
+}
+
+// The verdict for the chosen task and pair, read through the visitor's tolerance and their own rules.
+async function showVerdict(scroll = false) {
+  const mine = ++turn;
+  const overrides = Object.keys(state.overrides).length ? state.overrides : null;
+  const judged = await ledger.verdict(state.task, state.a, state.b, null, rules.good_enough, rules.min_pairs, state.profile, overrides);
+  const spec = await ledger.build({ ...judged, suite: null });
   if (mine !== turn) return;
-  drawVerdict(spec, scores);
+  drawVerdict(spec, judged);
   $('step-verdict').hidden = false;
-  $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ---- step 3: verdict and spec ---------------------------------------------------------------------------------
 
-const yesNo = (ok) => el('span', { class: ok ? 'yes' : 'no' }, ok ? 'yes' : 'no');
 
 function table(headers, rows, numeric = []) {
   return el(
@@ -344,69 +366,250 @@ function table(headers, rows, numeric = []) {
   );
 }
 
-function drawVerdict(spec, scores) {
+// Model ids inside a sentence from the ledger, swapped for the names people know.
+function plainNames(text, ids) {
+  return ids.reduce((out, id) => out.split(id).join(shortName(id)), text);
+}
+
+const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+const PROFILE_HELP = {
+  personal: 'One person runs it and sees the results.',
+  enterprise: 'A business runs it unattended, at volume.',
+};
+const LEVEL_HELP = {
+  unforgivable: 'one attempt with it makes a model unfit',
+  serious: 'fine if rare; unfit above the share allowed',
+  minor: 'shown, never decides on its own',
+};
+
+// One row of the comparison: the first model's value, what is compared, the second model's value.
+function tapeRow(left, label, small, right, extra = null) {
+  return el(
+    'div',
+    { class: 'tape-row' },
+    el('div', { class: 'val l' }, left),
+    el('div', { class: 'lab' }, label, small ? el('small', null, small) : null, extra),
+    el('div', { class: 'val r' }, right),
+  );
+}
+
+// The result as a fight card: the two models, the arena, the comparison row by row, where each one slipped
+// (with the visitor's own say on how serious each fault is), then one verdict, then how to check it.
+function fightCard(spec, v) {
+  const { a, b } = v;
+  const ids = [a, b];
+  const title = spec.blueprint.title || spec.task;
+  const fa = v.fit[a];
+  const fb = v.fit[b];
+  const A = v.models[a];
+  const B = v.models[b];
+
+  const tolerance = el(
+    'fieldset',
+    { class: 'tolerance' },
+    el('legend', null, 'Whose tolerance decides?'),
+    Object.keys(rules.policy.profiles).map((name) => {
+      const p = rules.policy.profiles[name];
+      return el(
+        'label',
+        { class: `option compact${name === v.profile ? ' on' : ''}` },
+        el('input', {
+          type: 'radio',
+          name: 'profile',
+          value: name,
+          checked: name === v.profile,
+          onchange: () => {
+            state.profile = name;
+            showVerdict();
+          },
+        }),
+        el(
+          'span',
+          { class: 'text' },
+          el('span', { class: 'name' }, sentence(name)),
+          el('span', { class: 'sub' }, `${PROFILE_HELP[name] || ''} ${percent(p.bar)} of attempts must pass; a serious fault may show in at most ${percent(p.serious_share)} of them.`),
+        ),
+      );
+    }),
+  );
+
+  const side = (id, cls) =>
+    el('div', { class: `fighter ${cls}` }, el('div', { class: 'name' }, shortName(id)), el('div', { class: 'id' }, id));
+  const settings = [spec.blueprint.settings.effort, spec.blueprint.settings.attempt_budget_usd];
+  const card = [
+    el('div', { class: 'fighters' }, side(a, 'a'), el('div', { class: 'vs', 'aria-hidden': 'true' }, 'vs'), side(b, 'b')),
+    el(
+      'p',
+      { class: 'note center' },
+      `Matches played by Gladiator, an open engine · ${plural(v.evidence.length, 'sealed match record')} · the same settings for both` +
+        (settings[0] && settings[0].length === 1 ? `: ${settings[0][0]} effort` : '') +
+        (settings[1] && settings[1].length === 1 ? `, $${str(settings[1][0], true)} limit per attempt` : ''),
+    ),
+  ];
+
+  // Each square says who won the scenario and what state both were in: both passed (plain), only the winner
+  // passed (dashed outline), or neither passed (faded: the one that got further, or spent less, took it).
+  const stateOf = (r) => (r.a_passed && r.b_passed ? 'both' : r.a_passed || r.b_passed ? 'sole' : 'neither');
+  const tally = { both: 0, sole: 0, neither: 0 };
+  for (const r of v.rounds) tally[stateOf(r)] += 1;
+  const arena = [
+    el('h3', { class: 'center' }, `The arena: ${plural(v.pairs, 'scenario')}`),
+    el(
+      'p',
+      { class: 'note center' },
+      'Each scenario is a freshly generated world with its own records and traps. Both models are handed the same one. ' +
+        'One scenario played by both is a pair, and each pair has a winner.',
+    ),
+    el(
+      'ol',
+      { class: 'rounds', 'aria-label': 'Who won each scenario' },
+      v.rounds.map((r, i) => {
+        const who = r.winner === a ? 'a' : r.winner === b ? 'b' : 'tie';
+        const what = stateOf(r);
+        const how = {
+          both: 'both passed; the cheaper, faster run won',
+          sole: 'only the winner passed',
+          neither: r.rule === 'progress' ? 'neither passed; the one that got further won' : 'neither passed; the cheaper, faster run won',
+        }[what];
+        const label = who === 'tie' ? `Scenario ${i + 1}: a tie` : `Scenario ${i + 1}: won by ${shortName(r.winner)} (${how})`;
+        return el('li', { class: `round ${who} ${what}`, title: label, 'aria-label': label }, String(i + 1));
+      }),
+    ),
+    el(
+      'p',
+      { class: 'legend' },
+      el('span', { class: 'key a' }), `won by ${shortName(a)}`,
+      el('span', { class: 'key b' }), `won by ${shortName(b)}`,
+      tally.both ? [el('span', { class: 'key both' }), `both passed, the cheaper and faster run won (${tally.both})`] : null,
+      tally.sole ? [el('span', { class: 'key sole' }), `only the winner passed (${tally.sole})`] : null,
+      tally.neither ? [el('span', { class: 'key neither' }), `neither passed, the one that got further or spent less won (${tally.neither})`] : null,
+    ),
+  ];
+
+  const num = (text, cls = '') => el('span', { class: `fig ${cls}` }, text);
+  const tape = [
+    tapeRow(num(String(v.wins[a])), 'Scenarios won', `of ${v.pairs} played against each other`, num(String(v.wins[b]))),
+    tapeRow(num(`${A.passed} of ${A.attempts}`), 'Scenarios passed', 'in those same pairs', num(`${B.passed} of ${B.attempts}`)),
+    tapeRow(num(`$${fixed(A.cost_per_attempt, 4)}`), 'Cost per attempt', 'lower is better', num(`$${fixed(B.cost_per_attempt, 4)}`)),
+    tapeRow(num(`${fixed(A.seconds_per_attempt, 0)}s`), 'Seconds per attempt', 'lower is better', num(`${fixed(B.seconds_per_attempt, 0)}s`)),
+    el('div', { class: 'tape-head' }, `Fit for this task: every attempt each model made on it, against any opponent`),
+    tapeRow(
+      num(`${fa.passed} of ${fa.attempts}`, fa.pass_rate < fa.bar ? 'bad' : ''),
+      'Attempts passed',
+      `${percent(fa.pass_rate)} and ${percent(fb.pass_rate)}; ${percent(fa.bar)} needed`,
+      num(`${fb.passed} of ${fb.attempts}`, fb.pass_rate < fb.bar ? 'bad' : ''),
+    ),
+  ];
+
+  // Where each one slipped: every fault either model made (and every unforgivable one, made or not), with the
+  // level it has under this tolerance. The visitor can change a level; the verdict below follows.
+  const faults = new Map();
+  for (const [key, f] of [['a', fa], ['b', fb]]) {
+    for (const x of f.faults) {
+      if (!faults.has(x.fault)) faults.set(x.fault, { fault: x.fault, kind_of: x.kind_of ?? null, level: x.level });
+      faults.get(x.fault)[key] = x;
+    }
+  }
+  const order = (x) => rules.policy.levels.indexOf(x.level);
+  const top = [...faults.values()].filter((x) => x.kind_of === null).sort((x, y) => order(x) - order(y) || (x.fault < y.fault ? -1 : 1));
+  const count = (x, f) => (x ? num(`${x.attempts_with} of ${f.attempts}`, x.breaks ? 'bad' : x.attempts_with ? '' : 'none') : num(`0 of ${f.attempts}`, 'none'));
+  const slips = [];
+  for (const row of top) {
+    const picker = el(
+      'select',
+      {
+        class: `level ${row.level}`,
+        'aria-label': `How serious is "${row.fault}" for you?`,
+        title: LEVEL_HELP[row.level],
+        onchange: (event) => {
+          state.overrides = { ...state.overrides, [row.fault]: event.target.value };
+          showVerdict();
+        },
+      },
+      rules.policy.levels.map((level) => el('option', { value: level, selected: level === row.level }, level)),
+    );
+    slips.push(tapeRow(count(row.a, fa), sentence(row.fault), null, count(row.b, fb), picker));
+    for (const kid of [...faults.values()].filter((x) => x.kind_of === row.fault).sort((x, y) => (x.fault < y.fault ? -1 : 1))) {
+      slips.push(
+        el(
+          'div',
+          { class: 'tape-row kid' },
+          el('div', { class: 'val l' }, count(kid.a, fa)),
+          el('div', { class: 'lab' }, sentence(kid.fault)),
+          el('div', { class: 'val r' }, count(kid.b, fb)),
+        ),
+      );
+    }
+  }
+  const changed = Object.keys(state.overrides).length;
+  const slipsHead = el(
+    'div',
+    { class: 'tape-head' },
+    'Where each one slipped (attempts with the fault). ',
+    el('span', { class: 'plainer' }, 'Set how serious each is for you: ', rules.policy.levels.map((l) => `${l} = ${LEVEL_HELP[l]}`).join('; '), '.'),
+    changed
+      ? [' ', el('button', { type: 'button', class: 'quiet small', id: 'reset-levels', onclick: () => { state.overrides = {}; showVerdict(); } }, `Reset ${plural(changed, 'change')}`)]
+      : null,
+  );
+
+  const kind = { use: 'win', 'only one fit': 'win', 'both fit': 'even', 'neither fit': 'stop', 'too few attempts': 'even' }[v.outcome];
+  const versus = {
+    better: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios. A split that lopsided between two equal models would happen about ${percent(v.p_value, 1)} of the time.`,
+    leaning: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios: ahead, but a split like that happens by chance ${percent(v.p_value)} of the time, so it is not settled.`,
+    'no real difference shown': `Head to head they split the ${v.pairs} scenarios ${v.wins[a]} to ${v.wins[b]}.`,
+    'not enough evidence': `Head to head they have met on only ${plural(v.pairs, 'scenario')}, fewer than the ${rules.min_pairs} a verdict needs.`,
+  }[v.verdict];
+  const why = ids
+    .filter((id) => v.fit[id].fit === false)
+    .map((id) => el('li', null, `${shortName(id)} is not fit: ${v.fit[id].reasons.join('; ')}.`));
+  const others = v.fit_on_task.filter((o) => !ids.includes(o.model));
+  const elsewhere =
+    v.outcome !== 'neither fit'
+      ? null
+      : others.length
+        ? el(
+            'p',
+            null,
+            'Fit for this task among the models tested, cheapest first: ',
+            others.map((o) => `${shortName(o.model)} (passed ${percent(o.pass_rate)} of ${o.attempts} attempts, $${fixed(o.cost_per_attempt, 4)} each)`).join('; '),
+            '.',
+          )
+        : el('p', null, `No model tested on this task is fit at ${v.profile} tolerance. That points to a larger model, more reasoning effort, or guardrails around the faults above; this page has no matches for those to show.`);
+  const band = el(
+    'div',
+    { class: `band ${kind}`, id: 'verdict-band' },
+    el('p', { class: 'band-kind' }, `Verdict for this task, at ${v.profile} tolerance`),
+    el('p', { class: 'headline', id: 'verdict-headline' }, plainNames(v.headline, ids)),
+    why.length ? el('ul', { class: 'why' }, why) : null,
+    el('p', null, versus),
+    elsewhere,
+    el('p', { class: 'small' }, `A claim about ${title} as tested, in a simulated world. Not a ranking of the models in general.`),
+  );
+
+  const proof = el(
+    'p',
+    { class: 'proof' },
+    'Test ', el('code', null, spec.version.split('/').pop()),
+    ' · sealed records ', v.evidence.map((e, i) => [i ? ', ' : '', el('code', null, str(e.seal_sha256).slice(0, 12))]),
+    ' · check every record yourself: ', el('code', null, 'uv run ledger verify'),
+  );
+  return [tolerance, card, arena, el('div', { class: 'tape' }, tape, slipsHead, slips), band, proof];
+}
+
+function drawVerdict(spec, v) {
   const d = spec.decision;
-  const { a, b } = d;
   const bp = spec.blueprint;
   const st = bp.settings;
-  const title = bp.title || spec.task;
-  const headline = {
-    better: `${shortName(d.better)} does this task better`,
-    leaning: `Leaning ${shortName(d.better)}, not settled`,
-    'no real difference shown': 'No real difference shown',
-    'not enough evidence': 'Not enough evidence',
-  }[d.verdict];
-  const meaning = {
-    better: `Use it for this task: it did ${title} better than ${shortName(d.better === a ? b : a)} on the same worlds.`,
-    leaning: 'It is ahead, but the lead could still be chance. No winner is named.',
-    'no real difference shown': 'The two models split the pairs evenly on this task. No winner is named.',
-    'not enough evidence': 'There are too few head-to-head pairs to call it. No winner is named.',
-  }[d.verdict];
-  const kindClass = { better: 'better', leaning: 'leaning' }[d.verdict] || 'none';
   const one = (values, isFloat) => {
-    const kept = (values || []).filter((v) => v !== null && v !== undefined);
-    return kept.length ? kept.map((v) => str(v, isFloat)).join(', ') : 'not recorded';
+    const kept = (values || []).filter((x) => x !== null && x !== undefined);
+    return kept.length ? kept.map((x) => str(x, isFloat)).join(', ') : 'not recorded';
   };
   const markdown = ledger.markdown(spec);
 
   const copyNote = el('span', { class: 'note', role: 'status', 'aria-live': 'polite' });
   const body = [
-    el(
-      'div',
-      { class: `verdict ${kindClass}` },
-      el('p', { class: 'kind' }, d.verdict),
-      el('p', { class: 'headline', id: 'verdict-headline' }, headline),
-      el('p', null, meaning),
-      el('p', { class: 'note' }, `A claim about ${title} as tested, in a simulated world. Not a ranking of the models in general.`),
-    ),
-    el(
-      'ul',
-      { class: 'facts' },
-      el(
-        'li',
-        null,
-        `${d.pairs} judged pairs on the same generated worlds: ${shortName(a)} won ${d.wins[a]}, ${shortName(b)} won ${d.wins[b]}, ` +
-          `${d.ties} tied (sign test p = ${floatRepr(d.p_value)}).`,
-      ),
-      el('li', null, `Decided by: ${decidedText(d.decided_by)}.`),
-    ),
-    table(
-      ['Model', 'Passed', 'Cost per attempt', 'Seconds per attempt', 'Mistakes per attempt', `Good enough (bar ${percent(d.bar)})`],
-      [a, b].map((name) => {
-        const s = spec.models[name];
-        return [
-          modelLabel(name),
-          `${s.passed} of ${s.attempts}`,
-          `$${fixed(s.cost_per_attempt, 4)}`,
-          fixed(s.seconds_per_attempt, 0),
-          fixed(s.mistakes, 1),
-          yesNo(s.good_enough),
-        ];
-      }),
-      [1, 2, 3, 4],
-    ),
-    d.notes.length ? el('ul', { class: 'notes' }, d.notes.map((n) => el('li', null, n))) : null,
-    pathFigure(spec, scores),
+    fightCard(spec, v),
+    d.notes.length ? el('ul', { class: 'notes' }, d.notes.map((n) => el('li', null, plainNames(n, [d.a, d.b])))) : null,
 
     el('h3', null, 'Blueprint'),
     el('p', { class: 'note' }, 'What the result was earned on. Build the real flow to match it, then re-test.'),
@@ -513,83 +716,6 @@ async function copy(text, note) {
   note.textContent = ok ? 'Copied.' : 'Could not copy here. Use the download instead.';
 }
 
-// The walk through the graph that produced the answer, with this selection's real counts.
-function pathFigure(spec, scores) {
-  const d = spec.decision;
-  const { a, b } = d;
-  const bp = spec.blueprint;
-  const scoreOf = new Map(scores.map((s) => [s.model, s]));
-  const hasScore = scores.length > 0;
-  const height = hasScore ? 382 : 304;
-  const H = 52;
-  const parts = [];
-  const box = (x, y, w, kind, main, sub, cls = '') => {
-    const max = Math.floor((w - 20) / 6.6);
-    parts.push(
-      svg('rect', { x, y, width: w, height: H, rx: 8, class: `g-box ${cls}` }),
-      svg('text', { x: x + 10, y: y + 16, class: 'g-kind' }, kind),
-      svg('text', { x: x + 10, y: y + 32, class: 'g-main' }, clip(main, max), svg('title', null, main)),
-      svg('text', { x: x + 10, y: y + 46, class: 'g-sub' }, clip(sub, Math.floor((w - 20) / 5.6))),
-    );
-  };
-  const arrow = (x1, y1, x2, y2, rel, dashed = false, labelAt = null) => {
-    const angle = Math.atan2(y2 - y1, x2 - x1);
-    const tip = (da, len) => `${x2 - len * Math.cos(angle + da)},${y2 - len * Math.sin(angle + da)}`;
-    parts.push(
-      svg('line', { x1, y1, x2: x2 - 4 * Math.cos(angle), y2: y2 - 4 * Math.sin(angle), class: `g-edge${dashed ? ' g-dash' : ''}` }),
-      svg('polygon', { points: `${x2},${y2} ${tip(0.4, 8)} ${tip(-0.4, 8)}`, class: 'g-arrow' }),
-    );
-    if (rel) {
-      const [lx, ly, anchor] = labelAt || [(x1 + x2) / 2 + 7, (y1 + y2) / 2 + 3, 'start'];
-      parts.push(svg('text', { x: lx, y: ly, class: 'g-rel', 'text-anchor': anchor }, rel));
-    }
-  };
-  const mainX = 10;
-  const mainW = 215;
-  const mid = mainX + mainW / 2;
-  const srcX = 250;
-  const srcW = 100;
-  const rows = [8, 86, 164, 242, 320];
-  const records = spec.evidence.length;
-
-  box(mainX, rows[0], mainW, 'Flow', bp.title || spec.task, spec.task);
-  arrow(mid, rows[0] + H, mid, rows[1], 'VERSION_OF');
-  box(mainX, rows[1], mainW, 'Test version', spec.version.split('@').pop().split(':')[0], `fingerprint ${str(spec.test_fingerprint).slice(0, 12)}`);
-  arrow(mid, rows[1] + H, mid, rows[2], 'USED');
-  box(mainX, rows[2], mainW, 'Judged pairs', `${plural(d.pairs, 'pair')} on the same worlds`, `${d.wins[a]} to ${d.wins[b]}, ${d.ties} tied`, 'hot');
-  arrow(mainX + mainW, rows[2] + H / 2, srcX, rows[2] + H / 2, 'FROM', true, [(mainX + mainW + srcX) / 2, rows[2] + H / 2 - 7, 'middle']);
-  box(srcX, rows[2], srcW, 'Source', 'gladiator', plural(records, 'record'), 'src');
-
-  const modelW = 165;
-  const ax = 10;
-  const bx = 185;
-  arrow(mid - 30, rows[2] + H, ax + modelW / 2, rows[3], 'IN, BY', false, [ax + modelW / 2 - 8, rows[3] - 10, 'end']);
-  arrow(mid + 30, rows[2] + H, bx + modelW / 2, rows[3], 'IN, BY', false, [bx + modelW / 2 + 2, rows[3] - 10, 'start']);
-  const won = (m) => `won ${d.wins[m]} · passed ${spec.models[m].passed} of ${spec.models[m].attempts}`;
-  box(ax, rows[3], modelW, 'Model', shortName(a), won(a), d.better === a ? 'hot' : '');
-  box(bx, rows[3], modelW, 'Model', shortName(b), won(b), d.better === b ? 'hot' : '');
-
-  if (hasScore) {
-    const show = (m) => (scoreOf.has(m) ? fixed(scoreOf.get(m).score, 1) : 'none');
-    if (scoreOf.has(a)) arrow(ax + modelW / 2, rows[3] + H, mid - 30, rows[4], 'SCORED', false, [ax + modelW / 2 - 8, rows[4] - 10, 'end']);
-    if (scoreOf.has(b)) arrow(bx + modelW / 2, rows[3] + H, mid + 30, rows[4], 'SCORED', false, [bx + modelW / 2 + 2, rows[4] - 10, 'start']);
-    box(mainX, rows[4], mainW, 'Benchmark', scores[0].benchmark, `scores: ${show(a)} and ${show(b)}`);
-    arrow(mainX + mainW, rows[4] + H / 2, srcX, rows[4] + H / 2, 'FROM', true, [(mainX + mainW + srcX) / 2, rows[4] + H / 2 - 7, 'middle']);
-    box(srcX, rows[4], srcW, 'Source', scores[0].source, 'CC BY 4.0', 'src');
-  }
-
-  const label =
-    `The graph path behind this answer: the flow ${bp.title}, its test version, ${d.pairs} judged pairs from ` +
-    `${plural(records, 'sealed match record')}, and the two models` +
-    (hasScore ? ', with their published benchmark scores.' : '.');
-  return el(
-    'figure',
-    { class: 'path' },
-    svg('svg', { viewBox: `0 0 360 ${height}`, role: 'img', 'aria-label': label }, parts),
-    el('figcaption', null, 'The answer is a walk through connected facts in the graph. The benchmark only suggests opponents; it never decides.'),
-  );
-}
-
 // ---- the example ------------------------------------------------------------------------------------------------
 
 // Walks the three steps for a flow and pair of models with the most head-to-head evidence in the graph (a settled
@@ -633,6 +759,7 @@ async function start() {
   const status = $('status');
   try {
     ({ ledger, rules } = await ledgerReady);
+    state.profile = rules.policy.default_profile;
     const stats = await graphReady;
     status.textContent =
       `Ready: ${stats.matches} matches (${stats.pairs} judged pairs), ${stats.models} models, built in ${Math.round(stats.total_ms)} ms.`;

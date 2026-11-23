@@ -12,6 +12,8 @@ because each one follows connections across runs: models, matches, test versions
   pair_on_task           One task, two models: every pair where they met, with both sides' facts.
   pair_hazards           The hazards each of those two models met and tripped on, in those pairs.
   fault_profile          One task: for each model, each fault it could show, in how many attempts it showed it.
+  task_attempts          One task version and its suites: every model's attempts, passes and cost.
+  task_faults            The same scope: the faults each model made (what "fit for the task" is judged from).
   find_flow              Describe your flow: the tested workflows whose text matches your words best.
   flows                  Every tested workflow (newest versions).
   flow_as_tested         The text, tools and settings a workflow was tested with (what a spec is built from).
@@ -89,6 +91,29 @@ WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
      count(a) AS attempts, count(x) AS attempts_with, sum(coalesce(x.count, 0)) AS times
 RETURN model, fault, kind, kind_of, attempts, attempts_with, times, toFloat(attempts_with) / attempts AS rate
 ORDER BY model, kind, times DESC, fault
+"""
+
+# Fit for the task: every model's attempts on one test version under the settings of the given suites (fitness is
+# about the model and the task, so every opponent it faced counts), and the faults it made in those attempts.
+TASK_ATTEMPTS = """
+MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
+      (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded AND r.suite IN $suites
+RETURN m.name AS model, m.display_name AS display_name, count(a) AS attempts,
+       sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed, avg(a.cost_usd) AS cost_per_attempt
+ORDER BY cost_per_attempt, model
+"""
+
+TASK_FAULTS = """
+MATCH (tv:TestVersion {key: $version_key})-[:CAN_SHOW]->(f:Fault),
+      (tv)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run), (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded AND r.suite IN $suites
+OPTIONAL MATCH (a)-[x:MADE]->(f)
+OPTIONAL MATCH (f)-[:KIND_OF]->(parent:Fault)
+WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
+     count(x) AS attempts_with, sum(coalesce(x.count, 0)) AS times
+RETURN model, fault, kind, kind_of, attempts_with, times
+ORDER BY model, fault
 """
 
 # Q3. Beat cycles: per test version, who beat whom by pair majority (ties dropped), then 3-cycles among them,
@@ -281,4 +306,6 @@ ALL = {
     "pair_on_task": PAIR_ON_TASK,
     "pair_hazards": PAIR_HAZARDS,
     "fault_profile": FAULT_PROFILE,
+    "task_attempts": TASK_ATTEMPTS,
+    "task_faults": TASK_FAULTS,
 }

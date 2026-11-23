@@ -125,9 +125,129 @@ export function createLedger(ask, questions, rules) {
     };
   }
 
+  // ---- fit for the task (ledger/policy.py and cli.fitness / cli.outcome) ----------------------------------------
+  const policy = rules.policy;
+  const profileNames = Object.keys(policy.profiles);
+
+  // The level of one fault on one task under a profile: the reader's override, then the task's exception, then
+  // the fault's default; a mix-up falls back to the fault it is a kind of; anything unknown is serious.
+  function levelOf(test, fault, kindOf, profile, overrides = null) {
+    const column = profileNames.indexOf(profile);
+    const task = (policy.task_levels[test] || {}).levels || {};
+    for (const name of [fault, kindOf]) {
+      if (name === null || name === undefined) continue;
+      if (overrides && name in overrides) return overrides[name];
+      if (name in task) return task[name][column];
+      if (name in policy.fault_levels) return policy.fault_levels[name][column];
+    }
+    return 'serious';
+  }
+
+  function assess(test, row, faults, profile, overrides = null, bar = null) {
+    const limits = policy.profiles[profile];
+    bar = bar === null ? limits.bar : bar;
+    const { attempts, passed } = row;
+    const passRate = attempts ? passed / attempts : 0.0;
+    const listed = [];
+    const reasons = [];
+    for (const f of faults) {
+      const level = levelOf(test, f.fault, f.kind_of ?? null, profile, overrides);
+      const share = attempts ? f.attempts_with / attempts : 0.0;
+      let breaks = false;
+      if (level === 'unforgivable') breaks = f.attempts_with > 0;
+      // a mix-up is already counted in the fault it is a kind of: it explains, it does not decide twice
+      else if (level === 'serious') breaks = (f.kind_of ?? null) === null && share > limits.serious_share;
+      listed.push({ ...f, level, share: round(share, 4), breaks });
+      if (breaks) {
+        reasons.push(
+          `${f.fault} (${level}) in ${f.attempts_with} of ${attempts} attempts` +
+            (level === 'unforgivable' ? '' : `, over the ${percent(limits.serious_share)} allowed`),
+        );
+      }
+    }
+    if (passRate < bar) {
+      reasons.unshift(`passed ${passed} of ${attempts} attempts (${percent(passRate)}), under the ${percent(bar)} bar`);
+    }
+    const thin = attempts < limits.min_attempts;
+    const order = (e) => policy.levels.indexOf(e.level);
+    listed.sort(
+      (x, y) =>
+        Number(!x.breaks) - Number(!y.breaks) ||
+        order(x) - order(y) ||
+        y.attempts_with - x.attempts_with ||
+        byCodePoint(x.fault, y.fault),
+    );
+    return {
+      fit: thin ? null : reasons.length === 0,
+      attempts,
+      passed,
+      pass_rate: round(passRate, 4),
+      bar,
+      cost_per_attempt: row.cost_per_attempt ?? null,
+      reasons,
+      thin,
+      faults: listed.filter((e) => e.attempts_with || e.level === 'unforgivable'),
+    };
+  }
+
+  // Every model's fitness for one task version, counting every attempt it made under those suites' settings.
+  async function fitness(test, version, suites, profile, overrides = null, bar = null) {
+    const scope = { version_key: version, suites };
+    const faults = {};
+    for (const { model, ...f } of await ask(questions.task_faults, scope)) (faults[model] ||= []).push(f);
+    const out = {};
+    for (const r of await ask(questions.task_attempts, scope)) {
+      out[r.model] = assess(test, r, faults[r.model] || [], profile, overrides, bar);
+    }
+    return out;
+  }
+
+  // The answer a reader acts on: [code, sentence, the model to use or null].
+  function outcome(v, fit) {
+    const { a, b } = v;
+    const fa = fit[a].fit;
+    const fb = fit[b].fit;
+    const ahead = v.better;
+    const settled = v.verdict === 'better';
+    if (fa === null || fb === null) {
+      const thin = [a, b].filter((m) => fit[m].fit === null);
+      return ['too few attempts', `Too few attempts to say whether ${thin.join(' or ')} is fit for this task.`, null];
+    }
+    if (!fa && !fb) {
+      const more = ahead ? ` ${ahead} did it better of the two, which is not the same as fit.` : '';
+      return ['neither fit', `Neither is fit for this task.${more}`, null];
+    }
+    if (fa !== fb) {
+      const [fitOne, other] = fa ? [a, b] : [b, a];
+      if (ahead === other) {
+        const lead = settled ? 'did it better' : 'is ahead';
+        return ['only one fit', `${other} ${lead} head to head, but only ${fitOne} is fit for this task.`, fitOne];
+      }
+      if (ahead === fitOne) {
+        const lead = settled ? 'did it better' : 'is ahead, not settled';
+        return ['only one fit', `Use ${fitOne}: it is the only one of the two fit for this task, and it ${lead}.`, fitOne];
+      }
+      return ['only one fit', `Use ${fitOne}: it is the only one of the two fit for this task.`, fitOne];
+    }
+    if (settled) return ['use', `Use ${ahead}: both are fit for this task and it did it better.`, ahead];
+    if (ahead) {
+      return ['both fit', `Both are fit for this task. ${ahead} is ahead head to head, but that is not settled.`, null];
+    }
+    return ['both fit', 'Both are fit for this task, and the matches show no winner between them.', null];
+  }
+
   // A task claim: which of two models did THIS task better on the same worlds, how sure that is, and whether
   // either is good enough. No winner is named on thin evidence or a level score.
-  async function verdict(workflow, a, b, suite = null, bar = rules.good_enough, minPairs = rules.min_pairs) {
+  async function verdict(
+    workflow,
+    a,
+    b,
+    suite = null,
+    bar = rules.good_enough,
+    minPairs = rules.min_pairs,
+    profile = null,
+    overrides = null,
+  ) {
     const test = testId(workflow);
     const version = await currentVersion(test);
     const params = { test_id: test, a, b, suite, version_key: version };
@@ -181,6 +301,19 @@ export function createLedger(ask, questions, rules) {
     const hazards = await ask(questions.pair_hazards, params);
     const runs = {};
     for (const p of pairs) runs[p.run] = { run: p.run, seal_sha256: p.seal, engine_commit: p.engine, suite: p.suite };
+    if (profile) {
+      // Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
+      const suites = [...new Set(pairs.map((p) => p.suite))].sort(byCodePoint);
+      const versionKey = pairs.map((p) => p.version).sort(byCodePoint).at(-1);
+      const everyone = await fitness(test, versionKey, suites, profile, overrides);
+      out.profile = profile;
+      out.fit = { [a]: everyone[a], [b]: everyone[b] };
+      [out.outcome, out.headline, out.use] = outcome({ a, b, better, verdict: kind }, out.fit);
+      out.rounds = pairs.map((p) => ({ winner: p.winner, rule: p.rule, a_passed: p.a_passed, b_passed: p.b_passed }));
+      out.fit_on_task = Object.entries(everyone)
+        .filter(([, f]) => f.fit)
+        .map(([model, f]) => ({ model, pass_rate: f.pass_rate, attempts: f.attempts, cost_per_attempt: f.cost_per_attempt }));
+    }
     return {
       ...out,
       verdict: kind,
@@ -205,7 +338,8 @@ export function createLedger(ask, questions, rules) {
 
   // The spec as data, from a verdict (ledger/spec.py build).
   async function build(v) {
-    const chosen = v.better ?? null;
+    const judged = 'outcome' in v; // the verdict was read through fitness
+    const chosen = (judged ? v.use : v.better) ?? null;
     const decision = {};
     for (const k of ['verdict', 'better', 'a', 'b', 'pairs', 'wins', 'ties', 'p_value', 'decided_by', 'bar', 'notes']) {
       decision[k] = v[k] ?? null;
@@ -218,6 +352,20 @@ export function createLedger(ask, questions, rules) {
       chosen,
       evidence: v.evidence || [],
     };
+    if (judged) {
+      Object.assign(decision, { outcome: v.outcome, headline: v.headline, profile: v.profile });
+      out.fit = {};
+      for (const [model, f] of Object.entries(v.fit)) {
+        out.fit[model] = {
+          fit: f.fit,
+          attempts: f.attempts,
+          passed: f.passed,
+          pass_rate: f.pass_rate,
+          bar: f.bar,
+          reasons: f.reasons,
+        };
+      }
+    }
     if (v.verdict === 'no data') return out;
     const found = await ask(questions.flow_as_tested, {
       test_id: v.task,
@@ -297,7 +445,29 @@ export function createLedger(ask, questions, rules) {
       'no real difference shown': '**No winner.** The two models split the pairs evenly on this task.',
       'not enough evidence': '**No winner yet.** There are too few head-to-head pairs to call it.',
     }[d.verdict];
-    lines.push(headline, '');
+    if (d.headline) {
+      // fit for the task comes first; the head to head follows as the evidence between the two
+      lines.push(`**${d.headline}**`, '', `Fit for this task, at ${d.profile} tolerance:`, '');
+      for (const name of [a, b]) {
+        const f = spec.fit[name];
+        const word = f.fit === null ? 'too few attempts to say' : f.fit ? 'fit' : 'not fit';
+        const why = f.reasons.join('; ');
+        lines.push(
+          `- \`${name}\`: **${word}**. Passed ${f.passed} of ${f.attempts} attempts on this task ` +
+            `(${percent(f.pass_rate)}; bar ${percent(f.bar)}).` +
+            (why ? ` Because: ${why}.` : ''),
+        );
+      }
+      const versus = {
+        better: `\`${d.better}\` did this task better than the other model.`,
+        leaning: `\`${d.better}\` is ahead, but the lead could still be chance.`,
+        'no real difference shown': 'the two models split the pairs evenly.',
+        'not enough evidence': 'too few head-to-head pairs to call it.',
+      }[d.verdict];
+      lines.push('', `Head to head: ${versus}`, '');
+    } else {
+      lines.push(headline, '');
+    }
     lines.push(
       `- ${d.pairs} judged pairs on the same generated worlds: \`${a}\` won ${d.wins[a]}, \`${b}\` won ` +
         `${d.wins[b]}, ${d.ties} tied (sign test p = ${floatRepr(d.p_value)}).`,
@@ -387,8 +557,9 @@ export function createLedger(ask, questions, rules) {
     return lines.join('\n');
   }
 
-  async function spec(workflow, a, b) {
-    return build({ ...(await verdict(workflow, a, b)), suite: null });
+  async function spec(workflow, a, b, profile = null, overrides = null) {
+    const found = await verdict(workflow, a, b, null, rules.good_enough, rules.min_pairs, profile, overrides);
+    return build({ ...found, suite: null });
   }
 
   // For the page's step 2: who has judged pairs on this flow, and who has met `model` on it.
@@ -412,6 +583,7 @@ export function createLedger(ask, questions, rules) {
     currentVersion,
     resolveModel,
     opponents,
+    levelOf,
     verdict,
     build,
     spec,

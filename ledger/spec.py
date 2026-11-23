@@ -46,7 +46,8 @@ def tool_kind(name: str) -> str:
 
 def build(rows, verdict: dict) -> dict:
     """The spec as data. `rows(query, params)` runs a question against the store; `verdict` is cli.verdict's result."""
-    chosen = verdict.get("better")
+    judged = "outcome" in verdict  # the verdict was read through fitness (ledger/policy.py)
+    chosen = verdict.get("use") if judged else verdict.get("better")
     out = {
         "task": verdict["task"],
         "version": verdict["version"],
@@ -58,6 +59,10 @@ def build(rows, verdict: dict) -> dict:
         "chosen": chosen,
         "evidence": verdict.get("evidence") or [],
     }
+    if judged:
+        out["decision"].update({k: verdict[k] for k in ("outcome", "headline", "profile")})
+        keep = ("fit", "attempts", "passed", "pass_rate", "bar", "reasons")
+        out["fit"] = {model: {k: f[k] for k in keep} for model, f in verdict["fit"].items()}
     if verdict["verdict"] == "no data":
         return out
     flow = rows(
@@ -141,7 +146,26 @@ def markdown(spec: dict) -> str:
         "no real difference shown": "**No winner.** The two models split the pairs evenly on this task.",
         "not enough evidence": "**No winner yet.** There are too few head-to-head pairs to call it.",
     }[d["verdict"]]
-    lines += [headline, ""]
+    if d.get("headline"):
+        # fit for the task comes first; the head to head follows as the evidence between the two
+        lines += [f"**{d['headline']}**", "", f"Fit for this task, at {d['profile']} tolerance:", ""]
+        for name in (a, b):
+            f = spec["fit"][name]
+            word = {True: "fit", False: "not fit", None: "too few attempts to say"}[f["fit"]]
+            why = "; ".join(f["reasons"])
+            lines.append(
+                f"- `{name}`: **{word}**. Passed {f['passed']} of {f['attempts']} attempts on this task "
+                f"({f['pass_rate']:.0%}; bar {f['bar']:.0%})." + (f" Because: {why}." if why else "")
+            )
+        versus = {
+            "better": f"`{d['better']}` did this task better than the other model.",
+            "leaning": f"`{d['better']}` is ahead, but the lead could still be chance.",
+            "no real difference shown": "the two models split the pairs evenly.",
+            "not enough evidence": "too few head-to-head pairs to call it.",
+        }[d["verdict"]]
+        lines += ["", f"Head to head: {versus}", ""]
+    else:
+        lines += [headline, ""]
     lines += [
         (
             f"- {d['pairs']} judged pairs on the same generated worlds: `{a}` won {d['wins'][a]}, `{b}` won "
