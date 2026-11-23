@@ -278,6 +278,10 @@ async function main() {
         if (winner && !finish.startsWith(winner[1])) problems.push(`the square says ${JSON.stringify(label)} but the race ends ${JSON.stringify(finish)}`);
         const hidden = await page.locator('.race .tick[hidden]').count();
         if (hidden) problems.push(`${hidden} steps are still hidden after the race ended`);
+        // the graph picture under the race: one dot per scenario, and exactly the watched one ringed
+        const dots = await page.locator('#race figure.graph circle').count();
+        const ringed = await page.locator('#race figure.graph circle.ring').count();
+        if (dots !== squares || ringed !== 1) problems.push(`the graph under the race shows ${dots} dots (${ringed} ringed) for ${squares} scenarios`);
       }
     }
 
@@ -363,6 +367,12 @@ async function main() {
           if (!(await live.locator('#live-stage .tick.again').count())) problems.push('acting on the same item again is not marked');
           const off = await live.locator('#live-stage .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
           if (off) problems.push(`${off} live steps are drawn past the end of the track`);
+          // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
+          await live.waitForSelector('#live-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
+          const drawn = await live.locator('#live-graph circle').count();
+          if (drawn !== pair.pairs + 1) problems.push(`the graph after the live race shows ${drawn} dots, not ${pair.pairs} recorded + 1 live`);
+          const after = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
+          if (after.pairs !== pair.pairs || after.wins[pair.a] !== pair.wins[pair.a]) problems.push('a live result changed the recorded verdict');
           const ask = runner.asked;
           if (!(ask.a === pair.a && ask.b === pair.b && ask.task === pair.task.split('/').pop())) problems.push(`the page asked the runner for ${JSON.stringify(ask)}`);
         }

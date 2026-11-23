@@ -293,3 +293,23 @@ select.level.serious { border-color: var(--warn); background: var(--warn-soft); 
 .race.live { border-style: dashed; }
 .race.live h4 { margin: 0 0 4px; }
 .race-controls input { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); width: 11em; }
+
+/* ---- the graph behind a verdict ------------------------------------------------------------------------------ */
+figure.graph { margin: 16px 0 0; }
+figure.graph svg { display: block; width: 100%; height: auto; }
+figure.graph figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted); }
+.glink { stroke: var(--line); stroke-width: 1; }
+.glink.ring { stroke: var(--ink); stroke-width: 1.6; }
+.glink.live { stroke: var(--ink); stroke-width: 1.4; stroke-dasharray: 4 4; }
+.gnode { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.gnode.a { stroke: var(--side-a); stroke-width: 2.5; } .gnode.b { stroke: var(--side-b); stroke-width: 2.5; }
+.glabel { font: 600 13px var(--sans); fill: var(--ink); }
+.gdot.a { fill: var(--side-a); } .gdot.b { fill: var(--side-b); } .gdot.tie { fill: var(--muted); }
+.gdot.ring { stroke: var(--ink); stroke-width: 3; }
+.gdot.live { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 3 3; }
+@media (prefers-reduced-motion: no-preference) {
+  .glink.ring, .glink.live { stroke-dashoffset: 400; stroke-dasharray: 400; animation: gdraw 0.9s ease-out forwards; }
+  .glink.live { animation-name: gdraw-live; }
+}
+@keyframes gdraw { to { stroke-dashoffset: 0; } }
+@keyframes gdraw-live { to { stroke-dashoffset: 0; stroke-dasharray: 4 4; } }

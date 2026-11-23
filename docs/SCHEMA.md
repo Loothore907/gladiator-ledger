@@ -112,6 +112,12 @@ every kind and judges none.
 `uv run ledger ask fault_profile --param test_id=gladiator/incident-triage` lists, per model,
 each fault it could show and in how many attempts it showed it.
 
+## Live results (browser session only)
+When the page runs a live race, the result joins the in-browser graph as its own kind of node, so it can be drawn
+beside the recorded matches and never counted with them: `(LiveMatch {run_id, winner, seal})-[:RAN_ON]->(TestVersion)`
+and `-[:PLAYED_BY]->(Model)`. No question that answers a verdict matches `LiveMatch`. It is not in the shipped
+store; a live record becomes evidence only if it is imported like any other (`ledger import`).
+
 ## Fit for the task (`ledger/policy.py`)
 Whether a model is fit for a task is read from the graph by `task_attempts` and `task_faults` (every attempt the
 model made on the test version under the same suite's settings) and judged by a policy: each fault has a level
