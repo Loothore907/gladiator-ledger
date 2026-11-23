@@ -17,8 +17,12 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   idea dates from October 2026, its first code was committed on 2026-11-18 (owner, 2026-11-22; never write that
   Gladiator code predates the contest, which opened Nov 11), and the engine Ledger's data uses was built Nov 20-22. Never copy Gladiator code into Ledger without marking it as reused in the file header and in the
   disclosure statement. `ledger/scoring.py` is the one copied file so far.
-- **Ledger reads Gladiator's output; it never runs matches.** Matches and their budgets live in the Gladiator repo
-  (`CLAUDE.md` there). Ledger itself costs nothing to run, and judges need no API keys.
+- **Ledger reads Gladiator's output and never runs a match itself.** It may *request* one from a Gladiator runner
+  (owner, 2026-11-23, for the live demo): the runner is Gladiator's, holds the keys and enforces the caps; Ledger
+  shows the race and files the sealed record it gets back. Live runs are open to the hackathon judges only for now
+  (by access code) and the public page says so ("coming soon" for everyone else). A live result is labelled live
+  and kept apart from the recorded evidence that public verdicts rest on. Budgets live in the operations repo
+  (`CLAUDE.md` there). The public page still costs nothing to use and needs no API keys.
 - **Private halves (owner, 2026-11-22):** a match's `operator.json` (the answer key of its generated worlds) is
   published beside its record once the match is over, so anyone can re-grade it. Only for tests that generate a
   fresh world per attempt (`instances: generator`), only through `ledger import` (which checks it against the
