@@ -69,21 +69,31 @@ function same(expected, actual, where) {
 
 // A stand-in race runner speaking the real one's protocol (gladiator-core engine/serve.py): /options, and /race
 // as an event stream that ends with a sealed record. It lets the check drive a live race with no keys or spending.
-function fakeRunner(models) {
+function fakeRunner(models, extra) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' };
+  const json = (res, status, value) => res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }).end(JSON.stringify(value));
+  let races = 3;
   const server = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
     if (req.url === '/options') {
       const tasks = ['refund-queue', 'access-review', 'incident-triage', 'inventory-transfer'].map((id) => ({ id, name: id, levels: ['easy', 'standard'] }));
-      return res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }).end(JSON.stringify({ tasks, models, profiles: ['balanced', 'budget', 'latency'], needs_code: true }));
+      const budgets = [{ provider: 'openrouter', limit_usd: 30, left_usd: 30 - (3 - races) * 0.0055 }, { provider: 'google', limit_usd: 20, left_usd: 0.1 }];
+      return json(res, 200, { tasks, models: [...models, extra], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true });
     }
-    if (req.url !== '/race' || req.method !== 'POST') return res.writeHead(404, cors).end();
+    if (!['/race', '/signin'].includes(req.url) || req.method !== 'POST') return res.writeHead(404, cors).end();
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
       const ask = JSON.parse(body);
+      // an invite is exchanged once for a session; after that only the session is sent
+      if (req.url === '/signin') {
+        server.signins = (server.signins || []).concat([ask]);
+        if (ask.invite === 'judge-invite' || ask.token === 'session-1') return json(res, 200, { token: 'session-1', expires_unix: 0, races_left: races });
+        return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
+      }
       server.asked = ask;
-      if (ask.code !== 'judge-1') return res.writeHead(403, { ...cors, 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'That access code is not valid.' }));
+      if (ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
+      races -= 1;
       res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
       const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
       const step = (side, turn, tool_name, tool_args, elapsed_s, error = null) =>
@@ -346,57 +356,93 @@ async function main() {
     // With no runner the page says live races are not open, and offers nothing to press.
     // With one (here the stand-in), a race streams into two lanes and ends with a comparison to the record.
     const pair = expected.judged.find((j) => j.verdict.better && !j.overrides).verdict;
-    const runner = await fakeRunner([pair.a, pair.b]);
+    const NEWCOMER = 'openrouter:example/never-raced';
+    const runner = await fakeRunner([pair.a, pair.b], NEWCOMER);
     const runnerUrl = `http://127.0.0.1:${runner.address().port}`;
     try {
-      for (const withRunner of [false, true]) {
-        const live = await browser.newPage();
-        live.on('pageerror', (e) => problems.push(`live page error: ${e.message}`));
-        await live.goto(`${origin}${BASE}${withRunner ? `?runner=${encodeURIComponent(runnerUrl)}` : ''}`);
+      const pickPair = async (live) => {
         await live.evaluate(() => window.ledgerDemo.ready());
         await live.locator('#flow-cards button', { hasText: pair.task.includes('refund') ? 'Refund' : pair.task.includes('incident') ? 'Incident' : pair.task.includes('access') ? 'Access' : 'Inventory' }).first().click();
         await live.locator(`#first-list input[value="${pair.a}"]`).check();
         await live.locator(`#second-list input[value="${pair.b}"]`).check();
         await live.waitForSelector('#live h4');
-        if (!withRunner) {
-          await live.waitForSelector('#live-soon', { timeout: 5000 }).catch(() => problems.push('with no runner, the page does not say live races are not open yet'));
-          if (await live.locator('#live-go').count()) problems.push('with no runner, the page still offers a live race');
-        } else {
-          await live.waitForSelector('#live-go', { timeout: 5000 });
-          if (!(await live.locator('#live-prior').innerText()).includes('the record')) problems.push('the live panel does not state what the record expects');
-          await live.locator('#live-go').click(); // no access code yet
-          await live.waitForFunction(() => document.getElementById('live-result').innerText.includes('access code'), null, { timeout: 5000 }).catch(() => problems.push('a refused live race does not show the runner\'s reason'));
-          await live.fill('#live-code', 'judge-1');
-          await live.locator('#live-go').click();
-          await live.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('the live race never reported a result'));
-          const said = await live.locator('#live-result').innerText();
-          const want = pair.better === pair.a ? 'in line with the record' : 'against the record';
-          if (!said.includes(want)) problems.push(`the live result should read "${want}": ${JSON.stringify(said)}`);
-          if (!said.includes('live-check-1')) problems.push('the live result does not name its sealed record');
-          // the live race offers its own report: this scenario, both costs, its sealed record, and that it is live
-          const liveText = await live.evaluate(() => window.ledgerDemo.lastLiveReport || '');
-          if (!(await live.locator('#download-live').count())) problems.push('the live result offers no report to download');
-          for (const part of ['# Live race report', 'live-check-1', '$0.0021', '$0.0034', 'This race cost $0.0055', 'kept apart from the recorded matches']) {
-            if (!liveText.includes(part)) problems.push(`the live race report lacks ${JSON.stringify(part)}`);
-          }
-          const ticks = await live.locator('#live-stage .tick').count();
-          if (ticks !== 6) problems.push(`the live lanes show ${ticks} of the 6 streamed steps`);
-          if ((await live.locator('#live-stage .outcome:not([hidden])').count()) !== 2) problems.push('the live lanes do not both show a grade');
-          if (!(await live.locator('#live-stage .tick.timeout').count())) problems.push('the timed-out step is not marked');
-          if (!(await live.locator('#live-stage .tick.again').count())) problems.push('acting on the same item again is not marked');
-          const off = await live.locator('#live-stage .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
-          if (off) problems.push(`${off} live steps are drawn past the end of the track`);
-          // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
-          await live.waitForSelector('#live-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
-          const drawn = await live.locator('#live-graph circle').count();
-          if (drawn !== pair.pairs + 1) problems.push(`the graph after the live race shows ${drawn} dots, not ${pair.pairs} recorded + 1 live`);
-          const after = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
-          if (after.pairs !== pair.pairs || after.wins[pair.a] !== pair.wins[pair.a]) problems.push('a live result changed the recorded verdict');
-          const ask = runner.asked;
-          if (!(ask.a === pair.a && ask.b === pair.b && ask.task === pair.task.split('/').pop())) problems.push(`the page asked the runner for ${JSON.stringify(ask)}`);
-        }
+      };
+      // Nobody is offered a live race without a runner, or with one but no invitation: nothing to press or type.
+      for (const query of ['', `?runner=${encodeURIComponent(runnerUrl)}`]) {
+        const live = await browser.newPage();
+        live.on('pageerror', (e) => problems.push(`live page error: ${e.message}`));
+        await live.goto(`${origin}${BASE}${query}`);
+        await pickPair(live);
+        const who = query ? 'with a runner but no invitation' : 'with no runner';
+        await live.waitForSelector('#live-soon', { timeout: 5000 }).catch(() => problems.push(`${who}, the page does not say live races are not open yet`));
+        if (await live.locator('#live-go, #live input').count()) problems.push(`${who}, the page still offers a live race or asks for a code`);
         await live.close();
       }
+      if ((runner.signins || []).length) problems.push('a visitor with no invitation was sent to the runner to sign in');
+
+      // With an invitation link: signed in once, the invite leaves the address, and a race needs nothing typed.
+      const context = await browser.newContext();
+      const live = await context.newPage();
+      live.on('pageerror', (e) => problems.push(`live page error: ${e.message}`));
+      await live.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}&invite=judge-invite`);
+      await pickPair(live);
+      await live.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('an invitation link did not open live races'));
+      if (live.url().includes('judge-invite')) problems.push('the invite is still in the address bar after signing in');
+      if (await live.locator('#live input').count()) problems.push('a signed-in visitor is still asked to type something');
+      if (!(await live.locator('#live-prior').innerText()).includes('the record')) problems.push('the live panel does not state what the record expects');
+      const budget = await live.locator('#live-budget').innerText();
+      for (const part of ['OpenRouter $30.00 of $30.00', 'Google $0.10 of $20.00', '3 live races left', 'Gemini']) {
+        if (!budget.includes(part)) problems.push(`the live budget line lacks ${JSON.stringify(part)}: ${JSON.stringify(budget)}`);
+      }
+      await live.locator('#live-go').click();
+      await live.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('the live race never reported a result'));
+      const said = await live.locator('#live-result').innerText();
+      const want = pair.better === pair.a ? 'in line with the record' : 'against the record';
+      if (!said.includes(want)) problems.push(`the live result should read "${want}": ${JSON.stringify(said)}`);
+      if (!said.includes('live-check-1')) problems.push('the live result does not name its sealed record');
+      // the live race offers its own report: this scenario, both costs, its sealed record, and that it is live
+      const liveText = await live.evaluate(() => window.ledgerDemo.lastLiveReport || '');
+      if (!(await live.locator('#download-live').count())) problems.push('the live result offers no report to download');
+      for (const part of ['# Live race report', 'live-check-1', '$0.0021', '$0.0034', 'This race cost $0.0055', 'kept apart from the recorded matches']) {
+        if (!liveText.includes(part)) problems.push(`the live race report lacks ${JSON.stringify(part)}`);
+      }
+      const ticks = await live.locator('#live-stage .tick').count();
+      if (ticks !== 6) problems.push(`the live lanes show ${ticks} of the 6 streamed steps`);
+      if ((await live.locator('#live-stage .outcome:not([hidden])').count()) !== 2) problems.push('the live lanes do not both show a grade');
+      if (!(await live.locator('#live-stage .tick.timeout').count())) problems.push('the timed-out step is not marked');
+      if (!(await live.locator('#live-stage .tick.again').count())) problems.push('acting on the same item again is not marked');
+      const off = await live.locator('#live-stage .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
+      if (off) problems.push(`${off} live steps are drawn past the end of the track`);
+      // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
+      await live.waitForSelector('#live-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
+      const drawn = await live.locator('#live-graph circle').count();
+      if (drawn !== pair.pairs + 1) problems.push(`the graph after the live race shows ${drawn} dots, not ${pair.pairs} recorded + 1 live`);
+      const after = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
+      if (after.pairs !== pair.pairs || after.wins[pair.a] !== pair.wins[pair.a]) problems.push('a live result changed the recorded verdict');
+      const ask = runner.asked;
+      if (!(ask.a === pair.a && ask.b === pair.b && ask.task === pair.task.split('/').pop())) problems.push(`the page asked the runner for ${JSON.stringify(ask)}`);
+      if (ask.token !== 'session-1' || 'code' in ask || 'invite' in ask) problems.push(`a race must carry the session and nothing else secret: ${JSON.stringify(Object.keys(ask))}`);
+      // the money and the races left are read again after a race
+      await live.waitForFunction(() => document.getElementById('live-budget').innerText.includes('2 live races left'), null, { timeout: 5000 }).catch(() => problems.push('the budget line was not refreshed after the race'));
+      if (!(await live.locator('#live-budget').innerText()).includes('OpenRouter $29.99 of $30.00')) problems.push('the provider budget was not refreshed after the race');
+
+      // Any two models on the runner's list can be raced. With no record between them the page says so, both ways.
+      await live.locator('#live-b').selectOption(NEWCOMER);
+      await live.waitForFunction(() => document.getElementById('live-prior').innerText.includes('never met'), null, { timeout: 5000 }).catch(() => problems.push('a pair with no record is not described as one'));
+      await live.locator('#live-go').click();
+      await live.waitForFunction(() => document.getElementById('live-result').innerText.includes('the first these two have played'), null, { timeout: 10000 }).catch(() => problems.push('a first race between two models is not described as the first evidence'));
+      if (runner.asked.b !== NEWCOMER) problems.push('the page did not race the model that was picked');
+      if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
+      await live.locator('#live-a').selectOption(NEWCOMER);
+      if (!(await live.locator('#live-go').isDisabled())) problems.push('the same model can be raced against itself');
+      await live.close();
+
+      // The sign-in is kept: the same browser comes back with no invite in the link and can still race.
+      const back = await context.newPage();
+      await back.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+      await pickPair(back);
+      await back.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('the sign-in was not kept for the next visit'));
+      await context.close();
     } finally {
       runner.close();
     }

@@ -786,6 +786,57 @@ async function readEvents(response, onMessage) {
   }
 }
 
+// Signing in for live races. An invitation link (?invite=...) is exchanged once with the runner for a session,
+// which this browser keeps, so nothing is typed and the invite leaves the address bar. A runner on your own
+// machine needs no sign-in. Returns { token, races_left } or null (not signed in: no button is shown at all).
+const SESSION_KEY = 'ledger-live-session';
+const stored = {
+  get() {
+    try {
+      return localStorage.getItem(SESSION_KEY);
+    } catch {
+      return null; // storage is blocked: the invitation link still works for this visit
+    }
+  },
+  set(token) {
+    try {
+      if (token) localStorage.setItem(SESSION_KEY, token);
+      else localStorage.removeItem(SESSION_KEY);
+    } catch {
+      /* nothing to keep it in */
+    }
+  },
+};
+let sessionPromise;
+function signIn(runner, again = false) {
+  if (again) sessionPromise = null;
+  sessionPromise ||= (async () => {
+    if (!runner.options.needs_code) return { token: null, races_left: null };
+    const post = async (ask) => {
+      const response = await fetch(`${runner.base}/signin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ask) });
+      return response.ok ? response.json() : null;
+    };
+    const url = new URL(location.href);
+    const invite = url.searchParams.get('invite');
+    let session = null;
+    try {
+      if (invite) {
+        session = await post({ invite });
+        url.searchParams.delete('invite');
+        history.replaceState(null, '', url); // the invite is spent: do not leave it in the address bar or history
+      }
+      if (!session && stored.get()) session = await post({ token: stored.get() });
+    } catch {
+      return null; // the runner did not answer
+    }
+    stored.set(session ? session.token : null);
+    return session;
+  })();
+  return sessionPromise;
+}
+
+const providerName = (id) => ({ openrouter: 'OpenRouter', anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google' })[id] || id;
+
 // The live panel under the arena: what the record expects, then a fresh scenario raced now, then how it compares.
 async function drawLive(v) {
   const box = $('live');
@@ -793,39 +844,85 @@ async function drawLive(v) {
   const runner = await findRunner();
   if ($('live') !== box) return; // the verdict was redrawn while we looked
   const title = el('h4', null, 'Race them live on a fresh scenario');
+  const soon = 'Live races are open to the hackathon judges for now, by invitation link, and coming soon for everyone. Every scenario above is a real recorded race you can replay.';
   if (!runner) {
-    box.replaceChildren(title, el('p', { class: 'note', id: 'live-soon' }, 'Live races are open to the hackathon judges for now, and coming soon for everyone. Every scenario above is a real recorded race you can replay.'));
+    box.replaceChildren(title, el('p', { class: 'note', id: 'live-soon' }, soon));
     return;
   }
   if (!runner.options) {
     box.replaceChildren(title, el('p', { class: 'note' }, `The race runner at ${runner.base} is not answering. Recorded races still play.`));
     return;
   }
-  const { a, b } = v;
-  const task = spec_task(v.task);
-  const offered = runner.options.tasks.find((t) => t.id === task);
-  const missing = [a, b].filter((m) => !runner.options.models.includes(m));
-  if (!offered || missing.length) {
-    box.replaceChildren(
-      title,
-      el('p', { class: 'note' }, !offered ? 'This runner does not offer this task.' : `Live races use a short list of small, cheap models, and ${missing.map(shortName).join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on it.`),
-    );
+  const session = await signIn(runner);
+  if ($('live') !== box) return;
+  if (!session) {
+    // not signed in: nothing to press and nothing to type
+    box.replaceChildren(title, el('p', { class: 'note', id: 'live-soon' }, soon));
     return;
   }
-  const prior =
-    v.verdict === 'better'
-      ? `On this tested workflow the record favours ${shortName(v.better)}: it won ${v.wins[v.better]} of their ${v.pairs} scenarios.`
-      : v.verdict === 'leaning'
-        ? `On this tested workflow the record leans to ${shortName(v.better)} (${v.wins[v.better]} of ${v.pairs}), not settled.`
-        : `On this tested workflow the record names no favourite between them (${v.wins[a]} to ${v.wins[b]} over ${plural(v.pairs, 'scenario')}).`;
+  const task = spec_task(v.task);
+  const offered = runner.options.tasks.find((t) => t.id === task);
+  const models = runner.options.models;
+  if (!offered || models.length < 2) {
+    box.replaceChildren(title, el('p', { class: 'note' }, !offered ? 'This runner does not offer this task.' : 'The live budgets are used up for now. Recorded races still play.'));
+    return;
+  }
+  // Any two models on the runner's list can be raced. The pair being looked at is the starting choice where it is on it.
+  const start = [models.includes(v.a) ? v.a : models[0]];
+  start.push(models.includes(v.b) && v.b !== start[0] ? v.b : models.find((m) => m !== start[0]));
+  const pick = (id, label, chosen) =>
+    el('select', { id, 'aria-label': label }, models.map((m) => el('option', { value: m, selected: m === chosen }, shortName(m))));
+  const pickA = pick('live-a', 'First model', start[0]);
+  const pickB = pick('live-b', 'Second model', start[1]);
   const level = el('select', { id: 'live-level', 'aria-label': 'Difficulty' }, offered.levels.map((x) => el('option', { value: x, selected: x === 'standard' }, `${x} difficulty`)));
   const profile = el('select', { id: 'live-profile', 'aria-label': 'What matters most' }, runner.options.profiles.map((x) => el('option', { value: x, selected: x === 'budget' }, `${x} scoring`)));
-  const code = runner.options.needs_code ? el('input', { id: 'live-code', type: 'password', placeholder: 'access code', 'aria-label': 'Access code', autocomplete: 'off' }) : null;
   const go = el('button', { type: 'button', id: 'live-go' }, 'Race them live');
+  const prior = el('p', { class: 'note', id: 'live-prior' });
+  const money = el('p', { class: 'note small', id: 'live-budget' });
   const stage = el('div', { id: 'live-stage' });
   const say = el('p', { class: 'finish', id: 'live-result', role: 'status', 'aria-live': 'polite' });
   const grown = el('div', { id: 'live-graph' });
+
+  // what is left to spend, by provider, and how many races this sign-in has left
+  const showBudget = (options, left) => {
+    const parts = (options.budgets || []).map((b) => `${providerName(b.provider)} $${fixed(b.left_usd, 2)} of $${fixed(b.limit_usd, 2)}`);
+    const out = (options.models_out || []).map(shortName);
+    money.replaceChildren(
+      parts.length ? `Live budget left: ${parts.join(' · ')}.` : '',
+      left === null || left === undefined ? '' : ` ${plural(left, 'live race')} left on this sign-in.`,
+      out.length ? ` Not on offer now (their provider's budget is used up): ${out.join(', ')}.` : '',
+    );
+  };
+  showBudget(runner.options, session.races_left);
+
+  // the record for whichever two are chosen: it may favour one, lean, name no favourite, or not exist at all
+  let recordFor = v;
+  const readRecord = async () => {
+    const [a, b] = [pickA.value, pickB.value];
+    go.disabled = a === b;
+    if (a === b) {
+      prior.textContent = 'Choose two different models.';
+      return;
+    }
+    recordFor = a === v.a && b === v.b ? v : await ledger.verdict(v.task, a, b, null, rules.good_enough, rules.min_pairs, state.profile, null);
+    const r = recordFor;
+    const text =
+      r.verdict === 'no data'
+        ? `${shortName(a)} and ${shortName(b)} have never met on this task in the record. This race would be the first evidence, and one race is not a verdict.`
+        : r.verdict === 'better'
+          ? `On this tested workflow the record favours ${shortName(r.better)}: it won ${r.wins[r.better]} of their ${r.pairs} scenarios.`
+          : r.verdict === 'leaning'
+            ? `On this tested workflow the record leans to ${shortName(r.better)} (${r.wins[r.better]} of ${r.pairs}), not settled.`
+            : `On this tested workflow the record names no favourite between them (${r.wins[a]} to ${r.wins[b]} over ${plural(r.pairs, 'scenario')}).`;
+    prior.textContent = `${text} Now put that to the test: one new scenario, generated this minute, never seen by either model.`;
+  };
+  pickA.addEventListener('change', readRecord);
+  pickB.addEventListener('change', readRecord);
+  await readRecord();
+
   go.addEventListener('click', async () => {
+    const [a, b] = [pickA.value, pickB.value];
+    const r = recordFor;
     go.disabled = true;
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
@@ -834,7 +931,7 @@ async function drawLive(v) {
       const response = await fetch(`${runner.base}/race`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, a, b, difficulty: level.value, profile: profile.value, code: code ? code.value : '' }),
+        body: JSON.stringify({ task, a, b, difficulty: level.value, profile: profile.value, token: session.token || '' }),
       });
       if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
       let record = null;
@@ -849,35 +946,37 @@ async function drawLive(v) {
       const winner = { A: a, B: b }[record.body.verdict.winner] || null;
       const versus = !winner
         ? 'Live, this scenario had no winner.'
-        : !v.better
-          ? `Live, ${shortName(winner)} took this scenario. The record had no favourite, and one scenario does not make one.`
-          : winner === v.better
-            ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
-            : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${v.wins[v.better]} of ${v.pairs}, but it is now on file.`;
+        : r.verdict === 'no data'
+          ? `Live, ${shortName(winner)} took this scenario: the first these two have played on this task. One scenario is not a verdict.`
+          : !r.better
+            ? `Live, ${shortName(winner)} took this scenario. The record had no favourite, and one scenario does not make one.`
+            : winner === r.better
+              ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
+              : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${r.wins[r.better]} of ${r.pairs}, but it is now on file.`;
       say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. A live result is kept apart from the recorded evidence the verdict rests on.'));
-      const liveText = liveReport(record, a, b, task, v);
+      const liveText = liveReport(record, a, b, task, r);
       window.ledgerDemo.lastLiveReport = liveText;
       say.append(
         ' ',
         el('button', { type: 'button', id: 'download-live', class: 'quiet small', onclick: () => download(liveText, 'live-race-report.md') }, 'Download the live race report'),
       );
       // the result joins the graph, as its own kind of node, and the picture is drawn from the graph again
-      await ask(ADD_LIVE, { run: record.body.run_id, winner, seal: record.sha256, at: Date.now(), version: v.version, a, b });
-      grown.replaceChildren(await evidenceGraph(v));
+      await ask(ADD_LIVE, { run: record.body.run_id, winner, seal: record.sha256, at: Date.now(), version: r.version, a, b });
+      grown.replaceChildren(r.rounds ? await evidenceGraph(r) : '');
     } catch (error) {
       say.textContent = `The live race did not run: ${error.message}`;
     } finally {
       go.disabled = false;
+      // the budgets and this sign-in's races have moved: read them again
+      try {
+        const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
+        showBudget(options, renewed ? renewed.races_left : null);
+      } catch {
+        /* the next race will say what is wrong */
+      }
     }
   });
-  box.replaceChildren(
-    title,
-    el('p', { class: 'note', id: 'live-prior' }, prior, ' Now put that to the test: one new scenario, generated this minute, never seen by either model.'),
-    el('div', { class: 'race-controls' }, level, profile, code, go),
-    stage,
-    say,
-    grown,
-  );
+  box.replaceChildren(title, prior, el('div', { class: 'race-controls' }, pickA, el('span', { class: 'note' }, 'vs'), pickB, level, profile, go), money, stage, say, grown);
 }
 const spec_task = (test) => test.split('/').pop();
 
@@ -895,7 +994,9 @@ function liveReport(record, a, b, title, v) {
       'scenario does not make a verdict.**',
     '',
     `- Result: ${winner ? `\`${winner}\` took this scenario` : 'no winner'}.`,
-    `- On this tested workflow the record ${v.better ? `${v.verdict === 'better' ? 'favours' : 'leans to'} \`${v.better}\` (${v.wins[v.better]} of ${v.pairs} scenarios)` : `names no favourite (${v.wins[a]} to ${v.wins[b]})`}.`,
+    v.verdict === 'no data'
+      ? '- The record holds no match between these two on this task: this is the first evidence.'
+      : `- On this tested workflow the record ${v.better ? `${v.verdict === 'better' ? 'favours' : 'leans to'} \`${v.better}\` (${v.wins[v.better]} of ${v.pairs} scenarios)` : `names no favourite (${v.wins[a]} to ${v.wins[b]})`}.`,
     `- Sealed record \`${body.run_id}\`, seal \`${str(record.sha256).slice(0, 16)}\`${body.engine_commit ? `, engine commit \`${str(body.engine_commit).slice(0, 7)}\`` : ''}.`,
     '',
     '## What each model did and what it cost',
