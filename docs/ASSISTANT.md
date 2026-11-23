@@ -56,9 +56,12 @@ Ask in plain words, for example:
 > I need a model for handling refund requests. I'm using Claude Haiku 5.5. What should I compare it with, and
 > which is better at this task? Then write me the spec.
 
-A good session finds the refund workflow, suggests opponents that are close on paper, gives a verdict with the pair
-counts ("MiniMax M3.1 Flash does this task better, 12 of 15 pairs"), and offers the spec. Ask the same about
-incident triage and it should say **leaning** Claude Haiku 5.5, not a settled result.
+A good session finds the refund workflow, suggests opponents that are close on paper, and asks whether this is
+for a business running it unattended or for you alone. It then leads with the answer to act on, for example "MiniMax
+did it better head to head, but only Claude Haiku 5.5 is fit for this task", with the counts behind it, and offers
+the spec. Ask the same about incident triage and it should say Haiku is the only one of the two that is fit, and
+that its lead is **not settled**. Tell it a fault is unforgivable for you ("it must never act before reading") and
+the answer should change.
 
 ## What the assistant can and cannot do
 - It can: find the closest tested workflow, list who has played it, suggest opponents, give a verdict, write the
