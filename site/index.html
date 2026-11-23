@@ -14,7 +14,8 @@
   <h1>Of these two models, which does <em>this</em> task better?</h1>
   <p class="lede">Ledger answers from head-to-head matches: two models play the same freshly generated worlds of a
     tool-using workflow, and each pair of attempts is judged. It makes a claim about one task, never a general
-    ranking, and it names no winner when the evidence is thin or level.</p>
+    ranking, and it names no winner when the evidence is thin or level. There is no leaderboard: for your own
+    flow, the record of the closest tested workflow is a starting point, and a match on your task is the evidence.</p>
   <p id="status" class="status" role="status" aria-live="polite">Building the graph in your browser…</p>
 </header>
 
@@ -26,7 +27,7 @@
       <label for="flow-text">Optional: describe what your agent has to do, to put the closest ones first</label>
       <div class="search-row">
         <input id="flow-text" type="text" placeholder="for example: decide refund requests for damaged orders" disabled>
-        <button type="submit" id="flow-go" disabled>Rank</button>
+        <button type="submit" id="flow-go" disabled>Find closest</button>
       </div>
     </form>
     <p class="note example-row">New here? <button type="button" id="example" class="quiet small" disabled>Show me an example</button> walks all three steps for the pair of models with the most evidence.</p>

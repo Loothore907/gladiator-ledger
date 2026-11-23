@@ -806,10 +806,10 @@ async function drawLive(v) {
   }
   const prior =
     v.verdict === 'better'
-      ? `The record favours ${shortName(v.better)}: it won ${v.wins[v.better]} of their ${v.pairs} scenarios.`
+      ? `On this tested workflow the record favours ${shortName(v.better)}: it won ${v.wins[v.better]} of their ${v.pairs} scenarios.`
       : v.verdict === 'leaning'
-        ? `The record leans to ${shortName(v.better)} (${v.wins[v.better]} of ${v.pairs}), not settled.`
-        : `The record names no favourite between them (${v.wins[a]} to ${v.wins[b]} over ${plural(v.pairs, 'scenario')}).`;
+        ? `On this tested workflow the record leans to ${shortName(v.better)} (${v.wins[v.better]} of ${v.pairs}), not settled.`
+        : `On this tested workflow the record names no favourite between them (${v.wins[a]} to ${v.wins[b]} over ${plural(v.pairs, 'scenario')}).`;
   const level = el('select', { id: 'live-level', 'aria-label': 'Difficulty' }, offered.levels.map((x) => el('option', { value: x, selected: x === 'standard' }, `${x} difficulty`)));
   const profile = el('select', { id: 'live-profile', 'aria-label': 'What matters most' }, runner.options.profiles.map((x) => el('option', { value: x, selected: x === 'budget' }, `${x} scoring`)));
   const code = runner.options.needs_code ? el('input', { id: 'live-code', type: 'password', placeholder: 'access code', 'aria-label': 'Access code', autocomplete: 'off' }) : null;

@@ -350,7 +350,7 @@ async function main() {
           if (await live.locator('#live-go').count()) problems.push('with no runner, the page still offers a live race');
         } else {
           await live.waitForSelector('#live-go', { timeout: 5000 });
-          if (!(await live.locator('#live-prior').innerText()).includes('The record')) problems.push('the live panel does not state what the record expects');
+          if (!(await live.locator('#live-prior').innerText()).includes('the record')) problems.push('the live panel does not state what the record expects');
           await live.locator('#live-go').click(); // no access code yet
           await live.waitForFunction(() => document.getElementById('live-result').innerText.includes('access code'), null, { timeout: 5000 }).catch(() => problems.push('a refused live race does not show the runner\'s reason'));
           await live.fill('#live-code', 'judge-1');
