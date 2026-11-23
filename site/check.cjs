@@ -67,6 +67,44 @@ function same(expected, actual, where) {
   for (const key of Object.keys(expected)) same(expected[key], actual[key], `${where}.${key}`);
 }
 
+// A stand-in race runner speaking the real one's protocol (gladiator-core engine/serve.py): /options, and /race
+// as an event stream that ends with a sealed record. It lets the check drive a live race with no keys or spending.
+function fakeRunner(models) {
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' };
+  const server = http.createServer((req, res) => {
+    if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
+    if (req.url === '/options') {
+      const tasks = ['refund-queue', 'access-review', 'incident-triage', 'inventory-transfer'].map((id) => ({ id, name: id, levels: ['easy', 'standard'] }));
+      return res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }).end(JSON.stringify({ tasks, models, profiles: ['balanced', 'budget', 'latency'], needs_code: true }));
+    }
+    if (req.url !== '/race' || req.method !== 'POST') return res.writeHead(404, cors).end();
+    let body = '';
+    req.on('data', (chunk) => (body += chunk));
+    req.on('end', () => {
+      const ask = JSON.parse(body);
+      server.asked = ask;
+      if (ask.code !== 'judge-1') return res.writeHead(403, { ...cors, 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'That access code is not valid.' }));
+      res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
+      const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
+      const step = (side, turn, tool_name, tool_args, elapsed_s, error = null) =>
+        send('step', { side, turn, tool_name, tool_args, error, call_s: 1, cost_usd: 0.001, tokens: 500, elapsed_s });
+      send('match_start', { models: { A: ask.a, B: ask.b } });
+      step('A', 0, 'list_alerts', { page: 1 }, 1);
+      res.write(': still running\n\n');
+      step('B', 0, 'list_alerts', { page: 1 }, 2);
+      step('A', 1, 'close_alert', { alert_id: 'ALR-1' }, 3, 'timeout');
+      step('A', 2, 'check_page', { alert_id: 'ALR-1' }, 4);
+      step('A', 3, 'close_alert', { alert_id: 'ALR-1' }, 50); // long enough to stretch the time scale
+      step('B', 1, 'escalate_alert', { alert_id: 'ALR-1' }, 5);
+      send('attempt_end', { side: 'A', passed: true, termination: 'session_ended', grade_details: { items: 1, correct: 1 } });
+      send('attempt_end', { side: 'B', passed: false, termination: 'no_action', grade_details: { items: 1, correct: 0, wrong: 1 } });
+      send('record', { record: { sha256: 'abcdef0123456789', body: { run_id: 'live-check-1', live: true, verdict: { winner: 'A' } } }, operator: {} });
+      res.end();
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
 async function main() {
   const expected = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'expected.json'), 'utf8'));
   for (const part of ['verdicts', 'specs', 'judged', 'judged_specs', 'flows', 'opponents']) {
@@ -287,6 +325,52 @@ async function main() {
       }
     }
     await page.close();
+
+    // With no runner the page says live races are not open, and offers nothing to press.
+    // With one (here the stand-in), a race streams into two lanes and ends with a comparison to the record.
+    const pair = expected.judged.find((j) => j.verdict.better && !j.overrides).verdict;
+    const runner = await fakeRunner([pair.a, pair.b]);
+    const runnerUrl = `http://127.0.0.1:${runner.address().port}`;
+    try {
+      for (const withRunner of [false, true]) {
+        const live = await browser.newPage();
+        live.on('pageerror', (e) => problems.push(`live page error: ${e.message}`));
+        await live.goto(`${origin}${BASE}${withRunner ? `?runner=${encodeURIComponent(runnerUrl)}` : ''}`);
+        await live.evaluate(() => window.ledgerDemo.ready());
+        await live.locator('#flow-cards button', { hasText: pair.task.includes('refund') ? 'Refund' : pair.task.includes('incident') ? 'Incident' : pair.task.includes('access') ? 'Access' : 'Inventory' }).first().click();
+        await live.locator(`#first-list input[value="${pair.a}"]`).check();
+        await live.locator(`#second-list input[value="${pair.b}"]`).check();
+        await live.waitForSelector('#live h4');
+        if (!withRunner) {
+          await live.waitForSelector('#live-soon', { timeout: 5000 }).catch(() => problems.push('with no runner, the page does not say live races are not open yet'));
+          if (await live.locator('#live-go').count()) problems.push('with no runner, the page still offers a live race');
+        } else {
+          await live.waitForSelector('#live-go', { timeout: 5000 });
+          if (!(await live.locator('#live-prior').innerText()).includes('The record')) problems.push('the live panel does not state what the record expects');
+          await live.locator('#live-go').click(); // no access code yet
+          await live.waitForFunction(() => document.getElementById('live-result').innerText.includes('access code'), null, { timeout: 5000 }).catch(() => problems.push('a refused live race does not show the runner\'s reason'));
+          await live.fill('#live-code', 'judge-1');
+          await live.locator('#live-go').click();
+          await live.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('the live race never reported a result'));
+          const said = await live.locator('#live-result').innerText();
+          const want = pair.better === pair.a ? 'in line with the record' : 'against the record';
+          if (!said.includes(want)) problems.push(`the live result should read "${want}": ${JSON.stringify(said)}`);
+          if (!said.includes('live-check-1')) problems.push('the live result does not name its sealed record');
+          const ticks = await live.locator('#live-stage .tick').count();
+          if (ticks !== 6) problems.push(`the live lanes show ${ticks} of the 6 streamed steps`);
+          if ((await live.locator('#live-stage .outcome:not([hidden])').count()) !== 2) problems.push('the live lanes do not both show a grade');
+          if (!(await live.locator('#live-stage .tick.timeout').count())) problems.push('the timed-out step is not marked');
+          if (!(await live.locator('#live-stage .tick.again').count())) problems.push('acting on the same item again is not marked');
+          const off = await live.locator('#live-stage .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
+          if (off) problems.push(`${off} live steps are drawn past the end of the track`);
+          const ask = runner.asked;
+          if (!(ask.a === pair.a && ask.b === pair.b && ask.task === pair.task.split('/').pop())) problems.push(`the page asked the runner for ${JSON.stringify(ask)}`);
+        }
+        await live.close();
+      }
+    } finally {
+      runner.close();
+    }
     return { stats, requests, clicked };
   } finally {
     await browser.close();

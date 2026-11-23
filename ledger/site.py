@@ -70,6 +70,9 @@ def export(data: Path, store: str, out: Path) -> dict:
                 "guardrails": spec.GUARDRAILS,
                 "unforgivable": spec.UNFORGIVABLE,
                 "reads": list(spec.READS),
+                # grader counter -> fault name, so the page can name the faults of a live race the same way
+                "fault_counters": {**gladiator.HAZARDS, **gladiator.DECISION_FAULTS},
+                "ending_faults": gladiator.ENDING_FAULTS,
                 "policy": {
                     "levels": list(policy.LEVELS),
                     "profiles": policy.PROFILES,
