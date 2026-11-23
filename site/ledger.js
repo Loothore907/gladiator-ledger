@@ -314,7 +314,14 @@ export function createLedger(ask, questions, rules) {
       out.profile = profile;
       out.fit = { [a]: everyone[a], [b]: everyone[b] };
       [out.outcome, out.headline, out.use] = outcome({ a, b, better, verdict: kind }, out.fit);
-      out.rounds = pairs.map((p) => ({ winner: p.winner, rule: p.rule, a_passed: p.a_passed, b_passed: p.b_passed }));
+      out.rounds = pairs.map((p) => ({
+        winner: p.winner,
+        rule: p.rule,
+        a_passed: p.a_passed,
+        b_passed: p.b_passed,
+        run: p.run,
+        match: p.match,
+      }));
       out.fit_on_task = Object.entries(everyone)
         .filter(([, f]) => f.fit)
         .map(([model, f]) => ({ model, pass_rate: f.pass_rate, attempts: f.attempts, cost_per_attempt: f.cost_per_attempt }));

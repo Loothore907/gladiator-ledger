@@ -426,6 +426,178 @@ function tapeRow(left, label, small, right, extra = null) {
   );
 }
 
+// ---- the race: one recorded scenario, replayed step by step ---------------------------------------------------
+
+const replays = new Map(); // run id -> its replay file, fetched once
+let raceTimer = 0;
+const SPEEDS = [
+  ['8', '8× speed'],
+  ['2', '2× speed'],
+  ['1', 'true speed'],
+];
+const stepWords = (tool, item) => `${tool ? tool.replaceAll('_', ' ') : 'answered without acting'}${item ? ` ${item}` : ''}`;
+const STATE_WORDS = ['', ': timed out, outcome unknown', ': refused'];
+
+async function replayOf(run) {
+  if (!replays.has(run)) {
+    const response = await fetch(new URL(`./data/replays/${run}.json`, import.meta.url));
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    replays.set(run, await response.json());
+  }
+  return replays.get(run);
+}
+
+// One lane of the race: the track with a mark per step, what the model is doing now, and four running gauges
+// (the parts of the efficiency score). Returns how to draw it at a given second.
+function raceLane(id, cls, line, tools, span) {
+  const track = el('div', { class: 'track' });
+  const marks = line.steps.map(([at, tool, item, kind, state, mark]) => {
+    const what = mark === 'wrong' ? 'wrong' : state === 1 ? 'timeout' : state === 2 ? 'refused' : mark === 'repeat' ? 'again' : kind;
+    const said = `${fixed(at, 1)}s: ${stepWords(tools[tool], item)}${STATE_WORDS[state]}${mark === 'wrong' ? ': the wrong decision' : mark === 'repeat' ? ' (again)' : ''}`;
+    return track.appendChild(el('span', { class: `tick ${what}`, style: `left:${(100 * at) / span}%`, title: said, hidden: true }));
+  });
+  const now = el('p', { class: 'now' }, 'Waiting to start.');
+  const gauge = (label) => {
+    const value = el('b', null, '0');
+    return [el('span', { class: 'gauge' }, value, ` ${label}`), value];
+  };
+  const [gSteps, vSteps] = gauge('steps');
+  const [gTime, vTime] = gauge('seconds');
+  const [gCost, vCost] = gauge('spent');
+  const [gTokens, vTokens] = gauge('tokens');
+  const result = el('p', { class: 'outcome', hidden: true });
+  const faults = Object.entries(line.faults);
+  result.append(
+    el('strong', { class: line.passed ? 'pass' : 'fail' }, line.passed ? 'Passed' : 'Did not pass'),
+    line.items ? ` · ${line.correct} of ${line.items} items right` : '',
+    faults.length ? ` · ${faults.map(([name, n]) => `${name}${n > 1 ? ` ×${n}` : ''}`).join(', ')}` : ' · no faults',
+  );
+  const node = el(
+    'div',
+    { class: `lane ${cls}` },
+    el('div', { class: 'lane-head' }, el('span', { class: 'name' }, shortName(id)), el('span', { class: 'gauges' }, gSteps, gTime, gCost, gTokens)),
+    track,
+    now,
+    result,
+  );
+  let shown = 0;
+  const draw = (clock) => {
+    while (shown < line.steps.length && line.steps[shown][0] <= clock) {
+      marks[shown].hidden = false;
+      shown += 1;
+    }
+    if (clock < (line.steps[0] || [0])[0]) for (let i = 0; i < shown; i += 1) marks[i].hidden = true;
+    const done = clock >= line.seconds;
+    const seen = line.steps.slice(0, shown);
+    vSteps.textContent = String(shown);
+    vTime.textContent = fixed(Math.min(clock, line.seconds), 0);
+    vCost.textContent = `$${fixed(done ? line.cost_usd : seen.reduce((sum, x) => sum + x[6], 0), 4)}`;
+    vTokens.textContent = seen.reduce((sum, x) => sum + x[7], 0).toLocaleString('en-US');
+    const last = seen.at(-1);
+    now.textContent = done ? 'Finished.' : last ? `${stepWords(tools[last[1]], last[2])}${STATE_WORDS[last[4]]}` : 'Waiting to start.';
+    result.hidden = !done;
+    return done;
+  };
+  const reset = () => {
+    shown = 0;
+    for (const m of marks) m.hidden = true;
+  };
+  return { node, draw, reset };
+}
+
+// Replays scenario `index` of this verdict's pairs: both models on the same world, at the pace they really ran.
+async function openRace(v, index) {
+  cancelAnimationFrame(raceTimer);
+  const box = $('race');
+  const round = v.rounds[index];
+  box.hidden = false;
+  box.replaceChildren(el('p', { class: 'note center' }, 'Loading the recorded match…'));
+  let file;
+  try {
+    file = await replayOf(round.run);
+  } catch (error) {
+    box.replaceChildren(el('p', { class: 'note center' }, `This scenario's replay could not be loaded (${error.message}).`));
+    return;
+  }
+  const match = file.matches[round.match];
+  const { a, b } = v;
+  const span = Math.max(match[a].seconds, match[b].seconds, 1);
+  const lanes = [raceLane(a, 'a', match[a], file.tools, span), raceLane(b, 'b', match[b], file.tools, span)];
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let speed = Number(SPEEDS[0][0]);
+  let clock = 0;
+  let playing = false;
+  let before = 0;
+  const how = { both: 'both passed, and its run was cheaper and faster', sole: 'it was the only one to pass', neither: round.rule === 'progress' ? 'neither passed, and it got further' : 'neither passed, and its run cost less' }[
+    round.a_passed && round.b_passed ? 'both' : round.a_passed || round.b_passed ? 'sole' : 'neither'
+  ];
+  const finish = el('p', { class: 'finish', id: 'race-finish', hidden: true }, round.winner === 'tie' ? 'This scenario was a tie.' : `${shortName(round.winner)} took this scenario: ${how}.`);
+  const play = el('button', { type: 'button', id: 'race-play' }, 'Play');
+  const paint = () => {
+    const done = lanes.map((lane) => lane.draw(clock)).every(Boolean);
+    finish.hidden = !done;
+    if (done) playing = false;
+    play.textContent = playing ? 'Pause' : done ? 'Play again' : 'Play';
+    return done;
+  };
+  const tick = (time) => {
+    if (!playing) return;
+    clock += ((time - before) / 1000) * speed;
+    before = time;
+    if (!paint()) raceTimer = requestAnimationFrame(tick);
+  };
+  const start = () => {
+    if (clock >= span) {
+      clock = 0;
+      for (const lane of lanes) lane.reset();
+    }
+    playing = true;
+    before = performance.now();
+    raceTimer = requestAnimationFrame(tick);
+    paint();
+  };
+  play.addEventListener('click', () => {
+    if (playing) {
+      playing = false;
+      cancelAnimationFrame(raceTimer);
+      paint();
+    } else start();
+  });
+  const end = el('button', { type: 'button', class: 'quiet', id: 'race-end', onclick: () => { playing = false; cancelAnimationFrame(raceTimer); clock = span; paint(); } }, 'Skip to the end');
+  const pace = el(
+    'select',
+    { id: 'race-speed', 'aria-label': 'Replay speed', onchange: (event) => { speed = Number(event.target.value); } },
+    SPEEDS.map(([value, label]) => el('option', { value }, label)),
+  );
+  box.replaceChildren(
+    el('h4', null, `Scenario ${index + 1}: replay of a recorded match`),
+    el(
+      'p',
+      { class: 'note' },
+      `Both models got the same generated world. Each mark is one step, placed when it really happened (${fixed(span, 0)} seconds for the slower one). `,
+      'Nothing here is re-run: it is the sealed record ', el('code', null, round.run), ', played back.',
+    ),
+    el('div', { class: 'race-controls' }, play, end, pace),
+    ...lanes.map((lane) => lane.node),
+    el(
+      'p',
+      { class: 'legend left' },
+      el('span', { class: 'tick read' }), 'looks something up',
+      el('span', { class: 'tick act' }), 'acts',
+      el('span', { class: 'tick check' }), 'checks an outcome',
+      el('span', { class: 'tick timeout' }), 'the world timed out',
+      el('span', { class: 'tick again' }), 'acts on the same item again',
+      el('span', { class: 'tick wrong' }), 'a wrong decision',
+    ),
+    finish,
+  );
+  if (still) {
+    clock = span;
+    paint();
+  } else start();
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 // The result as a fight card: the two models, the arena, the comparison row by row, where each one slipped
 // (with the visitor's own say on how serious each fault is), then one verdict, then how to check it.
 function fightCard(spec, v) {
@@ -505,7 +677,11 @@ function fightCard(spec, v) {
           neither: r.rule === 'progress' ? 'neither passed; the one that got further won' : 'neither passed; the cheaper, faster run won',
         }[what];
         const label = who === 'tie' ? `Scenario ${i + 1}: a tie` : `Scenario ${i + 1}: won by ${shortName(r.winner)} (${how})`;
-        return el('li', { class: `round ${who} ${what}`, title: label, 'aria-label': label }, String(i + 1));
+        return el(
+          'li',
+          null,
+          el('button', { type: 'button', class: `round ${who} ${what}`, title: `${label}. Watch it.`, 'aria-label': `${label}. Watch the replay.`, onclick: () => openRace(v, i) }, String(i + 1)),
+        );
       }),
     ),
     el(
@@ -517,6 +693,8 @@ function fightCard(spec, v) {
       tally.sole ? [el('span', { class: 'key sole' }), `only the winner passed (${tally.sole})`] : null,
       tally.neither ? [el('span', { class: 'key neither' }), `neither passed, the one that got further or spent less won (${tally.neither})`] : null,
     ),
+    el('p', { class: 'note center' }, 'Pick a scenario to watch both models work it, step by step.'),
+    el('div', { id: 'race', class: 'race', hidden: true }),
   ];
 
   const num = (text, cls = '') => el('span', { class: `fig ${cls}` }, text);

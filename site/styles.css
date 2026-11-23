@@ -207,7 +207,9 @@ ul.plain li { margin-bottom: 3px; }
 .fighter .id { font: 12.5px var(--mono); color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
 .vs { display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--muted); }
 .rounds { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 0; margin: 12px 0 8px; }
-.round { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; }
+.rounds li { display: contents; }
+.round { width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+.round:hover, .round:focus-visible { transform: translateY(-2px); box-shadow: 0 2px 0 var(--ink); }
 .round.a { background: var(--side-a); } .round.b { background: var(--side-b); } .round.tie { background: var(--muted); }
 .round.sole { outline: 2px dashed var(--ink); outline-offset: 2px; }
 .round.neither { opacity: 0.55; }
@@ -256,3 +258,35 @@ select.level.serious { border-color: var(--warn); background: var(--warn-soft); 
 }
 .card.far { opacity: 0.6; }
 .card.far:hover, .card.far:focus-visible, .card.far[aria-pressed="true"] { opacity: 1; }
+
+/* ---- the race ---------------------------------------------------------------------------------------------- */
+.race { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin: 4px 0 22px; }
+.race h4 { margin: 0 0 4px; }
+.race-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; }
+.race-controls select { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.lane { margin-bottom: 16px; }
+.lane-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 14px; align-items: baseline; }
+.lane.a .name { color: var(--side-a); } .lane.b .name { color: var(--side-b); }
+.lane .name { font-weight: 700; }
+.gauges { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; color: var(--muted); }
+.gauge b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 34px; margin: 6px 0 4px; background: var(--sunken); border-radius: 6px; overflow: hidden; }
+.tick { position: absolute; bottom: 0; width: 3px; height: 12px; background: var(--muted); border-radius: 2px 2px 0 0; }
+.tick[hidden] { display: none; }
+.lane.a .tick.act { background: var(--side-a); } .lane.b .tick.act { background: var(--side-b); }
+.tick.act { height: 24px; width: 4px; }
+.tick.check { height: 24px; background: transparent; border-left: 3px dotted var(--ink); border-radius: 0; }
+.tick.timeout { height: 34px; width: 5px; background: var(--warn); }
+.tick.refused { height: 24px; background: var(--warn); }
+.tick.again { height: 24px; width: 4px; background: var(--ink); }
+.tick.wrong { height: 34px; width: 6px; background: var(--stop); }
+.tick.end { height: 34px; width: 3px; background: var(--ink); }
+.tick.talk { height: 8px; }
+.now { margin: 0; font-size: 13.5px; color: var(--muted); min-height: 1.4em; font-family: var(--mono); }
+.outcome { margin: 4px 0 0; font-size: 14.5px; }
+.outcome .pass { color: var(--win); } .outcome .fail { color: var(--stop); }
+.legend.left { text-align: left; margin: 0 0 10px; }
+.legend .tick { position: static; display: inline-block; vertical-align: -3px; margin: 0 6px 0 14px; }
+.legend .tick.act { background: var(--side-a); }
+.legend .tick.timeout, .legend .tick.wrong { height: 20px; }
+.finish { margin: 0; font-weight: 650; }

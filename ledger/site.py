@@ -5,12 +5,13 @@ command line, so the page builds the same graph in the visitor's browser and giv
   questions.json every Cypher question by name
   rules.json     constants the page must share with the command line (thresholds, filler words, guardrails)
   expected.json  answers computed here by the command-line code, which the page's own answers are checked against
+  replays/       one file per match record: every step of every attempt, for replaying a scenario as a race
 """
 
 import json
 from pathlib import Path
 
-from ledger import cli, load, policy, questions, spec
+from ledger import cli, load, policy, questions, replay, spec
 from ledger.bridges import epoch, gladiator
 
 # Pairs the page is checked against: (task, model a, model b).
@@ -79,6 +80,10 @@ def export(data: Path, store: str, out: Path) -> dict:
             },
         ),
     }
+
+    # One file per match record, fetched only when a visitor opens a scenario to watch it.
+    replays = replay.export(data / "records", out / "replays")
+    sizes["replays/"] = sum(replays.values())
 
     def ask(q, p):
         return cli.rows(store, q, p)

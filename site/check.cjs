@@ -220,6 +220,29 @@ async function main() {
       }
     }
     if (!clicked) problems.push('no pair of models could be clicked: the click-through tested nothing');
+    // The race: open a scenario of the pair on screen, skip to the end, and require both lanes to show the grade
+    // and the finish line to name the same winner the square does.
+    const squares = await page.locator('.rounds button.round').count();
+    if (!squares) problems.push('the arena has no scenario to open');
+    else {
+      const square = page.locator('.rounds button.round').first();
+      const label = await square.getAttribute('title');
+      await square.click();
+      const opened = await page.waitForSelector('#race-end', { timeout: 10000 }).then(() => true, () => false);
+      if (!opened) problems.push('opening a scenario did not load its replay');
+      else {
+        if (!(await page.locator('.race .tick').count())) problems.push('the replay has no steps to show');
+        await page.locator('#race-end').click();
+        const finish = await page.locator('#race-finish').innerText();
+        const outcomes = await page.locator('.race .outcome:not([hidden])').count();
+        if (outcomes !== 2) problems.push(`the finished race shows ${outcomes} of 2 grades`);
+        const winner = /won by (.+?) \(/.exec(label || '');
+        if (winner && !finish.startsWith(winner[1])) problems.push(`the square says ${JSON.stringify(label)} but the race ends ${JSON.stringify(finish)}`);
+        const hidden = await page.locator('.race .tick[hidden]').count();
+        if (hidden) problems.push(`${hidden} steps are still hidden after the race ended`);
+      }
+    }
+
     // The example button must walk all three steps on its own and end on a drawn verdict with enough evidence.
     await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
     await page.locator('#example').click();
