@@ -101,6 +101,7 @@ const state = {
   openOnly: false,
   profile: null, // whose tolerance decides "fit for the task" (set from the rules once loaded)
   overrides: {}, // the visitor's own level for a fault, by fault name; kept per task
+  flowFaults: new Map(), // test id -> the faults its grader can report
 };
 const names = new Map(); // model id -> display name, as the graph has it
 let ledger;
@@ -115,49 +116,81 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // ---- step 1: flows ----------------------------------------------------------------------------------------
 
+// Step 1 is a choice among the workflows Ledger has matches for, and it says so. A description only puts the
+// closest ones first (a keyword match on each workflow's text): it never hides one, and it cannot test a new flow.
 async function searchFlows() {
   const text = $('flow-text').value.trim();
   const mine = ++searchTurn;
-  const found = await ledger.findFlows(text || null);
+  const [found, every, faults] = await Promise.all([ledger.findFlows(text || null), ledger.findFlows(null), ledger.flowFaults()]);
   if (mine !== searchTurn) return;
-  state.flows = found;
+  const ranked = found.matched ? found.flows : [];
+  const rest = every.flows.filter((f) => !ranked.some((r) => r.test === f.test)).map((f) => ({ ...f, score: null }));
+  state.flows = { ...found, flows: [...ranked, ...rest], total: every.flows.length };
+  state.flowFaults = new Map(faults.map((f) => [f.test, f.faults]));
   drawFlows();
 }
 
 function drawFlows() {
   const f = state.flows;
+  $('flow-intro').textContent =
+    `Ledger has matches for ${plural(f.total, 'workflow')}. Pick the one closest to what your agent has to do. ` +
+    'If none is close, the answers here do not apply to your flow: it would need its own test.';
   const note = $('flow-note');
-  if (f.described && f.matched) note.textContent = `Closest tested workflows (searched for: ${f.searched_for}).`;
-  else if (f.described) note.textContent = `Nothing tested matches “${f.described}”. Here is every tested workflow instead.`;
-  else note.textContent = 'Every tested workflow. Describe yours above to see the closest ones first.';
+  // a workflow that shares only a stray word with the description is a weak match, and is shown as one
   const top = Math.max(...f.flows.map((x) => x.score || 0));
+  const strong = (x) => x.score !== null && x.score >= 0.25 * top;
+  const matched = f.flows.filter(strong).length;
+  if (!f.described) note.textContent = '';
+  else if (matched) {
+    note.textContent =
+      `${matched} of ${f.total} ${matched === 1 ? 'matches' : 'match'} the words in your description (${f.searched_for}), closest first. ` +
+      'This is a keyword match on what each workflow asks for, not a judgement that yours is the same.';
+  } else {
+    note.textContent =
+      `None of the ${f.total} shares a word with “${f.described}”. Your flow is probably not tested here; ` +
+      'the cards below show what is.';
+  }
+  const order = ['wrong amount', 'duplicate effect', 'planted instruction'];
   $('flow-cards').replaceChildren(
-    ...f.flows.map((flow) =>
-      el(
+    ...f.flows.map((flow) => {
+      const catches = [...(state.flowFaults.get(flow.test) || [])].sort(
+        (x, y) => (order.indexOf(x) + 1 || 99) - (order.indexOf(y) + 1 || 99) || (x < y ? -1 : 1),
+      );
+      return el(
         'button',
-        { type: 'button', class: 'card', 'aria-pressed': String(flow.test === state.task), onclick: () => chooseFlow(flow) },
+        {
+          type: 'button',
+          class: `card${f.described && matched && !strong(flow) ? ' far' : ''}`,
+          'aria-pressed': String(flow.test === state.task),
+          onclick: () => chooseFlow(flow),
+        },
         el(
           'span',
           { class: 'card-head' },
           el('span', { class: 'card-title' }, flow.title),
-          flow.score !== null && flow.score !== undefined
+          strong(flow)
             ? el(
                 'span',
                 { class: 'strength' },
                 el('span', { class: 'bar', 'aria-hidden': 'true' }, el('span', { style: `width:${Math.max(4, (100 * flow.score) / top)}%` })),
                 `match ${fixed(flow.score, 2)}`,
               )
-            : null,
+            : f.described && matched
+              ? el('span', { class: 'strength' }, flow.score === null ? 'no words in common' : 'weak match')
+              : null,
         ),
         el('span', { class: 'card-brief' }, firstSentence(flow.brief || '')),
+        catches.length
+          ? el('span', { class: 'card-meta' }, `Catches: ${plural(catches.length, 'kind')} of fault, such as ${catches.slice(0, 3).join(', ')}`)
+          : null,
         el(
           'span',
           { class: 'card-meta' },
           `${plural(flow.models, 'model')} and ${plural(flow.pairs, 'judged pair')} stand behind it · version ${flow.version}`,
           flow.emulates ? ` · modelled on ${flow.emulates}` : '',
         ),
-      ),
-    ),
+      );
+    }),
   );
 }
 

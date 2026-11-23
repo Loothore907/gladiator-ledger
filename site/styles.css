@@ -254,3 +254,5 @@ select.level.serious { border-color: var(--warn); background: var(--warn-soft); 
   .round { width: 34px; height: 34px; }
   .band .headline { font-size: 19px; }
 }
+.card.far { opacity: 0.6; }
+.card.far:hover, .card.far:focus-visible, .card.far[aria-pressed="true"] { opacity: 1; }
