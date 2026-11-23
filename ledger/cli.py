@@ -19,7 +19,7 @@ from pathlib import Path
 
 import relate
 
-from ledger import load, publish, questions, spec
+from ledger import load, policy, publish, questions, spec
 from ledger.bridges import epoch
 
 DEFAULT_STORE = "data/ledger.rl"
@@ -314,6 +314,47 @@ def print_opponents(o: dict) -> None:
     print("Scores: Epoch AI, 'Capabilities & benchmarking', epoch.ai/benchmarks (CC BY 4.0). See data/epoch/README.md.")
 
 
+def fitness(store: str, test: str, version: str, suites: list[str], profile: str, overrides=None, bar=None) -> dict:
+    """Every model's fitness for one task version, by model id, under a profile (ledger/policy.py). Counts every
+    attempt the model made on the task under those suites' settings, whoever the opponent was."""
+    scope = {"version_key": version, "suites": suites}
+    faults: dict[str, list[dict]] = {}
+    for f in rows(store, questions.TASK_FAULTS, scope):
+        faults.setdefault(f.pop("model"), []).append(f)
+    return {
+        r["model"]: policy.assess(test, r, faults.get(r["model"], []), profile, overrides, bar)
+        for r in rows(store, questions.TASK_ATTEMPTS, scope)
+    }
+
+
+def outcome(v: dict, fit: dict) -> tuple[str, str]:
+    """The answer a reader acts on: the head-to-head result read through fitness. (code, sentence)."""
+    a, b = v["a"], v["b"]
+    fa, fb = fit[a]["fit"], fit[b]["fit"]
+    ahead, settled = v["better"], v["verdict"] == "better"
+    if fa is None or fb is None:
+        thin = [m for m in (a, b) if fit[m]["fit"] is None]
+        return "too few attempts", f"Too few attempts to say whether {' or '.join(thin)} is fit for this task."
+    if not fa and not fb:
+        return "neither fit", "Neither is fit for this task." + (
+            f" {ahead} did it better of the two, which is not the same as fit." if ahead else ""
+        )
+    if fa != fb:
+        fit_one, other = (a, b) if fa else (b, a)
+        if ahead == other:
+            lead = "did it better" if settled else "is ahead"
+            return "only one fit", f"{other} {lead} head to head, but only {fit_one} is fit for this task."
+        if ahead == fit_one:
+            lead = "did it better" if settled else "is ahead, not settled"
+            return "only one fit", f"Use {fit_one}: it is the only one of the two fit for this task, and it {lead}."
+        return "only one fit", f"Use {fit_one}: it is the only one of the two fit for this task."
+    if settled:
+        return "use", f"Use {ahead}: both are fit for this task and it did it better."
+    if ahead:
+        return "both fit", f"Both are fit for this task. {ahead} is ahead head to head, but that is not settled."
+    return "both fit", "Both are fit for this task, and the matches show no winner between them."
+
+
 def _side(pairs: list[dict], side: str) -> dict:
     n = len(pairs)
     passed = sum(1 for p in pairs if p[f"{side}_passed"])
@@ -337,6 +378,8 @@ def verdict(
     all_versions: bool = False,
     bar: float = GOOD_ENOUGH,
     min_pairs: int = MIN_PAIRS,
+    profile: str | None = None,
+    overrides: dict | None = None,
 ) -> dict:
     """A task claim: which of two models did THIS task better when they played the same worlds, how sure that is,
     and whether either is good enough. Only the pairs where these two met count. Never a claim about a model in
@@ -389,6 +432,25 @@ def verdict(
     runs = {}
     for p in pairs:
         runs[p["run"]] = {"run": p["run"], "seal_sha256": p["seal"], "engine_commit": p["engine"], "suite": p["suite"]}
+    if profile:
+        # Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
+        suites = sorted({p["suite"] for p in pairs})
+        version_key = max(p["version"] for p in pairs)
+        everyone = fitness(store, test, version_key, suites, profile, overrides)
+        out["profile"] = profile
+        out["fit"] = {m: everyone[m] for m in (a, b)}
+        out["outcome"], out["headline"] = outcome({"a": a, "b": b, "better": better, "verdict": kind}, out["fit"])
+        # who else is fit on this task, cheapest first: where to look when neither of these two is
+        out["fit_on_task"] = [
+            {
+                "model": m,
+                "pass_rate": f["pass_rate"],
+                "attempts": f["attempts"],
+                "cost_per_attempt": f["cost_per_attempt"],
+            }
+            for m, f in everyone.items()
+            if f["fit"]
+        ]
     return dict(
         out,
         verdict=kind,
@@ -419,7 +481,30 @@ def print_verdict(v: dict) -> None:
         "no real difference shown": "No real difference shown",
         "not enough evidence": "Not enough evidence",
     }[v["verdict"]]
-    print(f"\nVerdict: {line}")
+    if v.get("headline"):
+        print(f"\n{v['headline']}")
+        print(f"\nFit for this task ({v['profile']} tolerance):")
+        for name in (a, b):
+            f = v["fit"][name]
+            word = {True: "fit", False: "NOT fit", None: "too few attempts"}[f["fit"]]
+            print(
+                f"  {name}: {word}. Passed {f['passed']} of {f['attempts']} ({f['pass_rate']:.0%}; bar {f['bar']:.0%})."
+            )
+            for reason in f["reasons"]:
+                print(f"      because: {reason}")
+            for x in f["faults"]:
+                if x["attempts_with"] and not x["breaks"] and x.get("kind_of") is None:
+                    print(f"      tolerated: {x['fault']} ({x['level']}) in {x['attempts_with']} of {f['attempts']}")
+        if v["outcome"] == "neither fit":
+            others = [o for o in v["fit_on_task"] if o["model"] not in (a, b)]
+            print("  Fit on this task among the models tested, cheapest first:")
+            for o in others:
+                print(
+                    f"      {o['model']}: passed {o['pass_rate']:.0%} of {o['attempts']}, {money(o['cost_per_attempt'])} an attempt"
+                )
+            if not others:
+                print("      none: no tested model is fit for this task under this tolerance")
+    print(f"\n{'Head to head' if v.get('headline') else 'Verdict'}: {line}")
     print(
         f"  {v['pairs']} judged pairs on the same generated worlds: {a} won {v['wins'][a]}, {b} won {v['wins'][b]}, "
         f"{v['ties']} tied (sign test p = {v['p_value']})"
@@ -549,6 +634,19 @@ def main(argv=None):
     v.add_argument("--all-versions", action="store_true", help="also count pairs on older versions of the test")
     v.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that counts as good enough")
     v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
+    v.add_argument(
+        "--profile",
+        choices=list(policy.PROFILES),
+        help="also say whether each model is fit for the task, under this tolerance (enterprise is stricter)",
+    )
+    for level in policy.LEVELS:
+        v.add_argument(
+            f"--{level}",
+            action="append",
+            default=[],
+            metavar="FAULT",
+            help=f"treat this fault as {level} (repeatable), whatever the profile says",
+        )
     v.add_argument("--json", action="store_true")
     st = sub.add_parser("site", parents=[common], help="export the data the browser demo loads (site/data/)")
     st.add_argument("--data", type=Path, default=Path("data"), help="data folder (default data/)")
@@ -669,7 +767,11 @@ def main(argv=None):
     elif args.cmd == "verdict":
         a = resolve_model(args.store, args.a) or args.a
         b = resolve_model(args.store, args.b) or args.b
-        result = verdict(args.store, args.workflow, a, b, args.suite, args.all_versions, args.bar, args.min_pairs)
+        overrides = {fault: level for level in policy.LEVELS for fault in getattr(args, level)}
+        profile = args.profile or (policy.DEFAULT_PROFILE if overrides else None)
+        result = verdict(
+            args.store, args.workflow, a, b, args.suite, args.all_versions, args.bar, args.min_pairs, profile, overrides
+        )
         if args.json:
             print(json.dumps(result, indent=1, default=str))
         else:
