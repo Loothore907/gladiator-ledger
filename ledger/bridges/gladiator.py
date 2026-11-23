@@ -34,6 +34,57 @@ HAZARDS = {
     "wrong_amounts": "wrong amount",
 }
 
+# Faults: everything a grader can say a model did wrong on an attempt. A hazard a model fell for is one kind of
+# fault; a wrong decision, work left undone and an attempt that ended before the model finished are others.
+# A counter present in the grade details means the test version can show that fault.
+DECISION_FAULTS = {
+    "wrong": "wrong decision",
+    "wrong_args": "right decision, wrong details",
+    "missing": "left undone",
+}
+ENDING_FAULTS = {
+    "no_action": "stopped before finishing",
+    "action_limit": "ran out of allowed actions",
+}
+WRONG_DECISION = "wrong decision"
+
+
+def fault_rows(res: dict, test_id: str) -> list[dict]:
+    """The faults one attempt could show and how often it showed each (count 0 = could, did not).
+
+    kind: `trap` (fell for a hazard the test planted), `decision` (the outcome it gave an item), `mix-up` (one
+    specific wrong decision of this test, e.g. should close, did escalate; a kind of `wrong decision`) and
+    `ending` (how the attempt stopped). Mix-ups belong to one test, so their key carries the test id."""
+    details = res.get("grade_details") or {}
+    rows = []
+
+    def add(key, name, kind, count, test_id=None, kind_of=None, hazard=None):
+        rows.append(
+            {
+                "key": key,
+                "name": name,
+                "kind": kind,
+                "count": int(count or 0),
+                "test_id": test_id,
+                "kind_of": kind_of,
+                "hazard": hazard,
+            }
+        )
+
+    for counter, name in HAZARDS.items():
+        if counter in details:
+            add(name, name, "trap", details[counter], hazard=name)
+    for counter, name in DECISION_FAULTS.items():
+        if counter in details:
+            add(name, name, "decision", details[counter])
+    for pair, count in sorted((details.get("confusions") or {}).items()):
+        want, _, got = pair.partition("->")
+        add(f"{test_id}: {pair}", f"should {want}, did {got}", "mix-up", count, test_id=test_id, kind_of=WRONG_DECISION)
+    for termination, name in ENDING_FAULTS.items():
+        add(name, name, "ending", res.get("termination") == termination)
+    return rows
+
+
 # Corner-cutting validation players that stand for a hazard models trip on (see HAZARDS).
 PLAYER_HAZARDS = {
     "blind_retry": "ambiguous timeout (retried without checking)",
@@ -130,6 +181,8 @@ def run_rows(body: dict, seal: str) -> dict:
     by_key = {side: {(r["node"], r.get("attempt", 1)): r for r in sides[side]["results"]} for side in ("A", "B")}
     flows = flow_facts(sides)
     matches = []
+    can_show: dict[tuple[str, str], dict] = {}  # (test version, fault) -> the fault, once per run
+    made = []  # one row per attempt and fault it actually made
     for node, attempt in by_key["A"]:
         a, b = by_key["A"][(node, attempt)], by_key["B"].get((node, attempt))
         if b is None:
@@ -160,6 +213,12 @@ def run_rows(body: dict, seal: str) -> dict:
                     ],
                 }
             )
+        for side, res in (("A", a), ("B", b)):
+            for fault in fault_rows(res, challenge["id"]):
+                count = fault.pop("count")
+                can_show.setdefault((version_key(challenge), fault["key"]), fault)
+                if count:
+                    made.append({"attempt": f"{key}/{side}", "fault": fault["key"], "count": count})
         instance = a.get("instance") or {}
         matches.append(
             {
@@ -213,6 +272,8 @@ def run_rows(body: dict, seal: str) -> dict:
             "seal_sha256": seal,
         },
         "matches": matches,
+        "can_show": [dict(fault, version_key=vkey) for (vkey, _), fault in sorted(can_show.items())],
+        "made": made,
     }
 
 

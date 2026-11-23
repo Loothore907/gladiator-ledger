@@ -24,6 +24,8 @@ async function build() {
   db = new RelateDb();
   for (const statement of graph.schema) execute(statement);
   execute(graph.writes.runs, { runs: graph.rows.runs, source: graph.sources.gladiator });
+  execute(graph.writes.faults, { runs: graph.rows.runs });
+  execute(graph.writes.made, { runs: graph.rows.runs });
   execute(graph.link_forks);
   execute(graph.writes.checks, { checks: graph.rows.checks, source: graph.sources.gladiator });
   execute(graph.writes.scores, { scores: graph.rows.scores, source: graph.sources.epoch });

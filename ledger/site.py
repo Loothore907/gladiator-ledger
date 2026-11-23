@@ -38,7 +38,13 @@ def export(data: Path, store: str, out: Path) -> dict:
             out / "graph.json",
             {
                 "schema": load.SCHEMA,
-                "writes": {"runs": load.WRITE, "checks": load.WRITE_VALIDATIONS, "scores": load.WRITE_SCORES},
+                "writes": {
+                    "runs": load.WRITE,
+                    "faults": load.WRITE_FAULTS,
+                    "made": load.WRITE_MADE,
+                    "checks": load.WRITE_VALIDATIONS,
+                    "scores": load.WRITE_SCORES,
+                },
                 "link_forks": "MATCH (child:TestVersion) WHERE child.forked_from IS NOT NULL "
                 "MATCH (parent:TestVersion) WHERE parent.test_id + '@' + parent.version = child.forked_from "
                 "OR parent.test_id = child.forked_from MERGE (child)-[:FORKED_FROM]->(parent)",

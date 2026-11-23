@@ -191,7 +191,7 @@ flowchart LR
   (matches and test validation) and `epoch` (published scores, used only to suggest opponents). Another source of
   the same kinds of evidence plugs in the same way (`uv run ledger ask sources`).
 
-Graph: 10 kinds of node and 13 relationships. See [docs/SCHEMA.md](docs/SCHEMA.md).
+Graph: 11 kinds of node and 17 relationships. See [docs/SCHEMA.md](docs/SCHEMA.md).
 
 ## More questions the graph answers
 The matches come from [Gladiator](https://github.com/Loothore907/gladiator-core), an open head-to-head evaluation

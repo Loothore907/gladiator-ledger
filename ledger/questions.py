@@ -11,6 +11,7 @@ because each one follows connections across runs: models, matches, test versions
 
   pair_on_task           One task, two models: every pair where they met, with both sides' facts.
   pair_hazards           The hazards each of those two models met and tripped on, in those pairs.
+  fault_profile          One task: for each model, each fault it could show, in how many attempts it showed it.
   find_flow              Describe your flow: the tested workflows whose text matches your words best.
   flows                  Every tested workflow (newest versions).
   flow_as_tested         The text, tools and settings a workflow was tested with (what a spec is built from).
@@ -73,6 +74,21 @@ OPTIONAL MATCH (a)-[t:TRIPPED_ON]->(h)
 WITH m.name AS model, h.name AS hazard, count(a) AS exposed, count(t) AS tripped, sum(coalesce(t.count, 0)) AS times
 RETURN model, hazard, exposed, tripped, times, toFloat(tripped) / exposed AS rate
 ORDER BY hazard, rate DESC, model
+"""
+
+# Fault profile for one task version: per model and fault the version can show, the attempts where the model could
+# have made it, the attempts where it did, and how many times in all. Faults cover more than hazards: wrong
+# decisions, work left undone, a test's own mix-ups (kind_of names the general fault) and how an attempt ended.
+FAULT_PROFILE = """
+MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)-[:CAN_SHOW]->(f:Fault),
+      (tv)<-[:USED]-(mt:Match)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded AND ($version_key IS NULL OR tv.key = $version_key)
+OPTIONAL MATCH (a)-[x:MADE]->(f)
+OPTIONAL MATCH (f)-[:KIND_OF]->(parent:Fault)
+WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
+     count(a) AS attempts, count(x) AS attempts_with, sum(coalesce(x.count, 0)) AS times
+RETURN model, fault, kind, kind_of, attempts, attempts_with, times, toFloat(attempts_with) / attempts AS rate
+ORDER BY model, kind, times DESC, fault
 """
 
 # Q3. Beat cycles: per test version, who beat whom by pair majority (ties dropped), then 3-cycles among them,
@@ -264,4 +280,5 @@ ALL = {
     "flow_as_tested": FLOW_AS_TESTED,
     "pair_on_task": PAIR_ON_TASK,
     "pair_hazards": PAIR_HAZARDS,
+    "fault_profile": FAULT_PROFILE,
 }
