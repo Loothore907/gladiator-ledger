@@ -153,6 +153,28 @@ async function main() {
       same(pick(want), pick(got), `${where} candidates in order`);
       same(want, got, where);
     }
+    // Step 1 never hides a workflow: a description only puts the closest first, and a description that matches
+    // nothing says so and still shows every workflow.
+    const allCards = await page.locator('#flow-cards button').count();
+    for (const [text, expectNone] of [['refund requests for damaged orders', false], ['zebra unicorns', true]]) {
+      await page.fill('#flow-text', text);
+      await page.click('#flow-go');
+      await page.waitForFunction((t) => document.getElementById('flow-note').innerText.includes(t.split(' ')[0]), text, { timeout: 5000 }).catch(() => {});
+      const shown = await page.locator('#flow-cards button').count();
+      const note = await page.locator('#flow-note').innerText();
+      if (shown !== allCards) problems.push(`describing "${text}" left ${shown} of ${allCards} workflows on the page`);
+      if (expectNone !== note.startsWith('None of')) problems.push(`describing "${text}": the note reads ${JSON.stringify(note)}`);
+      if (!expectNone && !(await page.locator('#flow-cards button').first().innerText()).includes('Refund')) {
+        problems.push(`describing "${text}" did not put the refund workflow first`);
+      }
+    }
+    if (!(await page.locator('#flow-cards button').first().innerText()).includes('Catches:')) {
+      problems.push('the workflow cards do not say what each test catches');
+    }
+    await page.fill('#flow-text', '');
+    await page.click('#flow-go');
+    await page.waitForFunction(() => document.getElementById('flow-note').innerText === '', null, { timeout: 5000 }).catch(() => {});
+
     // Click through the page itself, the way a visitor does: every flow, every first model, every second model.
     // The comparisons above call the page's functions; this proves the buttons lead to a drawn verdict, including
     // for pairs where no winner is named.

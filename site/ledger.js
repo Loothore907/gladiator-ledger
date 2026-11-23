@@ -32,6 +32,11 @@ WHERE NOT mt.excluded AND o.name <> $model
 RETURN o.name AS model, count(DISTINCT mt) AS pairs
 ORDER BY model`;
 
+// What each tested workflow can catch: the faults its grader reports (not its one-off mix-ups or how a run ended).
+const FLOW_FAULTS = `MATCH (t:Test)<-[:VERSION_OF]-(tv:TestVersion)-[:CAN_SHOW]->(f:Fault)
+WHERE f.kind IN ['trap', 'decision']
+RETURN t.id AS test, collect(DISTINCT f.name) AS faults`;
+
 const SCORES_OF = `MATCH (m:Model)-[s:SCORED]->(b:Benchmark {name: $benchmark})-[:FROM]->(src:Source)
 WHERE m.name IN $models
 RETURN m.name AS model, s.score AS score, s.low AS low, s.high AS high, b.name AS benchmark, src.name AS source`;
@@ -575,6 +580,8 @@ export function createLedger(ask, questions, rules) {
     return ask(PARTNERS_ON_FLOW, { test_id: test, version_key: version, model });
   }
 
+  const flowFaults = () => ask(FLOW_FAULTS, {});
+
   const scoresOf = (models) => ask(SCORES_OF, { benchmark: rules.benchmark, models });
 
   return {
@@ -590,6 +597,7 @@ export function createLedger(ask, questions, rules) {
     markdown,
     modelsOnFlow,
     partnersOnFlow,
+    flowFaults,
     scoresOf,
   };
 }

@@ -20,12 +20,13 @@
 
 <main>
   <section id="step-flow" class="step" aria-labelledby="h-flow">
-    <h2 id="h-flow"><span class="num">1</span> Describe or pick a flow</h2>
+    <h2 id="h-flow"><span class="num">1</span> Pick the workflow closest to yours</h2>
+    <p id="flow-intro" class="note"></p>
     <form id="flow-form" class="search" autocomplete="off">
-      <label for="flow-text">Describe what your agent has to do</label>
+      <label for="flow-text">Optional: describe what your agent has to do, to put the closest ones first</label>
       <div class="search-row">
         <input id="flow-text" type="text" placeholder="for example: decide refund requests for damaged orders" disabled>
-        <button type="submit" id="flow-go" disabled>Find</button>
+        <button type="submit" id="flow-go" disabled>Rank</button>
       </div>
     </form>
     <p class="note example-row">New here? <button type="button" id="example" class="quiet small" disabled>Show me an example</button> walks all three steps for the pair of models with the most evidence.</p>
