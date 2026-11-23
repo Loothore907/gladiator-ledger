@@ -18,6 +18,14 @@ built from the same statements; and an MCP server gives AI assistants the same g
 > matches between 12 models** (closed and open-weights), so everything below reproduces from a clean clone with
 > **no API keys and no cost**.
 
+> **Correction in progress (2026-11-23).** A check of the recorded costs against the providers' real bills found
+> two errors in how the engine priced calls: Claude Haiku 5.5 was recorded at about four times its real cost (its
+> cache-read price was missing), and models run through OpenRouter at about 60% of theirs. **Every cost figure
+> and every scenario decided on efficiency below is under correction**, and the comparisons between Haiku and
+> the OpenRouter models are expected to change, some of them to the opposite result. What is not affected: which
+> attempts passed, every fault count, fitness, and scenarios where only one model passed. The engine is fixed
+> ([gladiator-core#6](https://github.com/Loothore907/gladiator-core/pull/6)); the data is being corrected.
+
 ## The idea in one table
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index: a tie on paper.
 Here are the same two models on four workflows, sixteen judged pairs each, played on the same generated worlds.

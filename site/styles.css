@@ -313,3 +313,4 @@ figure.graph figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted
 }
 @keyframes gdraw { to { stroke-dashoffset: 0; } }
 @keyframes gdraw-live { to { stroke-dashoffset: 0; stroke-dasharray: 4 4; } }
+.correction { margin: 0 0 18px; padding: 12px 14px; border: 1.5px solid var(--warn); background: var(--warn-soft); border-radius: 10px; font-size: 14.5px; }
