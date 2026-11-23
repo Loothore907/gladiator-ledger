@@ -43,7 +43,14 @@ command line in CI).
 passes the checks). The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
 the loop: describe a flow, pick two models, choose whose tolerance applies, read the verdict, download the spec. Every
 scenario behind a verdict can be replayed as a race: both models on the same world, step by step, at the pace they
-really ran. No server, no keys, nothing leaves
+really ran.
+
+**Live races (hackathon judges for now, coming soon for everyone).** Under the recorded scenarios the page can
+ask a [Gladiator race runner](https://github.com/Loothore907/gladiator-core/blob/main/docs/DEPLOYMENT.md) for one
+fresh scenario between the two models on screen. It first states what the record expects, then streams the race
+as it happens, then says whether the result was in line with the record or against it. To run one on your own
+machine with your own keys: start `gladiator serve` in a gladiator-core checkout with
+`--origin http://localhost:8000`, then open the page with `?runner=http://127.0.0.1:8787`. No server, no keys, nothing leaves
 the tab.
 
 ```bash

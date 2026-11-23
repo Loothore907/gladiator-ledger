@@ -290,3 +290,6 @@ select.level.serious { border-color: var(--warn); background: var(--warn-soft); 
 .legend .tick.act { background: var(--side-a); }
 .legend .tick.timeout, .legend .tick.wrong { height: 20px; }
 .finish { margin: 0; font-weight: 650; }
+.race.live { border-style: dashed; }
+.race.live h4 { margin: 0 0 4px; }
+.race-controls input { font: inherit; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); width: 11em; }

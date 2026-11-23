@@ -367,6 +367,7 @@ async function showVerdict(scroll = false) {
   const spec = await ledger.build({ ...judged, suite: null });
   if (mine !== turn) return;
   drawVerdict(spec, judged);
+  drawLive(judged);
   $('step-verdict').hidden = false;
   if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -598,6 +599,209 @@ async function openRace(v, index) {
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+// ---- a live race: one fresh scenario, played now by a Gladiator runner -------------------------------------------
+
+// Where a runner is, if there is one: ?runner=<address> for a runner on your own machine, else the address the
+// page was published with (site/data/live.json). No runner means no live races, and the page says so.
+let runnerPromise;
+function findRunner() {
+  runnerPromise ||= (async () => {
+    const asked = new URLSearchParams(location.search).get('runner');
+    let base = asked;
+    if (!base) {
+      const response = await fetch(new URL('./data/live.json', import.meta.url));
+      base = response.ok ? (await response.json()).runner : null;
+    }
+    if (!base) return null;
+    base = base.replace(/\/$/, '');
+    try {
+      const options = await (await fetch(`${base}/options`)).json();
+      return { base, options };
+    } catch {
+      return { base, options: null };
+    }
+  })();
+  return runnerPromise;
+}
+
+const liveKind = (tool) => (!tool ? 'talk' : tool === 'finish' ? 'end' : tool.startsWith('check_') ? 'check' : rules.reads.some((p) => tool.startsWith(p)) || tool.startsWith('stock_for_') ? 'read' : 'act');
+function liveItem(args) {
+  if (!args || typeof args !== 'object') return null;
+  for (const [key, value] of Object.entries(args)) if (key.endsWith('id') || key === 'sku' || key === 'page') return key === 'page' ? `page ${value}` : String(value);
+  return null;
+}
+
+// A lane that grows as steps arrive. The time scale stretches when a model runs longer than the track shows.
+function liveLane(id, cls) {
+  const track = el('div', { class: 'track' });
+  const now = el('p', { class: 'now' }, 'Waiting for its first step…');
+  const count = { steps: el('b', null, '0'), time: el('b', null, '0'), cost: el('b', null, '$0.0000'), tokens: el('b', null, '0') };
+  const result = el('p', { class: 'outcome', hidden: true });
+  const node = el(
+    'div',
+    { class: `lane ${cls}` },
+    el(
+      'div',
+      { class: 'lane-head' },
+      el('span', { class: 'name' }, shortName(id)),
+      el('span', { class: 'gauges' }, el('span', { class: 'gauge' }, count.steps, ' steps'), el('span', { class: 'gauge' }, count.time, ' seconds'), el('span', { class: 'gauge' }, count.cost, ' spent'), el('span', { class: 'gauge' }, count.tokens, ' tokens')),
+    ),
+    track,
+    now,
+    result,
+  );
+  const marks = [];
+  const acted = new Set();
+  let span = 30;
+  let cost = 0;
+  let tokens = 0;
+  const place = () => {
+    for (const [mark, at] of marks) mark.style.left = `${(100 * at) / span}%`;
+  };
+  return {
+    node,
+    step(e) {
+      const kind = liveKind(e.tool_name);
+      const item = liveItem(e.tool_args);
+      const again = kind === 'act' && item && acted.has(item);
+      if (kind === 'act' && item) acted.add(item);
+      const what = e.error === 'timeout' ? 'timeout' : e.error ? 'refused' : again ? 'again' : kind;
+      const said = `${stepWords(e.tool_name, item)}${e.error === 'timeout' ? STATE_WORDS[1] : e.error ? STATE_WORDS[2] : ''}`;
+      const mark = track.appendChild(el('span', { class: `tick ${what}`, title: `${fixed(e.elapsed_s, 1)}s: ${said}` }));
+      marks.push([mark, e.elapsed_s]);
+      while (e.elapsed_s > span * 0.92) span *= 1.5;
+      place();
+      cost += e.cost_usd;
+      tokens += e.tokens;
+      count.steps.textContent = String(marks.length);
+      count.time.textContent = fixed(e.elapsed_s, 0);
+      count.cost.textContent = `$${fixed(cost, 4)}`;
+      count.tokens.textContent = tokens.toLocaleString('en-US');
+      now.textContent = said;
+    },
+    end(e) {
+      const details = e.grade_details || {};
+      const faults = Object.entries(rules.fault_counters).filter(([counter]) => details[counter]).map(([counter, name]) => `${name}${details[counter] > 1 ? ` ×${details[counter]}` : ''}`);
+      if (rules.ending_faults[e.termination]) faults.push(rules.ending_faults[e.termination]);
+      now.textContent = e.error ? `Stopped: ${e.error}` : 'Finished.';
+      result.hidden = false;
+      result.replaceChildren(
+        el('strong', { class: e.passed ? 'pass' : 'fail' }, e.passed ? 'Passed' : 'Did not pass'),
+        details.items ? ` · ${details.correct} of ${details.items} items right` : '',
+        faults.length ? ` · ${faults.join(', ')}` : e.error ? '' : ' · no faults',
+      );
+    },
+  };
+}
+
+// Reads a text/event-stream body: calls back with (kind, value) for each message.
+async function readEvents(response, onMessage) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    let cut;
+    while ((cut = buffer.indexOf('\n\n')) >= 0) {
+      const block = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      let kind = null;
+      let data = '';
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event: ')) kind = line.slice(7);
+        else if (line.startsWith('data: ')) data += line.slice(6);
+      }
+      if (kind) onMessage(kind, JSON.parse(data));
+    }
+    if (done) return;
+  }
+}
+
+// The live panel under the arena: what the record expects, then a fresh scenario raced now, then how it compares.
+async function drawLive(v) {
+  const box = $('live');
+  if (!box) return;
+  const runner = await findRunner();
+  if ($('live') !== box) return; // the verdict was redrawn while we looked
+  const title = el('h4', null, 'Race them live on a fresh scenario');
+  if (!runner) {
+    box.replaceChildren(title, el('p', { class: 'note', id: 'live-soon' }, 'Live races are open to the hackathon judges for now, and coming soon for everyone. Every scenario above is a real recorded race you can replay.'));
+    return;
+  }
+  if (!runner.options) {
+    box.replaceChildren(title, el('p', { class: 'note' }, `The race runner at ${runner.base} is not answering. Recorded races still play.`));
+    return;
+  }
+  const { a, b } = v;
+  const task = spec_task(v.task);
+  const offered = runner.options.tasks.find((t) => t.id === task);
+  const missing = [a, b].filter((m) => !runner.options.models.includes(m));
+  if (!offered || missing.length) {
+    box.replaceChildren(
+      title,
+      el('p', { class: 'note' }, !offered ? 'This runner does not offer this task.' : `Live races use a short list of small, cheap models, and ${missing.map(shortName).join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on it.`),
+    );
+    return;
+  }
+  const prior =
+    v.verdict === 'better'
+      ? `The record favours ${shortName(v.better)}: it won ${v.wins[v.better]} of their ${v.pairs} scenarios.`
+      : v.verdict === 'leaning'
+        ? `The record leans to ${shortName(v.better)} (${v.wins[v.better]} of ${v.pairs}), not settled.`
+        : `The record names no favourite between them (${v.wins[a]} to ${v.wins[b]} over ${plural(v.pairs, 'scenario')}).`;
+  const level = el('select', { id: 'live-level', 'aria-label': 'Difficulty' }, offered.levels.map((x) => el('option', { value: x, selected: x === 'standard' }, `${x} difficulty`)));
+  const profile = el('select', { id: 'live-profile', 'aria-label': 'What matters most' }, runner.options.profiles.map((x) => el('option', { value: x, selected: x === 'budget' }, `${x} scoring`)));
+  const code = runner.options.needs_code ? el('input', { id: 'live-code', type: 'password', placeholder: 'access code', 'aria-label': 'Access code', autocomplete: 'off' }) : null;
+  const go = el('button', { type: 'button', id: 'live-go' }, 'Race them live');
+  const stage = el('div', { id: 'live-stage' });
+  const say = el('p', { class: 'finish', id: 'live-result', role: 'status', 'aria-live': 'polite' });
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    say.textContent = '';
+    const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
+    stage.replaceChildren(el('p', { class: 'note' }, 'A new world is being generated and handed to both models. Nothing below is a replay.'), lanes.A.node, lanes.B.node);
+    try {
+      const response = await fetch(`${runner.base}/race`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, a, b, difficulty: level.value, profile: profile.value, code: code ? code.value : '' }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+      let record = null;
+      let failed = null;
+      await readEvents(response, (kind, e) => {
+        if (kind === 'step') lanes[e.side].step(e);
+        else if (kind === 'attempt_end') lanes[e.side].end(e);
+        else if (kind === 'record') record = e.record;
+        else if (kind === 'failed') failed = e.error;
+      });
+      if (failed || !record) throw new Error(failed || 'the race ended without a record');
+      const winner = { A: a, B: b }[record.body.verdict.winner] || null;
+      const versus = !winner
+        ? 'Live, this scenario had no winner.'
+        : !v.better
+          ? `Live, ${shortName(winner)} took this scenario. The record had no favourite, and one scenario does not make one.`
+          : winner === v.better
+            ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
+            : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${v.wins[v.better]} of ${v.pairs}, but it is now on file.`;
+      say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. A live result is kept apart from the recorded evidence the verdict rests on.'));
+    } catch (error) {
+      say.textContent = `The live race did not run: ${error.message}`;
+    } finally {
+      go.disabled = false;
+    }
+  });
+  box.replaceChildren(
+    title,
+    el('p', { class: 'note', id: 'live-prior' }, prior, ' Now put that to the test: one new scenario, generated this minute, never seen by either model.'),
+    el('div', { class: 'race-controls' }, level, profile, code, go),
+    stage,
+    say,
+  );
+}
+const spec_task = (test) => test.split('/').pop();
+
 // The result as a fight card: the two models, the arena, the comparison row by row, where each one slipped
 // (with the visitor's own say on how serious each fault is), then one verdict, then how to check it.
 function fightCard(spec, v) {
@@ -695,6 +899,7 @@ function fightCard(spec, v) {
     ),
     el('p', { class: 'note center' }, 'Pick a scenario to watch both models work it, step by step.'),
     el('div', { id: 'race', class: 'race', hidden: true }),
+    el('div', { id: 'live', class: 'race live' }),
   ];
 
   const num = (text, cls = '') => el('span', { class: `fig ${cls}` }, text);
