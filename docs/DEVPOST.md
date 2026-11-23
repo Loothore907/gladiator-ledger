@@ -40,9 +40,9 @@ server for your own AI assistant, and a command line.
 ## Why it is useful
 Choosing a model is usually done by reading rankings or by feel. Ledger replaces that with a claim about the task.
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index, a tie on paper.
-On four workflows the answer changes with the task and with who is asking: DeepSeek wins three outright at about a
-third of the cost (15 of 16, 16 of 16 and 14 of 16 scenarios), and on the fourth it fails 43 of 68 attempts by
-acting before it has read the records. For one person, a single wrong decision in 54 attempts is tolerable; for a
+They cost about the same and split 64 head-to-head scenarios 30 to 34. Yet on four workflows the answer changes
+with the task and with who is asking: on a refund queue DeepSeek fails 43 of 68 attempts by acting before it has
+read the records, and on access reviews and inventory transfers it leads 11 scenarios to 5. For one person, a single wrong decision in 54 attempts is tolerable; for a
 business moving money it is disqualifying, and Ledger makes both calls and shows the count behind each. When the
 evidence is thin or level it says "leaning" or names no winner, and when neither model is fit it says so and
 lists the tested models that are.

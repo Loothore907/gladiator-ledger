@@ -1216,14 +1216,22 @@ async function showExample() {
       }
     }
     found.sort((x, y) => y.pairs - x.pairs);
-    // among the pairs with the most evidence, prefer one whose verdict is settled; otherwise the most evidence
-    let best = found[0];
+    // among the pairs with the most evidence, prefer a settled one that names a model to use and where the
+    // visitor's tolerance changes the answer; failing that a settled one; otherwise the most evidence
+    const judge = (c, profile) => ledger.verdict(c.flow.test, c.a, c.b, null, rules.good_enough, rules.min_pairs, profile, {});
+    let best = null;
+    let settled = null;
     for (const c of found.slice(0, 12)) {
-      if ((await ledger.verdict(c.flow.test, c.a, c.b)).verdict === 'better') {
+      const personal = await judge(c, 'personal');
+      if (personal.verdict !== 'better') continue;
+      settled = settled || c;
+      if (!['use', 'only one fit'].includes(personal.outcome)) continue;
+      if ((await judge(c, 'enterprise')).headline !== personal.headline) {
         best = c;
         break;
       }
     }
+    best = best || settled || found[0];
     if (!best) return;
     await chooseFlow(best.flow);
     await chooseFirst(best.a);

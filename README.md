@@ -18,13 +18,10 @@ built from the same statements; and an MCP server gives AI assistants the same g
 > matches between 12 models** (closed and open-weights), so everything below reproduces from a clean clone with
 > **no API keys and no cost**.
 
-> **Correction in progress (2026-11-23).** A check of the recorded costs against the providers' real bills found
-> two errors in how the engine priced calls: Claude Haiku 5.5 was recorded at about four times its real cost (its
-> cache-read price was missing), and models run through OpenRouter at about 60% of theirs. **Every cost figure
-> and every scenario decided on efficiency below is under correction**, and the comparisons between Haiku and
-> the OpenRouter models are expected to change, some of them to the opposite result. What is not affected: which
-> attempts passed, every fault count, fitness, and scenarios where only one model passed. The engine is fixed
-> ([gladiator-core#6](https://github.com/Loothore907/gladiator-core/pull/6)); the data is being corrected.
+> **Costs corrected (2026-11-23).** A check of recorded costs against the providers' real bills found the engine
+> had priced two kinds of call wrongly (Claude Haiku 5.5 about four times too high, models run through OpenRouter
+> about 40% too low). Every cost here is now the provider's billed figure where one exists, and every scenario
+> decided on efficiency was re-judged. What changed and how: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
 
 ## The idea in one table
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index: a tie on paper.
@@ -32,15 +29,17 @@ Here are the same two models on four workflows, sixteen judged pairs each, playe
 
 | Task | Pairs won (Haiku / DeepSeek) | Attempts passed on the task (Haiku / DeepSeek) | For one person | For a business running it unattended |
 |---|---|---|---|---|
-| Refund queue | 9 / 7 | 81% / 37% | **Use Haiku**: DeepSeek is not fit | neither is fit |
-| Access review | 1 / 15 | 96% / 96% | **Use DeepSeek** | **Use DeepSeek**: Haiku is not fit |
-| Inventory transfer | 0 / 16 | 85% / 93% | **Use DeepSeek** | neither is fit |
-| Incident triage | 2 / 14 | 87% / 96% | **Use DeepSeek** | neither is fit |
+| Refund queue | 11 / 5 | 81% / 37% | **Use Haiku**: DeepSeek is not fit | neither is fit |
+| Access review | 5 / 11 | 96% / 96% | both fit, leaning DeepSeek | **Use DeepSeek**: Haiku is not fit |
+| Inventory transfer | 5 / 11 | 85% / 93% | both fit, leaning DeepSeek | neither is fit |
+| Incident triage | 9 / 7 | 87% / 96% | both fit, leaning Haiku | neither is fit |
 
-One model is not "better". DeepSeek wins three of these tasks outright at about a third of the cost, and on the
-fourth it fails 43 of 68 attempts by acting before it has read the records. And **the right answer depends on who
+One model is not "better". The two cost about the same per attempt (half a cent) and split their 64 pairs 30 to
+34, yet task by task they are not level: on refunds DeepSeek fails 43 of 68 attempts by acting before it has read
+the records, and on access reviews and inventory transfers it leads 11 to 5. And **the right answer depends on who
 is asking**: a single wrong decision in 54 attempts is tolerable for one person and disqualifying for a business
-moving money or access rights. Ledger makes both calls, shows the count behind each, and lets you change the rule.
+moving money or access rights. Ledger makes both calls, shows the count behind each, says "leaning" when a lead
+could still be chance, and lets you change the rule.
 
 ## Three ways to use it
 All three walk the same loop over the same graph and give the same answers (the page is checked against the
@@ -131,16 +130,17 @@ Closest on paper, open weights only:
 ```
 Ledger never ranks models by a published score. It uses one, [Epoch AI's](https://epoch.ai/benchmarks)
 Capabilities Index, for a narrower question: which models are close enough on paper that a head-to-head is worth
-running? Haiku and DeepSeek are less than one point apart, with overlapping ranges. On these workflows DeepSeek won
-52 of their 64 pairs. **Close on paper, clearly different on the task**: that gap is what Ledger is for.
+running? Haiku and DeepSeek are less than one point apart, with overlapping ranges. Over all four workflows they
+are close too (30 pairs to 34), but on the refund queue only one of them is fit for the job. **Close on paper,
+different on the task**: that gap is what Ledger is for.
 
 ### Step 3. Get the verdict
 ```bash
 uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1
 ```
 ```text
-openrouter:minimax/minimax-m3.1-flash did it better head to head, but only anthropic:claude-haiku-5-5
-is fit for this task.                                                  (output wrapped and shortened here)
+Use anthropic:claude-haiku-5-5: it is the only one of the two fit for this task, and it is ahead,
+not settled.                                                           (output wrapped and shortened here)
 
 Fit for this task (personal tolerance):
   anthropic:claude-haiku-5-5: fit. Passed 44 of 54 (81%; bar 80%).
@@ -149,9 +149,9 @@ Fit for this task (personal tolerance):
   openrouter:minimax/minimax-m3.1-flash: NOT fit. Passed 53 of 67 (79%; bar 80%).
       because: passed 53 of 67 attempts (79%), under the 80% bar
 
-Head to head: openrouter:minimax/minimax-m3.1-flash does this task better
-  15 judged pairs on the same generated worlds: anthropic:claude-haiku-5-5 won 3,
-  openrouter:minimax/minimax-m3.1-flash won 12, 0 tied (sign test p = 0.0352)
+Head to head: Leaning anthropic:claude-haiku-5-5
+  15 judged pairs on the same generated worlds: anthropic:claude-haiku-5-5 won 7,
+  openrouter:minimax/minimax-m3.1-flash won 5, 3 tied (sign test p = 0.7744)
 ```
 **Fit comes first.** A model is fit for a task when it passes enough of its attempts and stays inside your
 tolerance for faults. Every attempt the model made on the task counts, whoever the opponent was. Each fault has a
@@ -177,13 +177,12 @@ uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --out spec.md
 ```
 One document in three layers:
 
-- **Decision.** The answer to act on (here: MiniMax did it better head to head, but only Haiku is fit), each
-  model's fitness with its reasons, the pair counts, and the comparison.
+- **Decision.** The answer to act on (here: use Haiku, the only one of the two that is fit, ahead but not
+  settled), each model's fitness with its reasons, the pair counts, and the comparison.
 - **Blueprint.** The job and the rules exactly as tested, the tools the flow needs, the settings the result holds
-  for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and for every hazard an autonomy call.
-  For this pair: MiniMax acted before reading the records in 2 of 15 attempts, so that step **needs a guard**
-  ("refuse an action on an item until the lookups it depends on have been made"); duplicate actions, planted
-  instructions and wrong amounts never happened, so those **can run alone**.
+  for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and for every hazard an autonomy call:
+  **can run alone** where the chosen model never fell for it in these matches, **needs a guard** where it did,
+  with the guard spelled out ("refuse an action on an item until the lookups it depends on have been made").
 - **Evidence.** The sealed match records, the test's fingerprint and the engine version.
 
 It ends with the same content as JSON, and it says plainly what it is: a result for this task, in a simulated world,
@@ -240,22 +239,22 @@ if both succeed, the more efficient wins; and no real difference is a tie. Ledge
 uv run ledger recommend --suite small-tier --budget 0.05
 ```
 ```text
-No winner named: tie
+Leaning: openrouter:deepseek/deepseek-v4.1-flash-1017
 
   model                                        pairs  won  ties  passed  $/attempt  $/clean  mistakes
-  openrouter:deepseek/deepseek-v4.1-flash-1017   272  196     3     218    $0.0065  $0.0082       0.9
-  openrouter:minimax/minimax-m3.1-flash          268  173     0     177    $0.0059  $0.0089       1.8
-  anthropic:claude-haiku-5-5                     216  108     0     189    $0.0184  $0.0210       0.4
+  openrouter:deepseek/deepseek-v4.1-flash-1017   272  212     1     218    $0.0047  $0.0059       0.9
+  anthropic:claude-haiku-5-5                     216  147     3     189    $0.0045  $0.0052       0.4
+  openrouter:minimax/minimax-m3.1-flash          268  132     3     177    $0.0093  $0.0140       1.8
   ...
 Caveats:
-  - deepseek ranks first overall but went 32-32 against minimax: no clear winner, so none is named.
-  - Beat cycles (2): deepseek > minimax > glm-5.3 > deepseek (4-2, 9-3, 7-5); ...
+  - deepseek leads claude-haiku-5-5 34-30, but a split like that happens by chance 71% of the time
+    between equal models: a lean, not a settled result.
+  - Beat cycles (2): nemotron > qwen > glm-5.3 > nemotron (9-3, 7-5, 7-5); ...
 ```
-Two open-weights models lead Claude Haiku on these four workflows at about a third of the cost per attempt. Between
-the two leaders, DeepSeek and MiniMax split their 64 head-to-head pairs 32-32, so Ledger names **no winner** and
-shows why. Task by task the same two are not level: MiniMax leans ahead on refunds, DeepSeek on incident triage
-and inventory transfers. A suite-wide answer pools different tasks and opponents, which is why the pair-by-pair
-verdict above is the claim to rely on.
+DeepSeek and Claude Haiku lead these four workflows at about half a cent per attempt, and their own head-to-head
+is 34 to 30, so Ledger says **leaning**, not better, and shows why. Task by task the same two are not level (the
+table at the top). A suite-wide answer pools different tasks and opponents, which is why the pair-by-pair verdict
+above is the claim to rely on.
 
 **Where models slip** (`uv run ledger ask hazard_profile`). For each model and each hazard a test can generate:
 how many attempts met it, and how many fell for it. The commonest slip is acting without reading: deciding a
