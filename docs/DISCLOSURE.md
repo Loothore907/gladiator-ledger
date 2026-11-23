@@ -35,10 +35,24 @@ In the Gladiator repositories, during the contest:
 ## The data
 `data/` holds 37 sealed public match records (12 models: Anthropic, OpenAI and Google models through their APIs,
 and open-weights models through OpenRouter) and 20 validation records. The matches were played on Nov 22, 2026 and
-cost $21.53 in API usage in total (the sum of the records' own cost figures), paid from the author's provider
+cost $24.90 in API usage in total (corrected figures, see below), paid from the author's provider
 accounts and plan credits. Each record includes its exact model ids, prices and costs, and the commit of the public Gladiator engine
 that played it. Each match's private half (`operator.json`, the answer key of its generated worlds) is published
 beside the record now that the match is over; `ledger verify` checks it against the fingerprint in the record.
+
+**Costs corrected on 2026-11-23.** The author checked the recorded costs against the providers' real balances and
+found the Gladiator engine had priced two kinds of call wrongly: Claude Haiku 5.5's cache reads were charged as
+plain input (recorded about four times too high), and models run through OpenRouter were priced from the list
+price instead of the cost OpenRouter reports for each call (recorded about 40% too low overall, and by a different
+factor for each model). The engine was fixed ([gladiator-core#6](https://github.com/Loothore907/gladiator-core/pull/6)).
+For the matches already played, nothing was re-run: the real cost of each of the 36,929 OpenRouter calls was looked
+up from OpenRouter by its call id and filed beside the record as `billed.json` (tied to the record by its seal),
+and Haiku's calls were re-priced from the token counts in the record with the published cache-read price. The
+sealed records are unchanged; Ledger applies the correction when it reads them (`ledger/costs.py`) and marks every
+attempt's cost as `billed`, `repriced` or `list` (OpenAI and Google, whose recorded costs agreed with the bills
+within 1% and 15%). Of the $24.90, $16.36 is billed, $1.14 re-priced and $7.40 list. No pass, fail, fault count or
+fitness call changed. Scenarios where both models passed are decided on efficiency, which includes cost, so those
+were re-judged: for example Claude Haiku against DeepSeek moved from 12 pairs to 52 to 30 to 34.
 
 **Data replaced on 2026-11-22.** The store first shipped with 60 matches played on Nov 20 to 22 ($51.49). A bug in
 the Gladiator engine was then found: the tool a model uses to check an action after a timeout was offered without

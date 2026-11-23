@@ -1,0 +1,1821 @@
+{
+ "source": "openrouter.ai/api/v1/generation (total_cost, USD)",
+ "fetched_at": "2026-11-23T18:40:39Z",
+ "record_sha256": "385e4353cfb6b1536c59da2be0d6d20a17a4e575a0dd3a05d0b65cfd1af0f591",
+ "partial": false,
+ "calls": {
+  "gen-1795344700-OclavutAr4c8PCyYsH8E": {
+   "total_cost": 0.00018795,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344700-iViwDIbrVwBC3pq7tGMi": {
+   "total_cost": 0.00015752,
+   "provider": "Venice"
+  },
+  "gen-1795344701-OS5TlKkpRD1FuHjmHJ7a": {
+   "total_cost": 0.00013736,
+   "provider": "Venice"
+  },
+  "gen-1795344701-Wxs9fPURtgPVCclWbDSm": {
+   "total_cost": 0.00022164,
+   "provider": "Venice"
+  },
+  "gen-1795344702-pHwgIffuv4s9cDW7s8dL": {
+   "total_cost": 0.00013618,
+   "provider": "Venice"
+  },
+  "gen-1795344702-cyz9a4leElFESYpEFXQr": {
+   "total_cost": 0.0001335,
+   "provider": "Venice"
+  },
+  "gen-1795344703-w8X6FurL7Cpp877Op4IV": {
+   "total_cost": 0.00013442,
+   "provider": "Venice"
+  },
+  "gen-1795344703-2xxQjgA30wSooEQa4IRj": {
+   "total_cost": 0.00013478,
+   "provider": "Venice"
+  },
+  "gen-1795344704-xhnnAP7DPfHCHIzYoZ6B": {
+   "total_cost": 0.0002268,
+   "provider": "Venice"
+  },
+  "gen-1795344704-6sgsotkEIGJ4hnLt5sDo": {
+   "total_cost": 0.0001437,
+   "provider": "Venice"
+  },
+  "gen-1795344705-Z45LBClbNTbJRmIkEBfl": {
+   "total_cost": 0.000307,
+   "provider": "Venice"
+  },
+  "gen-1795344705-4cT5lKR79Wb3fdUHrGfA": {
+   "total_cost": 0.00016418,
+   "provider": "Venice"
+  },
+  "gen-1795344706-YZvXSB6CF3yaZ44iZszm": {
+   "total_cost": 0.00017538,
+   "provider": "Venice"
+  },
+  "gen-1795344706-6MYnQlVsf8Q78QTmTmqc": {
+   "total_cost": 0.0002779,
+   "provider": "Venice"
+  },
+  "gen-1795344707-NNKkT86k8G7fthmNnAhY": {
+   "total_cost": 0.00021722,
+   "provider": "Venice"
+  },
+  "gen-1795344707-COMwqXKw5vH0P8dcBoBL": {
+   "total_cost": 0.00025756,
+   "provider": "Venice"
+  },
+  "gen-1795344708-r1dDF5J1Io4CZUmMTY4X": {
+   "total_cost": 0.0001985,
+   "provider": "Venice"
+  },
+  "gen-1795344708-b3V7xZEK50SiXW1n4wge": {
+   "total_cost": 0.00027256,
+   "provider": "Venice"
+  },
+  "gen-1795344709-U3WMZomJtPBFWiuNXkMW": {
+   "total_cost": 0.0002456,
+   "provider": "Venice"
+  },
+  "gen-1795344709-wKucX307zQTwQr6fN4ll": {
+   "total_cost": 0.00035218,
+   "provider": "Venice"
+  },
+  "gen-1795344710-W1ihFk1iAQ8KPbM6BOEb": {
+   "total_cost": 0.00025922,
+   "provider": "Venice"
+  },
+  "gen-1795344710-DV4wlQkv3DuP8xXXfS8v": {
+   "total_cost": 0.00022956,
+   "provider": "Venice"
+  },
+  "gen-1795344710-Ei2BEtINuJW538MFHeo2": {
+   "total_cost": 0.00043552,
+   "provider": "Venice"
+  },
+  "gen-1795344711-87x7yALXTOHa1rwd5SX3": {
+   "total_cost": 0.00028174,
+   "provider": "Venice"
+  },
+  "gen-1795344712-8aGQ7wyrUAZUNPyX0oZO": {
+   "total_cost": 0.000291,
+   "provider": "Venice"
+  },
+  "gen-1795344712-eInu2y2wecjICHm8AyBd": {
+   "total_cost": 0.00038078,
+   "provider": "Venice"
+  },
+  "gen-1795344713-fbmAVlZFnGnZyL2awmF9": {
+   "total_cost": 0.00029562,
+   "provider": "Venice"
+  },
+  "gen-1795344713-6toPFz2RXwCUBwmLEiLD": {
+   "total_cost": 0.00033554,
+   "provider": "Venice"
+  },
+  "gen-1795344714-3VJziFjY7vAjIG9YSmjQ": {
+   "total_cost": 0.00030986,
+   "provider": "Venice"
+  },
+  "gen-1795344714-fJgCtqxQ3BjWemg4pSDK": {
+   "total_cost": 0.00034978,
+   "provider": "Venice"
+  },
+  "gen-1795344715-f6Z16TtXBYpojItiCuV8": {
+   "total_cost": 0.0003725,
+   "provider": "Venice"
+  },
+  "gen-1795344715-Apg7Z22sRTLCYmAen5Ws": {
+   "total_cost": 0.00034064,
+   "provider": "Venice"
+  },
+  "gen-1795344716-YaxL0KLn5BWL09i3oulH": {
+   "total_cost": 0.00031188,
+   "provider": "Venice"
+  },
+  "gen-1795344716-dEsEThGCHVGTPeETNSuj": {
+   "total_cost": 0.00051394,
+   "provider": "Venice"
+  },
+  "gen-1795344717-L5s2AktcsAR2T9KgTQGG": {
+   "total_cost": 0.00035066,
+   "provider": "Venice"
+  },
+  "gen-1795344717-eg4msUCOa6TzTza41vfK": {
+   "total_cost": 0.00046322,
+   "provider": "Venice"
+  },
+  "gen-1795344718-KCMQopRR7evZBcN0gS1X": {
+   "total_cost": 0.0007344,
+   "provider": "Venice"
+  },
+  "gen-1795344719-0WOVsqAjRpcqIKf8Zk96": {
+   "total_cost": 0.0003729,
+   "provider": "Nebius"
+  },
+  "gen-1795344720-93tvjFWI1qLPKObcERei": {
+   "total_cost": 0.00013673,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344721-F3UP63RXiYoPd20shCDe": {
+   "total_cost": 0.00013165,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344722-FR9dWYJSVmnP1jpmKvy4": {
+   "total_cost": 0.00012283,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344722-WxkcfbUPOEAXzDyG3mBR": {
+   "total_cost": 0.0002589,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344724-rVWYBHu5SzIlrm7GYhQl": {
+   "total_cost": 0.00015931,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344724-ZrEKUiixGFFaO5YzHrMX": {
+   "total_cost": 0.00017434,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344725-Y7XR2SinHsHNUoU8mNeH": {
+   "total_cost": 0.00015591,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344726-3UXjIHdt3hMb2bqnCZGT": {
+   "total_cost": 0.00013267,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344726-xRxl2shVDb3MNWY2Elhp": {
+   "total_cost": 0.00012039,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344727-t36USL96045xL6f6YKJp": {
+   "total_cost": 0.000157,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344727-UqfPN4cQXR0weqV4Vt0z": {
+   "total_cost": 0.00017906,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344728-AG8adDTNBGo2IQ2HHa4G": {
+   "total_cost": 0.00015327,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344729-2c9oXXhGVoEiO8CAMrKY": {
+   "total_cost": 0.00027659,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344730-XL0ywOnul7qnxSxu7qIC": {
+   "total_cost": 0.00035235,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344732-0zOepEHmcwsZsTVDzTxr": {
+   "total_cost": 0.00021138,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344732-A5tZauON4rfgToKeWWuG": {
+   "total_cost": 0.00031357,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344733-y6yPSjJ9v5LrJtX2LRby": {
+   "total_cost": 0.00022643,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344734-dg4v5R4625PcCzAVCEqh": {
+   "total_cost": 0.00023337,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344735-ndklJMdInDSgCmH5371R": {
+   "total_cost": 0.00023518,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344736-JHTUmgb7aS3tA6aCAnWn": {
+   "total_cost": 0.00019905,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344737-G0mh9MU1zP7IHPyUc2ur": {
+   "total_cost": 0.00029402,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344738-0LKiJY9ZmCTqHCZDxIyQ": {
+   "total_cost": 0.00034308,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344739-AqgPhcOasLb4BKqVyHU7": {
+   "total_cost": 0.00032646,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344739-RbZRYgKhGECcxldRrjTf": {
+   "total_cost": 0.00023484,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344740-PwW6xV0nyJ94FZx40NhM": {
+   "total_cost": 0.00039011,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344741-6DzhRkJEUU3voJWl6mNy": {
+   "total_cost": 0.00026323,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344742-A8IjUgmOpfKG0SX6BxKD": {
+   "total_cost": 0.00029926,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344743-jtX6KKpcqhi1HyHQYqyh": {
+   "total_cost": 0.00027618,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344743-z7UgsxXjr22O2KgjUFbU": {
+   "total_cost": 0.00023765,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344744-AruIAmOjQJogCodBe1zM": {
+   "total_cost": 0.00039381,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344745-pXWMfxGmPkZUF1W8JNTG": {
+   "total_cost": 0.00028163,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344746-y6sl4PkGJT2lgXbsjpAR": {
+   "total_cost": 0.00033236,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344747-SIRZhMJSLNgp7lU9OhcG": {
+   "total_cost": 0.00045087,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344748-fOxli6TSC4MkESrqq5tR": {
+   "total_cost": 0.0002054,
+   "provider": "PrimaLabs"
+  },
+  "gen-1795344750-lUX4vZ9rzI7W57cAwbJ5": {
+   "total_cost": 0.0002817,
+   "provider": "Crusoe"
+  },
+  "gen-1795344751-4aiMODfDEWOLmziAvRCS": {
+   "total_cost": 0.0004348,
+   "provider": "Crusoe"
+  },
+  "gen-1795344754-iPFQc5EO5f6Wad7w2LBO": {
+   "total_cost": 0.0003121,
+   "provider": "Crusoe"
+  },
+  "gen-1795344755-bX3MVj23DgshwEaWoRT3": {
+   "total_cost": 0.00054532,
+   "provider": "Crusoe"
+  },
+  "gen-1795344759-fnP3MOwF4bETwxYi03O9": {
+   "total_cost": 0.00046192,
+   "provider": "Crusoe"
+  },
+  "gen-1795344760-mtSlgOB24KjYpfb48xB9": {
+   "total_cost": 0.00044884,
+   "provider": "Crusoe"
+  },
+  "gen-1795344761-yNOD5eGmCno1oOFlgoE8": {
+   "total_cost": 0.00066774,
+   "provider": "Crusoe"
+  },
+  "gen-1795344763-xmNpKP6SPb4FnzHefmvZ": {
+   "total_cost": 0.00212176,
+   "provider": "Crusoe"
+  },
+  "gen-1795344780-dJ07TXBrnnhdhMg9YqhA": {
+   "total_cost": 0.0002472,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344781-SjEaGwDfBa7e4UaJV9hq": {
+   "total_cost": 0.0005271,
+   "provider": "BaseTen"
+  },
+  "gen-1795344782-gbUjMCb07Er7fjibyOJT": {
+   "total_cost": 0.00016658,
+   "provider": "BaseTen"
+  },
+  "gen-1795344782-EBGVoFs9AgeDAyknlrXP": {
+   "total_cost": 0.00014742,
+   "provider": "BaseTen"
+  },
+  "gen-1795344783-jkIWv2d4NgXbVbaDDjM4": {
+   "total_cost": 0.00088964,
+   "provider": "BaseTen"
+  },
+  "gen-1795344785-FtKQ7GyZgacR2xKSAzyZ": {
+   "total_cost": 0.0002089,
+   "provider": "BaseTen"
+  },
+  "gen-1795344785-Ne8DC8wLy9wmG73qI3xy": {
+   "total_cost": 0.0002116,
+   "provider": "BaseTen"
+  },
+  "gen-1795344786-lU2PhpkY7S71IY66VcJE": {
+   "total_cost": 0.00022112,
+   "provider": "BaseTen"
+  },
+  "gen-1795344786-gQpXNzFq7iP6hGAbkhhV": {
+   "total_cost": 0.00038784,
+   "provider": "BaseTen"
+  },
+  "gen-1795344787-QeXReTAtHUts4xQlJrAz": {
+   "total_cost": 0.00022312,
+   "provider": "BaseTen"
+  },
+  "gen-1795344787-Npu9HwGuZmXrlnghHROC": {
+   "total_cost": 0.00023402,
+   "provider": "BaseTen"
+  },
+  "gen-1795344788-MCFcfpL9HY4blTVklp7l": {
+   "total_cost": 0.00057658,
+   "provider": "BaseTen"
+  },
+  "gen-1795344789-wvWIS9irV7yKGrbD1kMn": {
+   "total_cost": 0.00050598,
+   "provider": "BaseTen"
+  },
+  "gen-1795344789-W64427L9gkZYWTPuaa59": {
+   "total_cost": 0.00030416,
+   "provider": "BaseTen"
+  },
+  "gen-1795344790-OxV4xYggGsKkTglmOZv5": {
+   "total_cost": 0.00037098,
+   "provider": "BaseTen"
+  },
+  "gen-1795344790-KmWBi0b5rOUWlh3vETVJ": {
+   "total_cost": 0.0003269,
+   "provider": "BaseTen"
+  },
+  "gen-1795344791-FjUAtZ5FHIRRvEWzF2QM": {
+   "total_cost": 0.00031644,
+   "provider": "BaseTen"
+  },
+  "gen-1795344791-NVQujAdF1ULG9A7ao3Ip": {
+   "total_cost": 0.00031674,
+   "provider": "BaseTen"
+  },
+  "gen-1795344791-9N85J5Olt7cTeI96dYut": {
+   "total_cost": 0.00060806,
+   "provider": "BaseTen"
+  },
+  "gen-1795344792-cZu6Ri7wwOLLAYNCAMg4": {
+   "total_cost": 0.0003403,
+   "provider": "BaseTen"
+  },
+  "gen-1795344792-3Itzs3BHV43r3ZwUC9lt": {
+   "total_cost": 0.000412,
+   "provider": "BaseTen"
+  },
+  "gen-1795344793-yly5KpuQcF1xl8Q6w96o": {
+   "total_cost": 0.00037184,
+   "provider": "BaseTen"
+  },
+  "gen-1795344793-3AtfFsCaKTt3Sp3KIuZg": {
+   "total_cost": 0.00039314,
+   "provider": "BaseTen"
+  },
+  "gen-1795344794-OxqnXCPmjxm6oqy4FdUA": {
+   "total_cost": 0.00037526,
+   "provider": "BaseTen"
+  },
+  "gen-1795344794-7T7QCF7Dr9PPNKdZlu8X": {
+   "total_cost": 0.00052088,
+   "provider": "BaseTen"
+  },
+  "gen-1795344795-Wrdbc0R8qjTAHVntStGc": {
+   "total_cost": 0.00040326,
+   "provider": "BaseTen"
+  },
+  "gen-1795344795-4zPSIZonHSfFg7L0774I": {
+   "total_cost": 0.00042486,
+   "provider": "BaseTen"
+  },
+  "gen-1795344796-QJaPM84dH6r3b6CjLYI5": {
+   "total_cost": 0.00058398,
+   "provider": "BaseTen"
+  },
+  "gen-1795344796-cSKQcwHuiD2Wm2uNMMIx": {
+   "total_cost": 5.14e-05,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344797-PkLfn0U0XW9ArWoeH2Wr": {
+   "total_cost": 0.00011935,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344798-rCik72qC39rgBHHHGAyI": {
+   "total_cost": 0.00011698,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344799-fFhOllD8IUmlrKwhHS8w": {
+   "total_cost": 0.00017311,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344799-rXj49djUjXYVtoxnSl1w": {
+   "total_cost": 0.00010204,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344800-M7Ocm5k1vbsTF8nSrGug": {
+   "total_cost": 9.695e-05,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344801-QK1xJENhGPUoJGBcJ9Na": {
+   "total_cost": 9.276e-05,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344801-lQsTJZ2zBWhqcbmVynda": {
+   "total_cost": 0.00010536,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344802-b2ALjBIvXzKGWgVMWyX5": {
+   "total_cost": 0.00147652,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344807-LDoOIs0XBVumegMS5p9U": {
+   "total_cost": 0.00056003,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344808-6Unbc6kAg5pdB2sgrRHE": {
+   "total_cost": 0.00017942,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344809-6E9D7sNiEA0Y4cirqPqD": {
+   "total_cost": 0.00016728,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344810-FTouYKSDiQ446Bwo34Bf": {
+   "total_cost": 0.00019699,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344810-3PTiQYHT4DW12nL5U8nG": {
+   "total_cost": 0.00019504,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344811-jtjq5aFUqyEbeUBGEM5Q": {
+   "total_cost": 0.00019835,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344811-DuId1BQEQF8kAV9aO579": {
+   "total_cost": 0.00018081,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344812-HCbEp1K7qOd35928Xq7B": {
+   "total_cost": 0.00038497,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344813-hCOUyCkYsoXk3H0YH3ND": {
+   "total_cost": 0.00055778,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344815-l4ldKZe1Ckp0eowZiMXL": {
+   "total_cost": 0.00029577,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344816-CTJoeJb5qfF50FPt5ZSb": {
+   "total_cost": 0.00023718,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344817-EZP70s5VfE9WbnF9HRs3": {
+   "total_cost": 0.00023389,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344817-ueypAZhTTT8gHK7NHwad": {
+   "total_cost": 0.00021845,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344818-w6wPt7P7WLZsGi56c9dc": {
+   "total_cost": 0.00021021,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344818-2pmO0pKCTCG2luPIxCDK": {
+   "total_cost": 0.00035391,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344819-TvZTHaRD7EOHHHpE7hgw": {
+   "total_cost": 0.0002151,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344820-oxMY36VBZxGPKHeluxiZ": {
+   "total_cost": 0.00011845,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344820-7nlAHSLuNSOmK18qoYIg": {
+   "total_cost": 0.00011698,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344821-LL7vQaCKrcZenhjQcOk3": {
+   "total_cost": 0.00104686,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344825-gqXZ6AjK6lHpc5hudeBf": {
+   "total_cost": 0.00062314,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344827-HbGf6aYyoGKzBAbjeo8a": {
+   "total_cost": 0.0002876,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344828-hdTIoyfTnhfnii8MpJLc": {
+   "total_cost": 0.00018715,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344828-XekheHDOokzZKAuCCkhf": {
+   "total_cost": 0.00087147,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344832-Vp4vI1PBHkKJu5VN02cS": {
+   "total_cost": 0.00043363,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344833-f2d9mzJruQw1XR3lchMK": {
+   "total_cost": 0.00021176,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344834-D98atFHkxeOvgRMiHVxU": {
+   "total_cost": 0.00020562,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344834-qyiggZ7fJahWxHqTp6tG": {
+   "total_cost": 0.00025078,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344835-7e3k2lH6k7dmOLMThLHZ": {
+   "total_cost": 0.00025049,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344836-Pp5U0NB6fAtRhYycuZR0": {
+   "total_cost": 0.00022665,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344837-JIiBEsQ8iEF7FomeMtq0": {
+   "total_cost": 0.00021182,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344837-zlKYX4zuaOGwqKpcOt1d": {
+   "total_cost": 0.00024407,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344838-f52dAzcZePV24oQSbDF3": {
+   "total_cost": 0.00064038,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344840-knnQrtB0cQKccpfgpEaf": {
+   "total_cost": 0.00041209,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344842-OdLwj81TOA5gCx4mJ3L0": {
+   "total_cost": 0.00058662,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344845-UB5jiTY5WohevJF7gXFJ": {
+   "total_cost": 0.00034949,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344845-O35fZjkko0sO8SgUQKH0": {
+   "total_cost": 0.00027515,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344846-S7DLt3FyRZLXrZiZN3ry": {
+   "total_cost": 0.00033576,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344847-gLMs2jl8B2UJiecNxS9h": {
+   "total_cost": 0.00029752,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344848-pNM7ZCe9crQ7KGXoB0sW": {
+   "total_cost": 0.00060279,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344850-mDKZHSe3VFwgUNOKUMUr": {
+   "total_cost": 0.00033536,
+   "provider": "Venice"
+  },
+  "gen-1795344851-Eq8BP1U5c2eQyWRnRGtr": {
+   "total_cost": 0.0002077,
+   "provider": "Venice"
+  },
+  "gen-1795344852-IX6CIlv4nbR97Ms8r9ir": {
+   "total_cost": 0.00017888,
+   "provider": "Venice"
+  },
+  "gen-1795344852-SRe7qrkN9vFeNCOWkYHs": {
+   "total_cost": 0.00018644,
+   "provider": "Venice"
+  },
+  "gen-1795344852-7E5csqEGKSy8slV2gUqo": {
+   "total_cost": 0.0001988,
+   "provider": "Venice"
+  },
+  "gen-1795344853-aoFFffhUr2GzMEGGjkvW": {
+   "total_cost": 0.00068146,
+   "provider": "Venice"
+  },
+  "gen-1795344855-C4sLZcbfIqVToEwUvbYE": {
+   "total_cost": 0.00022294,
+   "provider": "Venice"
+  },
+  "gen-1795344855-hL12Swi3kLVhl0feOnl2": {
+   "total_cost": 0.00021976,
+   "provider": "Venice"
+  },
+  "gen-1795344855-QBMjbcvrh43Kr3Kl2H9k": {
+   "total_cost": 0.00021688,
+   "provider": "Venice"
+  },
+  "gen-1795344856-WSyx4efBQNvgfHkx85zI": {
+   "total_cost": 0.00022424,
+   "provider": "Venice"
+  },
+  "gen-1795344856-daoseK7KUhxtHKcyCzy1": {
+   "total_cost": 0.0002323,
+   "provider": "Venice"
+  },
+  "gen-1795344857-GCKQEzoybCvy4J60AEdK": {
+   "total_cost": 0.00022982,
+   "provider": "Venice"
+  },
+  "gen-1795344857-TYtKY2pUzOKY9R01ydcY": {
+   "total_cost": 0.00226108,
+   "provider": "Venice"
+  },
+  "gen-1795344862-W8U9RfbpEZrYQ4xxSm04": {
+   "total_cost": 0.00026655,
+   "provider": "PrimeIntellect"
+  },
+  "gen-1795344863-lOwssVXLdQrV2yhlkj2c": {
+   "total_cost": 0.00028555,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344864-UjM9RCU7utGIVlgIrt5l": {
+   "total_cost": 0.0003324,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344864-uYvGFVaKOSVNBcP2xDoq": {
+   "total_cost": 0.00038665,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344865-nTo2aNImVrasf2xlX27T": {
+   "total_cost": 0.00097455,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344867-GciitK7yWpBUhrC1Au3U": {
+   "total_cost": 0.0006063,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344867-qEIa6hbH4RYS60DGOr9b": {
+   "total_cost": 0.00061855,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344868-WdHDRCR8EeJGqZCOID4a": {
+   "total_cost": 0.0006318,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344868-ZkorGcV1mOA08BVelm9F": {
+   "total_cost": 0.00064405,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344869-B75QTGVWULxg3IdJ7uiY": {
+   "total_cost": 0.00065665,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344869-VLTu29P0N3ZpvOHWyigh": {
+   "total_cost": 0.0006699,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344869-yUbMMBM44jtk4orIori7": {
+   "total_cost": 0.0006828,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344870-WkgVO8DA5FePkKQq3KLl": {
+   "total_cost": 0.0021987,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344874-2PiDR6MzamYJOtheenpP": {
+   "total_cost": 0.00088586,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344874-L0BQ3eV3wForOXSugngF": {
+   "total_cost": 0.00062067,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344875-geDMSjzNwcGSgmByLpPV": {
+   "total_cost": 0.00224432,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344880-t7X98rBUFoDF8FP1lXOU": {
+   "total_cost": 0.00116467,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344880-bpaabalO75701pG0SEQi": {
+   "total_cost": 0.00061854,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344881-nLvWVkIyTZhfFFAdGr16": {
+   "total_cost": 0.00064219,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344881-irFP3pBuO9j854krYQpB": {
+   "total_cost": 0.00072044,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344882-7SEXLEUCNFf2t33kll7v": {
+   "total_cost": 0.00072079,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344883-EgaS1WgAPR7Y9k7LqNF0": {
+   "total_cost": 0.00074809,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344883-Sdc5xFt59tcuiokIben9": {
+   "total_cost": 0.00104094,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344884-XzJAFHKzGHCoORnZbQm8": {
+   "total_cost": 0.00085919,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344885-DLtgXgW8JrVTJKD3E4re": {
+   "total_cost": 0.00093469,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344886-1UXjH41yOlgkmEBGGG0r": {
+   "total_cost": 0.00098499,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344887-HAvVCuuLk1h8YcOGVDY8": {
+   "total_cost": 0.00068295,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344887-SgIpQTs2fwUzQ8kQmKUu": {
+   "total_cost": 0.0007048,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344888-XMJv2EHbRaGIWFRoTJzW": {
+   "total_cost": 0.00071805,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344888-nyc7EVpA13Llhu3Kdp7v": {
+   "total_cost": 0.0008038,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344889-H1tKQgxop5R5jKOL41x0": {
+   "total_cost": 0.0008017,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344889-hQe2xNhK84h3U458pCbx": {
+   "total_cost": 0.000821,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344890-gMdBT9ogn3eFcr9C01MM": {
+   "total_cost": 0.0008854,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344891-QPZgOlxhq8tp69cvtxt1": {
+   "total_cost": 0.00093365,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344891-muFztabSYxDXWis7cWxD": {
+   "total_cost": 0.00096285,
+   "provider": "DeepInfra"
+  },
+  "gen-1795344700-Szuzb6Z9GM4f48VI6JUL": {
+   "total_cost": 0.0008372,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344700-XR46KcyTJW47ssmIpFlF": {
+   "total_cost": 9.3064e-05,
+   "provider": "Wafer"
+  },
+  "gen-1795344701-9ISdBh9wIidDcMgVVh4z": {
+   "total_cost": 0.000105142,
+   "provider": "Wafer"
+  },
+  "gen-1795344701-BFBqkxCiRAmKrdtK4pev": {
+   "total_cost": 0.000185365,
+   "provider": "Wafer"
+  },
+  "gen-1795344702-jpkmqSqCcGMVq25WHd1G": {
+   "total_cost": 0.000152328,
+   "provider": "Wafer"
+  },
+  "gen-1795344703-nQvRnX3dbtm0eEVbmxOB": {
+   "total_cost": 0.000128112,
+   "provider": "Wafer"
+  },
+  "gen-1795344703-kmv8mkDkJzIbo0yQfs5y": {
+   "total_cost": 0.000191038,
+   "provider": "Wafer"
+  },
+  "gen-1795344704-iL1sb8LHjKr6VVC5R6TB": {
+   "total_cost": 0.000138473,
+   "provider": "Wafer"
+  },
+  "gen-1795344704-UAiz832c7UMGdjlPRB1W": {
+   "total_cost": 0.00015037,
+   "provider": "Wafer"
+  },
+  "gen-1795344705-oWPP2UV7L5FtBfKp5ry7": {
+   "total_cost": 0.000140013,
+   "provider": "Wafer"
+  },
+  "gen-1795344705-xIHpXYqyNCO9vRNYzO96": {
+   "total_cost": 0.000145325,
+   "provider": "Wafer"
+  },
+  "gen-1795344706-sBtQR8EdzohohZ37SXQp": {
+   "total_cost": 0.000160587,
+   "provider": "Wafer"
+  },
+  "gen-1795344706-EQ3qD9gWBREsp85mnbjp": {
+   "total_cost": 0.00015023,
+   "provider": "Wafer"
+  },
+  "gen-1795344707-Jz5mehzvDAna5QkZMNHV": {
+   "total_cost": 0.000207205,
+   "provider": "Wafer"
+  },
+  "gen-1795344707-BFspPhFjtOikPfEe8iv8": {
+   "total_cost": 0.00015821,
+   "provider": "Wafer"
+  },
+  "gen-1795344708-joHEXefhuEv7tOdDadbL": {
+   "total_cost": 0.000191385,
+   "provider": "Wafer"
+  },
+  "gen-1795344708-BoU51Ra0H0YHEgr6y85H": {
+   "total_cost": 0.000219243,
+   "provider": "Wafer"
+  },
+  "gen-1795344710-LuD429judtQ6Fr4dTkf7": {
+   "total_cost": 0.000171579,
+   "provider": "Wafer"
+  },
+  "gen-1795344710-bCFXYGUBUvFVOGPgn01K": {
+   "total_cost": 0.000222884,
+   "provider": "Wafer"
+  },
+  "gen-1795344711-cIXWTIkuPTpaIXWWuCyh": {
+   "total_cost": 0.00017921,
+   "provider": "Wafer"
+  },
+  "gen-1795344712-DLlYNec7eSS9cJiy7zpp": {
+   "total_cost": 0.000185265,
+   "provider": "Wafer"
+  },
+  "gen-1795344713-VXBRpofI9KobRxYVvZUm": {
+   "total_cost": 0.000247247,
+   "provider": "Wafer"
+  },
+  "gen-1795344714-qk52hU2qgQ90YBOip3yU": {
+   "total_cost": 0.000192153,
+   "provider": "Wafer"
+  },
+  "gen-1795344714-bt1tx5W9u6YsttvPhUXj": {
+   "total_cost": 0.000194464,
+   "provider": "Wafer"
+  },
+  "gen-1795344715-yZ2HKEWjlGG7i6CXkTV7": {
+   "total_cost": 0.000226386,
+   "provider": "Wafer"
+  },
+  "gen-1795344715-WYs3wI8RlVfVV3xepS5d": {
+   "total_cost": 0.000201398,
+   "provider": "Wafer"
+  },
+  "gen-1795344716-TqvKABkbtLwJVP9eqAAr": {
+   "total_cost": 0.000203772,
+   "provider": "Wafer"
+  },
+  "gen-1795344716-SjhkECr1HGi8RwHRGOQV": {
+   "total_cost": 0.000235695,
+   "provider": "Wafer"
+  },
+  "gen-1795344717-F4v55yyOB6tqnzjBJ0Vz": {
+   "total_cost": 0.000210706,
+   "provider": "Wafer"
+  },
+  "gen-1795344718-6AJfSf71SSmkFV04d6sQ": {
+   "total_cost": 0.000245141,
+   "provider": "Wafer"
+  },
+  "gen-1795344718-ZU78KrUGOG5hvVvDt4Rd": {
+   "total_cost": 0.00021931,
+   "provider": "Wafer"
+  },
+  "gen-1795344719-tbiH2YixkhqYqkbKNK7l": {
+   "total_cost": 0.000246751,
+   "provider": "Wafer"
+  },
+  "gen-1795344719-F4wYiQ8zJcIII1uoKjHU": {
+   "total_cost": 0.000225752,
+   "provider": "Wafer"
+  },
+  "gen-1795344720-o4uGJkceAR2U7TdjQ6NP": {
+   "total_cost": 0.000319133,
+   "provider": "Wafer"
+  },
+  "gen-1795344721-Qv1etfQrEV089thiSWaN": {
+   "total_cost": 0.000249269,
+   "provider": "Wafer"
+  },
+  "gen-1795344722-Q79FedLsRDTrJuIPriO3": {
+   "total_cost": 0.000238911,
+   "provider": "Wafer"
+  },
+  "gen-1795344723-F1W30SUW2vwNFiqjOpfo": {
+   "total_cost": 0.000318292,
+   "provider": "Wafer"
+  },
+  "gen-1795344724-mEKDdCMDbS0qEAopXjYm": {
+   "total_cost": 0.00059808,
+   "provider": "Wafer"
+  },
+  "gen-1795344726-koJpLmQVAelzLbuJ2dWx": {
+   "total_cost": 8.0343e-05,
+   "provider": "Wafer"
+  },
+  "gen-1795344726-273gWm8mbNxsnKqd8UQu": {
+   "total_cost": 0.000206646,
+   "provider": "Wafer"
+  },
+  "gen-1795344727-6kquBGj0UUZFhlPTAwqv": {
+   "total_cost": 0.000241563,
+   "provider": "Wafer"
+  },
+  "gen-1795344727-pMHzCaz9J3Ywka5gLFYV": {
+   "total_cost": 0.000229123,
+   "provider": "Wafer"
+  },
+  "gen-1795344727-Y8fpqYxQEZn4XeyVl1Jy": {
+   "total_cost": 0.000308904,
+   "provider": "Wafer"
+  },
+  "gen-1795344728-PmkXfSsdJMuloq1EK4Ll": {
+   "total_cost": 0.000253096,
+   "provider": "Wafer"
+  },
+  "gen-1795344728-4jZ6NOIpuFXCZ8Jqy2SC": {
+   "total_cost": 0.000276666,
+   "provider": "Wafer"
+  },
+  "gen-1795344729-FHWXEjG6Ru7SGv8x1okK": {
+   "total_cost": 0.000294783,
+   "provider": "Wafer"
+  },
+  "gen-1795344729-vl0YPeuRplQpzAXrkEDA": {
+   "total_cost": 0.000270932,
+   "provider": "Wafer"
+  },
+  "gen-1795344731-1YoY5VZfQUiZL3OPmrD7": {
+   "total_cost": 0.000302819,
+   "provider": "Wafer"
+  },
+  "gen-1795344735-F0Wx40VTZJ6kmbACXgWd": {
+   "total_cost": 0.000291274,
+   "provider": "Wafer"
+  },
+  "gen-1795344736-ZvwRaoR387HY48DCKDaC": {
+   "total_cost": 0.000361076,
+   "provider": "Wafer"
+  },
+  "gen-1795344736-Wp0JEBDnRChaNQnmpXXR": {
+   "total_cost": 0.00039529,
+   "provider": "Wafer"
+  },
+  "gen-1795344737-n4vLrNid9kAziV6rkTdA": {
+   "total_cost": 0.000329861,
+   "provider": "Wafer"
+  },
+  "gen-1795344738-zvenuUEuBfxVjEdF41V8": {
+   "total_cost": 0.000371906,
+   "provider": "Wafer"
+  },
+  "gen-1795344738-HXclVfunF642FCjN9FWK": {
+   "total_cost": 0.000346655,
+   "provider": "Wafer"
+  },
+  "gen-1795344738-UMTyKVDCm5MCnxMD03ph": {
+   "total_cost": 0.000386655,
+   "provider": "Wafer"
+  },
+  "gen-1795344739-sBu6aUAaqtIy7FKdtW7s": {
+   "total_cost": 0.000396308,
+   "provider": "Wafer"
+  },
+  "gen-1795344739-WCKKX7vwiLiYwGctLtDS": {
+   "total_cost": 0.000457825,
+   "provider": "Wafer"
+  },
+  "gen-1795344740-HuNjxSg4Z4Y9dsbDt4Ak": {
+   "total_cost": 0.000414438,
+   "provider": "Wafer"
+  },
+  "gen-1795344740-gZuJo3QGZMqAkPI3Ndkq": {
+   "total_cost": 0.000435419,
+   "provider": "Wafer"
+  },
+  "gen-1795344740-fFKBjXxVm2vdxPkxqi5M": {
+   "total_cost": 0.000737883,
+   "provider": "Wafer"
+  },
+  "gen-1795344744-LmJ8loCyieRrvNWv7naa": {
+   "total_cost": 0.000558991,
+   "provider": "Wafer"
+  },
+  "gen-1795344745-Ih9bIaMzsEfsnWIhrSnA": {
+   "total_cost": 0.000497161,
+   "provider": "Wafer"
+  },
+  "gen-1795344745-G3DdEEdQyhhesIxEDvbU": {
+   "total_cost": 0.000505427,
+   "provider": "Wafer"
+  },
+  "gen-1795344746-l7To1hOBZ4HDpBxzVT2i": {
+   "total_cost": 0.000558186,
+   "provider": "Wafer"
+  },
+  "gen-1795344746-S8UGN4JNsnGTgDd0Nf6T": {
+   "total_cost": 0.000523346,
+   "provider": "Wafer"
+  },
+  "gen-1795344747-ZnNPYyeWuL4EWAOP8rul": {
+   "total_cost": 0.000558212,
+   "provider": "Wafer"
+  },
+  "gen-1795344747-t6DyYQV3Snz1kmiumjfe": {
+   "total_cost": 0.000539066,
+   "provider": "Wafer"
+  },
+  "gen-1795344747-p3BxITRZ2Kmm0c3TJrXv": {
+   "total_cost": 0.000556333,
+   "provider": "Wafer"
+  },
+  "gen-1795344748-M0PObSQbjI2izlXJZiWY": {
+   "total_cost": 0.000623789,
+   "provider": "Wafer"
+  },
+  "gen-1795344748-o4hpDNgoUdvIkoUU1CSo": {
+   "total_cost": 0.000581559,
+   "provider": "Wafer"
+  },
+  "gen-1795344749-6oECVtm6jhBNafeHpM7f": {
+   "total_cost": 0.000624825,
+   "provider": "Wafer"
+  },
+  "gen-1795344749-3dCbTqpPnIScEEsvZSIX": {
+   "total_cost": 0.000797089,
+   "provider": "Wafer"
+  },
+  "gen-1795344750-MQAPan49oH6N4h60C58d": {
+   "total_cost": 7.9508e-05,
+   "provider": "Wafer"
+  },
+  "gen-1795344751-9XZ9aA0sLukBg4qzENw9": {
+   "total_cost": 0.000134368,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344751-JAE4lOhSwO7iV6xSLKnd": {
+   "total_cost": 0.000154184,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344752-w6e4UKePrAXHls2jaGwD": {
+   "total_cost": 0.000175752,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344752-mar44Y1JPTXLYubvIqzE": {
+   "total_cost": 0.00023942,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344753-1W9MmojktMbTaNrmocY3": {
+   "total_cost": 0.000203564,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344753-eDxjKIi4InY9ouz6myIL": {
+   "total_cost": 0.00020726,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344754-89Ie7r7FBtrBFwSoL8z9": {
+   "total_cost": 0.00021072,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344754-U1nslg7MTdlFos1KZl1r": {
+   "total_cost": 0.002005144,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344760-ZJd2trcP0tNpMAwXYwSo": {
+   "total_cost": 0.000264348,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344760-UUVNl9tVlfnaoKP0l8SK": {
+   "total_cost": 0.000266212,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344761-0vCjEYDcRYl9KKewBFXz": {
+   "total_cost": 0.000268396,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344761-I0rp5w9wHFwOS0GcPjJD": {
+   "total_cost": 0.000306596,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344762-9UDbUMaN3TogD8QMD60Z": {
+   "total_cost": 0.000274596,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344762-LBeWkpZ2Jpe19huSsrzW": {
+   "total_cost": 0.000277248,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344762-dpDNzSaBEBWfRqkNUplC": {
+   "total_cost": 0.000279432,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344763-GfQAfjqfao7DQipvO9wM": {
+   "total_cost": 0.000281296,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344763-H2IBPEsu4MEhhHmbbDfX": {
+   "total_cost": 0.00035548,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344764-rA8MYyyFXcC0ODaoNMQL": {
+   "total_cost": 0.000344624,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344764-NXasjQ3bilR6CSFKniTO": {
+   "total_cost": 0.000347832,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344764-RqGCR4o0SRqfOjQgEbuk": {
+   "total_cost": 0.000471588,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344765-onxvWpvMv2J2lmKYycc4": {
+   "total_cost": 0.002195,
+   "provider": "Fireworks"
+  },
+  "gen-1795344770-nIJolNJ7SslKxktEetTX": {
+   "total_cost": 0.00289172,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344771-3MLKVn2diKt0n62jERbf": {
+   "total_cost": 0.00145141,
+   "provider": "Decart"
+  },
+  "gen-1795344772-n9ROpEKK1j2WghLcWk4k": {
+   "total_cost": 0.00041509,
+   "provider": "Decart"
+  },
+  "gen-1795344772-9HKdy30nKR9VocA2v0Rm": {
+   "total_cost": 0.00040917,
+   "provider": "Decart"
+  },
+  "gen-1795344773-fyYhBaquPp7mrVAsnOyW": {
+   "total_cost": 0.00043269,
+   "provider": "Decart"
+  },
+  "gen-1795344774-qMP9Gj4ZKR5EwhuZaqur": {
+   "total_cost": 0.00042677,
+   "provider": "Decart"
+  },
+  "gen-1795344774-kWfqFiioULrscVbleXid": {
+   "total_cost": 0.00059461,
+   "provider": "Decart"
+  },
+  "gen-1795344775-FqJEduSaFz7ez1jse8ms": {
+   "total_cost": 7.4187e-05,
+   "provider": "Wafer"
+  },
+  "gen-1795344776-f3HaVF1lJHq43eW83Rff": {
+   "total_cost": 9.6732e-05,
+   "provider": "Wafer"
+  },
+  "gen-1795344778-bXtAU7kuuArRQmO9mDdN": {
+   "total_cost": 0.000248091,
+   "provider": "Wafer"
+  },
+  "gen-1795344780-VNbqOhJPmIQd92NHKkNH": {
+   "total_cost": 0.000111386,
+   "provider": "Wafer"
+  },
+  "gen-1795344780-KK1oydfRFr3MFlEfIXpI": {
+   "total_cost": 0.000127483,
+   "provider": "Wafer"
+  },
+  "gen-1795344781-j1A6azAt0rOPrUn4K1A5": {
+   "total_cost": 0.000133355,
+   "provider": "Wafer"
+  },
+  "gen-1795344782-r3KB7CGhkppzr2xfmfeO": {
+   "total_cost": 0.000206019,
+   "provider": "Wafer"
+  },
+  "gen-1795344783-PPu7Siw1rQTSAYQAS8n4": {
+   "total_cost": 0.000126572,
+   "provider": "Wafer"
+  },
+  "gen-1795344785-vFEjx15GvaoCwhgDyS4Y": {
+   "total_cost": 0.000171788,
+   "provider": "Wafer"
+  },
+  "gen-1795344785-5spFqtZ22hLPqNTVFPqd": {
+   "total_cost": 0.000134972,
+   "provider": "Wafer"
+  },
+  "gen-1795344786-BRdxc3ox8AkJ7tXBVueb": {
+   "total_cost": 0.00012979,
+   "provider": "Wafer"
+  },
+  "gen-1795344786-tITvUQ0LAajJd17zGNmZ": {
+   "total_cost": 0.000282927,
+   "provider": "Wafer"
+  },
+  "gen-1795344788-IBkX4LxNnKIppa2xiICU": {
+   "total_cost": 0.000166675,
+   "provider": "Wafer"
+  },
+  "gen-1795344788-zGLL8GefqIsYTcSZ9PuI": {
+   "total_cost": 0.000163669,
+   "provider": "Wafer"
+  },
+  "gen-1795344789-4PjGpW7ZEzV4iUaDZatt": {
+   "total_cost": 0.000170732,
+   "provider": "Wafer"
+  },
+  "gen-1795344789-7dV5FuRF8z1I7NcrU6iW": {
+   "total_cost": 0.000172486,
+   "provider": "Wafer"
+  },
+  "gen-1795344789-UVc7IkImg8U4kNFLDHy0": {
+   "total_cost": 0.000199439,
+   "provider": "Wafer"
+  },
+  "gen-1795344790-XzjHSy3ee2lVZxU8snbL": {
+   "total_cost": 0.000170251,
+   "provider": "Wafer"
+  },
+  "gen-1795344791-fHzGuYmFqTdib4R5dSXN": {
+   "total_cost": 0.000278934,
+   "provider": "Wafer"
+  },
+  "gen-1795344791-JbJGrzfnCluS4vj1BjQX": {
+   "total_cost": 0.000201955,
+   "provider": "Wafer"
+  },
+  "gen-1795344792-bVwrtLBSTtabH9D9dQKQ": {
+   "total_cost": 0.000204897,
+   "provider": "Wafer"
+  },
+  "gen-1795344792-0fvyO1uYugvkUWE1E6Wt": {
+   "total_cost": 0.000231914,
+   "provider": "Wafer"
+  },
+  "gen-1795344793-NqU47nY7FQf7HwoczKRM": {
+   "total_cost": 0.000234926,
+   "provider": "Wafer"
+  },
+  "gen-1795344794-e1S6gapChUYmOkzUB0da": {
+   "total_cost": 0.000205737,
+   "provider": "Wafer"
+  },
+  "gen-1795344794-ywLBBEAlD10ZKizBNnJj": {
+   "total_cost": 0.00022483,
+   "provider": "Wafer"
+  },
+  "gen-1795344795-HXSGHkEzBDYUd5JHPwWn": {
+   "total_cost": 0.000251655,
+   "provider": "Wafer"
+  },
+  "gen-1795344795-62SUXI9RmriDSUDa7nXK": {
+   "total_cost": 0.000254731,
+   "provider": "Wafer"
+  },
+  "gen-1795344796-ZXXoWhIYmQTaa71f7JfA": {
+   "total_cost": 0.000392143,
+   "provider": "Wafer"
+  },
+  "gen-1795344797-t5LgTagiYuxuc81ihmgG": {
+   "total_cost": 0.0015368,
+   "provider": "Together"
+  },
+  "gen-1795344797-R1rJx55T4kwgJPvRAMa1": {
+   "total_cost": 0.000154744,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344798-oIfn0839gftNJZqMFxXC": {
+   "total_cost": 0.000177,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344798-LezKvFni6awIejQd4E7J": {
+   "total_cost": 0.00046714,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344799-AhzAzrl40zZLupXXRmuO": {
+   "total_cost": 0.000215676,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344799-U4dYrJv0YaqGLfNa79U8": {
+   "total_cost": 0.000218144,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344799-VFdEI0WGjR4KPpH0frUe": {
+   "total_cost": 0.000168698,
+   "provider": "Wafer"
+  },
+  "gen-1795344800-7TazrQnDRH28q2BiC9j2": {
+   "total_cost": 0.00022436,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344800-otf0EOcvbtRRFsrCnLBO": {
+   "total_cost": 0.000383628,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344801-pUeN23N9tvaNn0W5We5L": {
+   "total_cost": 0.003309308,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344809-OFb8ZKCxCKmec6IoXWQZ": {
+   "total_cost": 0.00034738,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344810-PdByykHAhp4DSkZmh6Vi": {
+   "total_cost": 0.000411604,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344811-ydXxtAo0ScZryIxuOixD": {
+   "total_cost": 0.0024106,
+   "provider": "Fireworks"
+  },
+  "gen-1795344814-TlRS1lba8DPS5b32szXd": {
+   "total_cost": 0.001520708,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344819-4iefnMYcs84Gjr3Mx4sg": {
+   "total_cost": 0.00045414,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344820-22zXVjFE5kkymLDL9uTU": {
+   "total_cost": 0.000357892,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344820-oVoRk14clpoxF5dmlavp": {
+   "total_cost": 0.00084868,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344821-Won0k4b0jcKKWpZhlFrk": {
+   "total_cost": 0.000404044,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344822-szt0JsTnjQaBQJ97UyRZ": {
+   "total_cost": 0.00044978,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344822-PM7JtoIUnGByVHWIOSga": {
+   "total_cost": 0.000384924,
+   "provider": "InferenceNet"
+  },
+  "gen-1795344823-4DcqTen2DimmwzBYIzT5": {
+   "total_cost": 0.000320764,
+   "provider": "Wafer"
+  },
+  "gen-1795344823-SE0qrupv6pB0cIWKCnSJ": {
+   "total_cost": 0.000318496,
+   "provider": "Wafer"
+  },
+  "gen-1795344824-hKiT64OGatNiqf4HcJGi": {
+   "total_cost": 0.000320809,
+   "provider": "Wafer"
+  },
+  "gen-1795344824-xXi1Fg949Clk6nqOJq5X": {
+   "total_cost": 0.000386185,
+   "provider": "Wafer"
+  },
+  "gen-1795344825-nhfBz3JdbZxUy5R16SLd": {
+   "total_cost": 0.000318843,
+   "provider": "Wafer"
+  },
+  "gen-1795344826-bpbNDeSLQH6JEOKIoNVY": {
+   "total_cost": 0.000618867,
+   "provider": "Wafer"
+  },
+  "gen-1795344828-MOhGXKOLhXTcaQxxlQss": {
+   "total_cost": 0.000212255,
+   "provider": "Wafer"
+  },
+  "gen-1795344828-rlJBBaOGmQRP0m2JKD2f": {
+   "total_cost": 0.00030793,
+   "provider": "Decart"
+  },
+  "gen-1795344829-0GEQHcRf2iknmCz9ZZud": {
+   "total_cost": 0.00031977,
+   "provider": "Decart"
+  },
+  "gen-1795344829-3KfXvOQUh9kKsBjkyvJ1": {
+   "total_cost": 0.00114755,
+   "provider": "Decart"
+  },
+  "gen-1795344831-NzKVo525lfdS6RmwwCYG": {
+   "total_cost": 0.00028443,
+   "provider": "Decart"
+  },
+  "gen-1795344832-X2x6REYNSFdYzt7aeNyc": {
+   "total_cost": 0.00030515,
+   "provider": "Decart"
+  },
+  "gen-1795344832-jI1D2DsKYg0FRrddIYee": {
+   "total_cost": 0.00029643,
+   "provider": "Decart"
+  },
+  "gen-1795344833-nfKJj7lVcy2MdFOl92Zm": {
+   "total_cost": 0.00112803,
+   "provider": "Decart"
+  },
+  "gen-1795344835-45lg3thck6NX7oUdxy7v": {
+   "total_cost": 0.00052596,
+   "provider": "Decart"
+  },
+  "gen-1795344835-6n3GhMOMiYbhPb1CteRH": {
+   "total_cost": 0.00040599,
+   "provider": "Decart"
+  },
+  "gen-1795344836-Bx2pRdE1rpWf6hr4qoED": {
+   "total_cost": 0.00037813,
+   "provider": "Decart"
+  },
+  "gen-1795344836-fKjnRlteP3kfcZ1mziw7": {
+   "total_cost": 0.00040165,
+   "provider": "Decart"
+  },
+  "gen-1795344837-tqlf1gLb2bdKrL13Ey7W": {
+   "total_cost": 0.00042551,
+   "provider": "Decart"
+  },
+  "gen-1795344837-NiojZu6XoRarZQuFWoT4": {
+   "total_cost": 0.00039994,
+   "provider": "Decart"
+  },
+  "gen-1795344837-AySZQor0TOrTDgYtwI4T": {
+   "total_cost": 0.00038562,
+   "provider": "Decart"
+  },
+  "gen-1795344838-2CQHg1fqTxGPqZZgweq1": {
+   "total_cost": 0.00043013,
+   "provider": "Decart"
+  },
+  "gen-1795344838-EOAfC38Xk50ryjpz6tzM": {
+   "total_cost": 0.00055892,
+   "provider": "Decart"
+  },
+  "gen-1795344839-Ki0tsrcY1xvgoPjDKzG7": {
+   "total_cost": 0.00047649,
+   "provider": "Decart"
+  },
+  "gen-1795344839-QnyARgHBjzTn7IMKHaCg": {
+   "total_cost": 0.00040898,
+   "provider": "Decart"
+  },
+  "gen-1795344840-q5Wfi73gYf1IjQbbCiez": {
+   "total_cost": 0.0004241,
+   "provider": "Decart"
+  },
+  "gen-1795344841-tbZDWropNEoBfy8vwQGb": {
+   "total_cost": 0.00040978,
+   "provider": "Decart"
+  },
+  "gen-1795344841-MPIIAuvEjsbNXCPp71zO": {
+   "total_cost": 0.00043757,
+   "provider": "Decart"
+  },
+  "gen-1795344842-RBE5C3jZn0ET15tPU8aW": {
+   "total_cost": 0.00052853,
+   "provider": "Decart"
+  },
+  "gen-1795344842-L0TZXHVB5UIwcrjcOJgu": {
+   "total_cost": 0.00102962,
+   "provider": "Decart"
+  },
+  "gen-1795344844-jLRlON3dhHCgSG1tdHbb": {
+   "total_cost": 0.0005585,
+   "provider": "Cohere"
+  },
+  "gen-1795344844-IzAN3aRNjAggsIQCVlEM": {
+   "total_cost": 0.00028884,
+   "provider": "Decart"
+  },
+  "gen-1795344845-iOLLzWEl7ZzylGwszRFr": {
+   "total_cost": 0.00031948,
+   "provider": "Decart"
+  },
+  "gen-1795344845-q8bHES1zaNBBJTNLXXzV": {
+   "total_cost": 0.00032236,
+   "provider": "Decart"
+  },
+  "gen-1795344846-Q66m3lM9RHyaLJIOpQuI": {
+   "total_cost": 0.00047843,
+   "provider": "Decart"
+  },
+  "gen-1795344846-6vzpsCgMc7HqLi2X64O6": {
+   "total_cost": 0.00038132,
+   "provider": "Decart"
+  },
+  "gen-1795344847-8REevb5ISdtb6XtcLoAj": {
+   "total_cost": 0.00026915,
+   "provider": "Decart"
+  },
+  "gen-1795344847-BGRPwEnSSheCHGCQdFnA": {
+   "total_cost": 0.00029099,
+   "provider": "Decart"
+  },
+  "gen-1795344848-5AxIrzFZSruNnA8roXCR": {
+   "total_cost": 0.00028339,
+   "provider": "Decart"
+  },
+  "gen-1795344848-HGs0FqNYushKT6AcCSS5": {
+   "total_cost": 0.00027398,
+   "provider": "Decart"
+  },
+  "gen-1795344848-h7dQR1vEoYcv1xi5Kpbb": {
+   "total_cost": 0.00029651,
+   "provider": "Decart"
+  },
+  "gen-1795344849-rvICwYYNfRzY2dqQSnit": {
+   "total_cost": 0.00202289,
+   "provider": "Decart"
+  },
+  "gen-1795344852-LhjNkS3Jd8ihq8GnH0ac": {
+   "total_cost": 0.00039062,
+   "provider": "Decart"
+  },
+  "gen-1795344853-FK3isCa4hZTkj4hBwWOO": {
+   "total_cost": 0.00042814,
+   "provider": "Decart"
+  },
+  "gen-1795344853-IVntixYW2IkRKuNfWp9c": {
+   "total_cost": 0.00043622,
+   "provider": "Decart"
+  },
+  "gen-1795344854-aCFsaj8PMfGYysGNJtua": {
+   "total_cost": 0.00162999,
+   "provider": "Decart"
+  },
+  "gen-1795344857-t6XoAsGzs8lNmQQfoVUZ": {
+   "total_cost": 0.00057919,
+   "provider": "Decart"
+  },
+  "gen-1795344857-QGCsczWx7MpOQHE7GYES": {
+   "total_cost": 0.00056296,
+   "provider": "Decart"
+  },
+  "gen-1795344858-raosEraMUgmbBVo5dI41": {
+   "total_cost": 0.00055544,
+   "provider": "Decart"
+  },
+  "gen-1795344859-gYC1eKp9nJnyZmdbRPvH": {
+   "total_cost": 0.00055792,
+   "provider": "Decart"
+  },
+  "gen-1795344859-cDOAnkRMJ092OVU8JAtT": {
+   "total_cost": 0.00059527,
+   "provider": "Decart"
+  },
+  "gen-1795344860-ftJZ45rai5ib7Ayfmpdh": {
+   "total_cost": 0.00060848,
+   "provider": "Decart"
+  },
+  "gen-1795344860-CeyCNpFR9ZK8RZdM11KU": {
+   "total_cost": 0.00097959,
+   "provider": "Decart"
+  },
+  "gen-1795344862-dl84oOA6aPtwqG5ZseE5": {
+   "total_cost": 0.0006137,
+   "provider": "Decart"
+  },
+  "gen-1795344862-qFidCtOIlv8qwzvlYlyy": {
+   "total_cost": 0.00063036,
+   "provider": "Decart"
+  },
+  "gen-1795344863-NXkS1rXERZKmTtb0VEir": {
+   "total_cost": 0.00063508,
+   "provider": "Decart"
+  },
+  "gen-1795344863-R6Hyj1m2OUzJboZpiRgG": {
+   "total_cost": 0.0006529,
+   "provider": "Decart"
+  },
+  "gen-1795344864-74f7qGqVVpV4Kaq7B41E": {
+   "total_cost": 0.00058853,
+   "provider": "Decart"
+  },
+  "gen-1795344865-cIuWImRjPzxvq7jMyyna": {
+   "total_cost": 0.00067178,
+   "provider": "Decart"
+  },
+  "gen-1795344865-u4tAxb8cEgvotLDB6aDW": {
+   "total_cost": 0.00067167,
+   "provider": "Decart"
+  },
+  "gen-1795344866-A41Yt2PlJOTtVtTVUZXI": {
+   "total_cost": 0.00069298,
+   "provider": "Decart"
+  },
+  "gen-1795344867-XwsAANNUt10M6gC8eBlZ": {
+   "total_cost": 0.00064895,
+   "provider": "Decart"
+  },
+  "gen-1795344867-SiH13kDviBUHCYgerTck": {
+   "total_cost": 0.00069703,
+   "provider": "Decart"
+  },
+  "gen-1795344868-MX49JF5f7b94nBOQWdD0": {
+   "total_cost": 0.000693,
+   "provider": "Decart"
+  },
+  "gen-1795344868-THi34kuY70DFY2WbtruA": {
+   "total_cost": 0.00090406,
+   "provider": "Decart"
+  },
+  "gen-1795344869-NyqinU5sp1g0JCNbm7Wu": {
+   "total_cost": 0.000177363,
+   "provider": "Wafer"
+  },
+  "gen-1795344869-KZbtKRtnHkgGHuYyKvEs": {
+   "total_cost": 0.00125125,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344872-ENuywVb0YrmADEzp8JGE": {
+   "total_cost": 0.000495534,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344872-ADWeijJNQAUN53efe0l7": {
+   "total_cost": 0.000550628,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344873-O3KnoO4E4o1TZl22lMLc": {
+   "total_cost": 0.000524082,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344874-K0736usyuuynbrvte7Ax": {
+   "total_cost": 0.00041548,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344875-cSC1uJYMzDLvLeomiJH3": {
+   "total_cost": 0.000404586,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344875-qm6HsklHbMG9TVWpfMLJ": {
+   "total_cost": 0.000440076,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344876-KPd95FsjyhqzbmTOJHYZ": {
+   "total_cost": 0.000428142,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344877-VV0VN5TipfjuteWn5Xft": {
+   "total_cost": 0.000463632,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344878-ZXserEApSOJkJeGYqWKv": {
+   "total_cost": 0.000448838,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344879-RrQW2Ma5L8L9SlHsl46f": {
+   "total_cost": 0.000437944,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344879-6U2HDkHMq7fDP50igfGK": {
+   "total_cost": 0.001851954,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344882-MXaQHYKask04n7ahkB9H": {
+   "total_cost": 0.000708942,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344884-mYYQt0pdOSusPYPiDmG3": {
+   "total_cost": 0.000629434,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344884-v0ChPEe1uoTo3gAspyai": {
+   "total_cost": 0.00062088,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344885-XtGLZCxCPpqwwLZIqmMx": {
+   "total_cost": 0.000674986,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344886-LdbEDVrAGQwUwpmEk1Ew": {
+   "total_cost": 0.000648882,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344886-jWSQDjh2NslcaoljGhVN": {
+   "total_cost": 0.000635128,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344887-2ydsTxgftKIvYWYADp4Y": {
+   "total_cost": 0.000806754,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344887-LHAWBi4iuAu7dqylJWx2": {
+   "total_cost": 0.00085345,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344888-OE7Z7jIdXp8NkB7yoyHT": {
+   "total_cost": 0.000958412,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344889-xUL1x7lnhxnooMVzJBvt": {
+   "total_cost": 0.000925444,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344890-cy3RcIAkgRlyGKN2le3b": {
+   "total_cost": 0.000791596,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344891-MvZTWtDlMjAhUUvVyVb7": {
+   "total_cost": 0.000795912,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344892-B2qBRYGQVWVE7My8SmTg": {
+   "total_cost": 0.000896558,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344892-CQimqX8xeV2xIqK4ZPOM": {
+   "total_cost": 0.000924274,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344893-DmAUUcNnKoVvz4zku6Pc": {
+   "total_cost": 0.000907556,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344894-ivBeoC35vOPPUTq3BTJv": {
+   "total_cost": 0.000860132,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344895-DqIgP3hlIVo72UEyeXs6": {
+   "total_cost": 0.000918788,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344896-wjtvHHUzKCSJGrR8IcLq": {
+   "total_cost": 0.000976664,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344897-fpgbStQ8TRXz5XDbOz3f": {
+   "total_cost": 0.000926536,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344897-uNUjVzSNQx1EiMKsIcCM": {
+   "total_cost": 0.000894842,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344898-DtQdMRSa2pmaZqRUbYCD": {
+   "total_cost": 0.000985998,
+   "provider": "DigitalOcean"
+  },
+  "gen-1795344899-54cD6m7RJH8kpUpDn85P": {
+   "total_cost": 0.001384734,
+   "provider": "DigitalOcean"
+  }
+ },
+ "missing": []
+}
