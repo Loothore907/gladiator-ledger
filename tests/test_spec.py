@@ -3,7 +3,7 @@
 import hashlib
 import json
 
-from ledger import cli, load, spec
+from ledger import cli, load, reports, spec
 
 
 def flow_run(folder, run_id, node, title, brief, policy, a, b, results, tools, budget=0.12):
@@ -23,7 +23,16 @@ def flow_run(folder, run_id, node, title, brief, policy, a, b, results, tools, b
             },
             "instance": {"seed": i, "difficulty": "standard"},
             "public_packet": {"brief": brief, "policy": policy, "action_budget": 40},
-            "turns": [{"tool_name": t} for t in tools],
+            # a record from the fixed engine: each call carries its cost of record and its token counts
+            "turns": [
+                {
+                    "tool_name": t,
+                    "cost_usd": cost / len(tools),
+                    "list_cost_usd": cost / len(tools),
+                    "usage": {"input_tokens": 20, "cached_input_tokens": 15, "output_tokens": 2},
+                }
+                for t in tools
+            ],
             "passed": passed,
             "termination": "session_ended",
             "cost_usd": cost,
@@ -129,7 +138,14 @@ def test_spec_has_a_decision_a_blueprint_and_evidence_from_the_matches_it_rests_
 
     assert [e["run"] for e in built["evidence"]] == ["r1"] and built["test_fingerprint"] == "cd" * 32
     text = spec.markdown(built)
-    for part in ("## 1. Decision", "## 2. Blueprint", "## 3. Evidence", "Use `p:a` for this task", "`r1`"):
+    for part in (
+        "## 1. Decision",
+        "## 2. Blueprint",
+        "## 3. Cost",
+        "## 4. Evidence",
+        "Use `p:a` for this task",
+        "`r1`",
+    ):
         assert part in text
     assert json.loads(text.split("```json\n")[1].split("\n```")[0])["chosen"] == "p:a"
 
@@ -148,3 +164,38 @@ def test_spec_names_no_model_when_the_match_does_not_settle_it(tmp_path, capsys)
     out = tmp_path / "spec.md"
     assert cli.main(["spec", "t/refunds", "--a", "p:a", "--b", "p:b", "--out", str(out), "--store", store]) == 0
     assert "## 2. Blueprint" in out.read_text()
+
+
+def test_cost_and_evidence_reports_are_written_from_the_same_verdict_as_the_spec(tmp_path, capsys):
+    store = build(tmp_path)
+    found = cli.verdict(store, "t/refunds", "p:a", "p:b", profile="personal")
+    for name in ("p:a", "p:b"):
+        s = found["models"][name]
+        assert s["spent"] > 0 and abs(s["cost_per_attempt"] * s["attempts"] - s["spent"]) < 1e-12
+        assert s["cost_per_pass"] is None or abs(s["cost_per_pass"] * s["passed"] - s["spent"]) < 1e-12
+        assert s["cost_basis"] and s["tokens_in"] >= s["tokens_cached"] >= 0
+
+    cost = reports.cost_markdown(found, "Refund queue")
+    a = found["models"]["p:a"]
+    assert cost.startswith("# Cost breakdown: Refund queue")
+    assert f"${a['cost_per_attempt']:.4f}" in cost and f"${a['cost_per_attempt'] * 1000:.2f}" in cost
+    assert f"${a['spent']:.4f} over {a['attempts']} attempts" in cost
+    # one row per judged pair, each naming its sealed record
+    assert cost.count("| `r1` |") == found["pairs"]
+
+    evidence = reports.evidence_markdown(found, "Refund queue")
+    assert evidence.startswith("# Evidence report: Refund queue") and found["headline"] in evidence
+    assert evidence.count("| `r1` |") == found["pairs"] and "## Sealed records" in evidence
+    for name in ("p:a", "p:b"):
+        for fault in found["fit"][name]["faults"]:
+            assert f"| {fault['fault']} | {fault['level']} | {fault['attempts_with']} of" in evidence
+
+    # the command prints one document or all three, and writes three files side by side
+    args = ["spec", "t/refunds", "--a", "p:a", "--b", "p:b", "--store", store]
+    assert cli.main([*args, "--report", "cost"]) == 0
+    assert capsys.readouterr().out.strip() == cost.strip()
+    out = tmp_path / "plan.md"
+    assert cli.main([*args, "--report", "all", "--out", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").startswith("# Spec:")
+    assert (tmp_path / "plan.cost.md").read_text(encoding="utf-8") == cost
+    assert (tmp_path / "plan.evidence.md").read_text(encoding="utf-8") == evidence

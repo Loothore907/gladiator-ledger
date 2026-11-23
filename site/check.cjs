@@ -98,7 +98,7 @@ function fakeRunner(models) {
       step('B', 1, 'escalate_alert', { alert_id: 'ALR-1' }, 5);
       send('attempt_end', { side: 'A', passed: true, termination: 'session_ended', grade_details: { items: 1, correct: 1 } });
       send('attempt_end', { side: 'B', passed: false, termination: 'no_action', grade_details: { items: 1, correct: 0, wrong: 1 } });
-      send('record', { record: { sha256: 'abcdef0123456789', body: { run_id: 'live-check-1', live: true, verdict: { winner: 'A' } } }, operator: {} });
+      send('record', { record: { sha256: 'abcdef0123456789', body: { run_id: 'live-check-1', live: true, verdict: { winner: 'A' }, contestants: { A: { results: [{ passed: true, cost_usd: 0.0021, calls: 3, input_tokens: 900, output_tokens: 40, wall_s: 6, termination: 'session_ended' }] }, B: { results: [{ passed: false, cost_usd: 0.0034, calls: 1, input_tokens: 400, output_tokens: 25, wall_s: 5, termination: 'no_action' }] } } } }, operator: {} });
       res.end();
     });
   });
@@ -158,7 +158,7 @@ async function main() {
       const got = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.verdict(t, a, b, p, o), args);
       same(want, got, `judged[${i}] (${want.task}: ${want.a} vs ${want.b}, ${want.profile}${overrides ? ', own rule' : ''})`);
     }
-    for (const [i, { overrides, spec: want, markdown: wantText }] of expected.judged_specs.entries()) {
+    for (const [i, { overrides, spec: want, markdown: wantText, cost: wantCost, evidence: wantEvidence }] of expected.judged_specs.entries()) {
       const args = [want.task, want.decision.a, want.decision.b, want.decision.profile, overrides];
       const got = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.spec(t, a, b, p, o), args);
       same(want, got, `judged_specs[${i}] (${args.slice(0, 4).join(', ')})`);
@@ -173,6 +173,16 @@ async function main() {
         problems.push(`judged_specs[${i}]: Markdown differs at character ${at}: page ${JSON.stringify(md.slice(at - 30, at + 60))}, command line ${JSON.stringify(wantText.slice(at - 30, at + 60))}`);
       }
       compared += 1;
+      // the two reports that go with the spec must be the command line's text too
+      const reports = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.reports(t, a, b, p, o), args);
+      for (const [kind, wantReport] of [['cost', wantCost], ['evidence', wantEvidence]]) {
+        if (typeof wantReport !== 'string' || wantReport.length < 200) problems.push(`judged_specs[${i}]: no expected ${kind} report to compare`);
+        else if (reports[kind] !== wantReport) {
+          const at = [...reports[kind]].findIndex((ch, k) => ch !== wantReport[k]);
+          problems.push(`judged_specs[${i}]: the ${kind} report differs at character ${at}: page ${JSON.stringify(reports[kind].slice(at - 30, at + 60))}, command line ${JSON.stringify(wantReport.slice(at - 30, at + 60))}`);
+        }
+        compared += 1;
+      }
       if (!block) problems.push(`judged_specs[${i}]: the Markdown is not in the expected shape`);
       else same(want, JSON.parse(block[1]), `judged_specs[${i}] Markdown JSON block`);
     }
@@ -295,6 +305,9 @@ async function main() {
         { timeout: 15000 },
       )
       .then(() => true, () => false);
+    for (const id of ['download-spec', 'download-cost', 'download-evidence', 'download-all']) {
+      if (example && !(await page.locator(`#${id}`).count())) problems.push(`the result offers no ${id} button`);
+    }
     if (!example) problems.push('the example button did not end on a drawn verdict');
     else if (!(await page.locator('#verdict-band').getAttribute('class')).includes('win')) {
       problems.push('the example button did not end on a verdict that names a model to use (the data has one)');
@@ -360,6 +373,12 @@ async function main() {
           const want = pair.better === pair.a ? 'in line with the record' : 'against the record';
           if (!said.includes(want)) problems.push(`the live result should read "${want}": ${JSON.stringify(said)}`);
           if (!said.includes('live-check-1')) problems.push('the live result does not name its sealed record');
+          // the live race offers its own report: this scenario, both costs, its sealed record, and that it is live
+          const liveText = await live.evaluate(() => window.ledgerDemo.lastLiveReport || '');
+          if (!(await live.locator('#download-live').count())) problems.push('the live result offers no report to download');
+          for (const part of ['# Live race report', 'live-check-1', '$0.0021', '$0.0034', 'This race cost $0.0055', 'kept apart from the recorded matches']) {
+            if (!liveText.includes(part)) problems.push(`the live race report lacks ${JSON.stringify(part)}`);
+          }
           const ticks = await live.locator('#live-stage .tick').count();
           if (ticks !== 6) problems.push(`the live lanes show ${ticks} of the 6 streamed steps`);
           if ((await live.locator('#live-stage .outcome:not([hidden])').count()) !== 2) problems.push('the live lanes do not both show a grade');

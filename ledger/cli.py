@@ -19,7 +19,7 @@ from pathlib import Path
 
 import relate
 
-from ledger import load, policy, publish, questions, spec
+from ledger import load, policy, publish, questions, reports, spec
 from ledger.bridges import epoch
 
 DEFAULT_STORE = "data/ledger.rl"
@@ -360,11 +360,20 @@ def outcome(v: dict, fit: dict) -> tuple[str, str, str | None]:
 def _side(pairs: list[dict], side: str) -> dict:
     n = len(pairs)
     passed = sum(1 for p in pairs if p[f"{side}_passed"])
+    spent = sum(p[f"{side}_cost"] or 0 for p in pairs)
     return {
         "attempts": n,
         "passed": passed,
         "pass_rate": passed / n,
-        "cost_per_attempt": sum(p[f"{side}_cost"] or 0 for p in pairs) / n,
+        "cost_per_attempt": spent / n,
+        # what a successful result really costs, failures included (None when nothing passed)
+        "cost_per_pass": spent / passed if passed else None,
+        "spent": spent,
+        "cost_basis": sorted({str(p[f"{side}_basis"]) for p in pairs}),
+        "calls_per_attempt": sum(p[f"{side}_calls"] or 0 for p in pairs) / n,
+        "tokens_in": sum(p[f"{side}_in"] or 0 for p in pairs) / n,
+        "tokens_cached": sum(p[f"{side}_cached"] or 0 for p in pairs) / n,
+        "tokens_out": sum(p[f"{side}_out"] or 0 for p in pairs) / n,
         "seconds_per_attempt": sum(p[f"{side}_time"] or 0 for p in pairs) / n,
         "mistakes": sum(p[f"{side}_mistakes"] or 0 for p in pairs) / n,
         "effort": sorted({str(p[f"{side}_effort"]) for p in pairs}),
@@ -450,6 +459,8 @@ def verdict(
                 "rule": p["rule"],
                 "a_passed": p["a_passed"],
                 "b_passed": p["b_passed"],
+                "a_cost": p["a_cost"],
+                "b_cost": p["b_cost"],
                 "run": p["run"],
                 "match": p["match"],  # run/workflow/attempt: where the page finds this scenario's replay
             }
@@ -690,6 +701,12 @@ def main(argv=None):
     sp.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that is good enough")
     sp.add_argument("--out", type=Path, help="write the spec to this file (Markdown) instead of printing it")
     sp.add_argument("--json", action="store_true", help="print the spec as JSON only")
+    sp.add_argument(
+        "--report",
+        choices=["spec", "cost", "evidence", "all"],
+        default="spec",
+        help="which document: the spec (build plan), the cost breakdown, the evidence report, or all three",
+    )
     o = sub.add_parser(
         "opponents", parents=[common], help="models that score close to one you name: candidates for a fair match"
     )
@@ -776,12 +793,24 @@ def main(argv=None):
         found = verdict(args.store, args.workflow, a, b, args.suite, bar=args.bar, profile=profile)
         found["suite"] = args.suite
         built = spec.build(lambda q, p: rows(args.store, q, p), found)
-        text = json.dumps(built, indent=1, default=str) if args.json else spec.markdown(built)
-        if args.out:
-            args.out.write_text(text, encoding="utf-8")
-            print(f"Spec written to {args.out}")
+        title = (built.get("blueprint") or {}).get("title") or built["task"]
+        docs = {
+            "spec": lambda: json.dumps(built, indent=1, default=str) if args.json else spec.markdown(built),
+            "cost": lambda: reports.cost_markdown(found, title),
+            "evidence": lambda: reports.evidence_markdown(found, title),
+        }
+        wanted = list(docs) if args.report == "all" else [args.report]
+        if args.report == "all" and args.out:
+            # three files side by side: spec.md, spec.cost.md, spec.evidence.md
+            for name in wanted:
+                path = args.out if name == "spec" else args.out.with_suffix(f".{name}{args.out.suffix}")
+                path.write_text(docs[name](), encoding="utf-8")
+                print(f"{name.capitalize()} written to {path}")
+        elif args.out:
+            args.out.write_text(docs[wanted[0]](), encoding="utf-8")
+            print(f"{wanted[0].capitalize()} written to {args.out}")
         else:
-            print(text)
+            print("\n\n".join(docs[name]() for name in wanted))
     elif args.cmd == "opponents":
         result = opponents(args.store, args.model, args.open_only, args.n)
         if args.json:

@@ -200,9 +200,11 @@ OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
 RETURN mt.key AS match, r.run_id AS run, r.seal_sha256 AS seal, r.engine_commit AS engine, r.suite AS suite,
        tv.key AS version, mt.difficulty AS difficulty, mt.rule AS rule, coalesce(w.name, 'tie') AS winner,
        xa.passed AS a_passed, xa.cost_usd AS a_cost, xa.wall_s AS a_time, xa.mistakes AS a_mistakes,
-       xa.effort AS a_effort,
+       xa.effort AS a_effort, xa.cost_basis AS a_basis, xa.calls AS a_calls,
+       xa.tokens_in AS a_in, xa.tokens_cached AS a_cached, xa.tokens_out AS a_out,
        xb.passed AS b_passed, xb.cost_usd AS b_cost, xb.wall_s AS b_time, xb.mistakes AS b_mistakes,
-       xb.effort AS b_effort
+       xb.effort AS b_effort, xb.cost_basis AS b_basis, xb.calls AS b_calls,
+       xb.tokens_in AS b_in, xb.tokens_cached AS b_cached, xb.tokens_out AS b_out
 ORDER BY mt.key
 """
 

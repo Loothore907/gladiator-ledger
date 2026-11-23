@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { createLedger } from './ledger.js';
+import { costMarkdown, createLedger, evidenceMarkdown } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -63,6 +63,14 @@ window.ledgerDemo = {
   specMarkdownJudged: async (task, a, b, profile, overrides = null) => {
     const { ledger } = await ledgerReady;
     return ledger.markdown(await ledger.spec(task, a, b, profile, overrides));
+  },
+  // the cost breakdown and the evidence report for one judged pair, as the command line writes them
+  reports: async (task, a, b, profile, overrides = null) => {
+    const { ledger, rules } = await ledgerReady;
+    const v = await ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, overrides);
+    const built = await ledger.build({ ...v, suite: null });
+    const title = (built.blueprint || {}).title || built.task;
+    return { cost: costMarkdown(v, title), evidence: evidenceMarkdown(v, title) };
   },
   specMarkdown: async (task, a, b) => {
     const { ledger } = await ledgerReady;
@@ -847,6 +855,12 @@ async function drawLive(v) {
             ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
             : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${v.wins[v.better]} of ${v.pairs}, but it is now on file.`;
       say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. A live result is kept apart from the recorded evidence the verdict rests on.'));
+      const liveText = liveReport(record, a, b, task, v);
+      window.ledgerDemo.lastLiveReport = liveText;
+      say.append(
+        ' ',
+        el('button', { type: 'button', id: 'download-live', class: 'quiet small', onclick: () => download(liveText, 'live-race-report.md') }, 'Download the live race report'),
+      );
       // the result joins the graph, as its own kind of node, and the picture is drawn from the graph again
       await ask(ADD_LIVE, { run: record.body.run_id, winner, seal: record.sha256, at: Date.now(), version: v.version, a, b });
       grown.replaceChildren(await evidenceGraph(v));
@@ -866,6 +880,50 @@ async function drawLive(v) {
   );
 }
 const spec_task = (test) => test.split('/').pop();
+
+// The report of one live race, from the sealed record the runner handed back. It is one scenario, and it says so:
+// a live result never joins the recorded evidence a verdict rests on.
+function liveReport(record, a, b, title, v) {
+  const body = record.body;
+  const winner = { A: a, B: b }[(body.verdict || {}).winner] || null;
+  const lines = [
+    `# Live race report: ${title}`,
+    '',
+    `Task \`${v.task}\`, version \`${v.version}\`. Raced live: \`${a}\` and \`${b}\`.`,
+    '',
+    '**This is one live scenario, generated for this race. It is kept apart from the recorded matches, and one ' +
+      'scenario does not make a verdict.**',
+    '',
+    `- Result: ${winner ? `\`${winner}\` took this scenario` : 'no winner'}.`,
+    `- On this tested workflow the record ${v.better ? `${v.verdict === 'better' ? 'favours' : 'leans to'} \`${v.better}\` (${v.wins[v.better]} of ${v.pairs} scenarios)` : `names no favourite (${v.wins[a]} to ${v.wins[b]})`}.`,
+    `- Sealed record \`${body.run_id}\`, seal \`${str(record.sha256).slice(0, 16)}\`${body.engine_commit ? `, engine commit \`${str(body.engine_commit).slice(0, 7)}\`` : ''}.`,
+    '',
+    '## What each model did and what it cost',
+    '',
+    '| Model | Result | Cost | Calls | Tokens read | Tokens written | Seconds | How it ended |',
+    '|---|---|---|---|---|---|---|---|',
+  ];
+  let spent = 0;
+  for (const [side, name] of [['A', a], ['B', b]]) {
+    const r = (((body.contestants || {})[side] || {}).results || [])[0];
+    if (!r) {
+      lines.push(`| \`${name}\` | not in the record | - | - | - | - | - | - |`);
+      continue;
+    }
+    spent += r.cost_usd || 0;
+    lines.push(
+      `| \`${name}\` | ${r.passed ? 'passed' : 'failed'} | $${fixed(r.cost_usd || 0, 4)} | ${r.calls ?? '-'} | ${r.input_tokens ?? '-'} | ` +
+        `${r.output_tokens ?? '-'} | ${fixed(r.wall_s || 0, 0)} | ${r.termination || '-'} |`,
+    );
+  }
+  lines.push(
+    '',
+    `This race cost $${fixed(spent, 4)} in all. The cost is what the runner recorded for each call: the provider's billed ` +
+      'figure where it reports one, otherwise tokens times its list price.',
+    '',
+  );
+  return lines.join('\n');
+}
 
 // The result as a fight card: the two models, the arena, the comparison row by row, where each one slipped
 // (with the visitor's own say on how serious each fault is), then one verdict, then how to check it.
@@ -1086,6 +1144,8 @@ function drawVerdict(spec, v) {
     return kept.length ? kept.map((x) => str(x, isFloat)).join(', ') : 'not recorded';
   };
   const markdown = ledger.markdown(spec);
+  const costText = costMarkdown(v, spec.blueprint.title || spec.task);
+  const evidenceText = evidenceMarkdown(v, spec.blueprint.title || spec.task);
 
   const copyNote = el('span', { class: 'note', role: 'status', 'aria-live': 'polite' });
   const body = [
@@ -1159,18 +1219,31 @@ function drawVerdict(spec, v) {
     el(
       'div',
       { class: 'actions' },
-      el('button', { type: 'button', id: 'download-spec', onclick: () => download(markdown) }, 'Download spec.md'),
-      el('button', { type: 'button', id: 'copy-spec', class: 'quiet', onclick: () => copy(markdown, copyNote) }, 'Copy'),
+      el('button', { type: 'button', id: 'download-spec', onclick: () => download(markdown, 'spec.md') }, 'Spec (build plan)'),
+      el('button', { type: 'button', id: 'download-cost', onclick: () => download(costText, 'cost-breakdown.md') }, 'Cost breakdown'),
+      el('button', { type: 'button', id: 'download-evidence', onclick: () => download(evidenceText, 'evidence-report.md') }, 'Evidence report'),
+      el(
+        'button',
+        { type: 'button', id: 'download-all', class: 'quiet', onclick: () => download([markdown, costText, evidenceText].join('\n\n'), 'ledger-reports.md') },
+        'All three in one file',
+      ),
+      el('button', { type: 'button', id: 'copy-spec', class: 'quiet', onclick: () => copy(markdown, copyNote) }, 'Copy spec'),
       copyNote,
     ),
-    el('p', { class: 'note' }, 'The download is the same Markdown the ledger command line writes, with a machine-readable copy at the end.'),
+    el(
+      'p',
+      { class: 'note' },
+      'Three documents for this pair, each the same Markdown the ledger command line writes: the spec (what to build, with a ' +
+        'machine-readable copy at the end), the cost breakdown (per attempt, per successful result, per 1,000 runs, scenario by ' +
+        'scenario) and the evidence report (fit, every fault with its count, every scenario and its sealed record).',
+    ),
   ];
   $('verdict-body').replaceChildren(...body.flat(Infinity).filter(Boolean));
 }
 
-function download(markdown) {
+function download(markdown, name) {
   const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
-  const link = el('a', { href: url, download: 'spec.md' });
+  const link = el('a', { href: url, download: name });
   document.body.append(link);
   link.click();
   link.remove();

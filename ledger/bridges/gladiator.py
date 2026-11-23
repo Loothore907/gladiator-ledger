@@ -134,6 +134,12 @@ def attempt_props(res: dict, side: str, effort, efficiency: float | None) -> dic
         "cost_usd": float(res.get("cost_usd") or 0),
         "cost_basis": res.get("cost_basis") or "list",
         "tokens": int((res.get("input_tokens") or 0) + (res.get("output_tokens") or 0)),
+        # what the tokens were: read (all input), of which re-read from the provider's cache, and written
+        "tokens_in": int(res.get("input_tokens") or 0),
+        "tokens_cached": int(
+            sum((t.get("usage") or {}).get("cached_input_tokens") or 0 for t in res.get("turns") or [])
+        ),
+        "tokens_out": int(res.get("output_tokens") or 0),
         "wall_s": float(res.get("wall_s") or 0),
         "calls": res.get("calls"),
         "termination": res.get("termination"),
