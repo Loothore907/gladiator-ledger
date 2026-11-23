@@ -327,32 +327,34 @@ def fitness(store: str, test: str, version: str, suites: list[str], profile: str
     }
 
 
-def outcome(v: dict, fit: dict) -> tuple[str, str]:
-    """The answer a reader acts on: the head-to-head result read through fitness. (code, sentence)."""
+def outcome(v: dict, fit: dict) -> tuple[str, str, str | None]:
+    """The answer a reader acts on: the head-to-head result read through fitness. Returns (code, sentence, the
+    model to use or None)."""
     a, b = v["a"], v["b"]
     fa, fb = fit[a]["fit"], fit[b]["fit"]
     ahead, settled = v["better"], v["verdict"] == "better"
     if fa is None or fb is None:
         thin = [m for m in (a, b) if fit[m]["fit"] is None]
-        return "too few attempts", f"Too few attempts to say whether {' or '.join(thin)} is fit for this task."
+        return "too few attempts", f"Too few attempts to say whether {' or '.join(thin)} is fit for this task.", None
     if not fa and not fb:
-        return "neither fit", "Neither is fit for this task." + (
-            f" {ahead} did it better of the two, which is not the same as fit." if ahead else ""
-        )
+        more = f" {ahead} did it better of the two, which is not the same as fit." if ahead else ""
+        return "neither fit", "Neither is fit for this task." + more, None
     if fa != fb:
         fit_one, other = (a, b) if fa else (b, a)
         if ahead == other:
             lead = "did it better" if settled else "is ahead"
-            return "only one fit", f"{other} {lead} head to head, but only {fit_one} is fit for this task."
+            return "only one fit", f"{other} {lead} head to head, but only {fit_one} is fit for this task.", fit_one
         if ahead == fit_one:
             lead = "did it better" if settled else "is ahead, not settled"
-            return "only one fit", f"Use {fit_one}: it is the only one of the two fit for this task, and it {lead}."
-        return "only one fit", f"Use {fit_one}: it is the only one of the two fit for this task."
+            line = f"Use {fit_one}: it is the only one of the two fit for this task, and it {lead}."
+            return "only one fit", line, fit_one
+        return "only one fit", f"Use {fit_one}: it is the only one of the two fit for this task.", fit_one
     if settled:
-        return "use", f"Use {ahead}: both are fit for this task and it did it better."
+        return "use", f"Use {ahead}: both are fit for this task and it did it better.", ahead
     if ahead:
-        return "both fit", f"Both are fit for this task. {ahead} is ahead head to head, but that is not settled."
-    return "both fit", "Both are fit for this task, and the matches show no winner between them."
+        line = f"Both are fit for this task. {ahead} is ahead head to head, but that is not settled."
+        return "both fit", line, None
+    return "both fit", "Both are fit for this task, and the matches show no winner between them.", None
 
 
 def _side(pairs: list[dict], side: str) -> dict:
@@ -439,7 +441,13 @@ def verdict(
         everyone = fitness(store, test, version_key, suites, profile, overrides)
         out["profile"] = profile
         out["fit"] = {m: everyone[m] for m in (a, b)}
-        out["outcome"], out["headline"] = outcome({"a": a, "b": b, "better": better, "verdict": kind}, out["fit"])
+        head = {"a": a, "b": b, "better": better, "verdict": kind}
+        out["outcome"], out["headline"], out["use"] = outcome(head, out["fit"])
+        # every pair in order: who won it and how (the page draws one square per world)
+        out["rounds"] = [
+            {"winner": p["winner"], "rule": p["rule"], "a_passed": p["a_passed"], "b_passed": p["b_passed"]}
+            for p in pairs
+        ]
         # who else is fit on this task, cheapest first: where to look when neither of these two is
         out["fit_on_task"] = [
             {
@@ -636,8 +644,10 @@ def main(argv=None):
     v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
     v.add_argument(
         "--profile",
-        choices=list(policy.PROFILES),
-        help="also say whether each model is fit for the task, under this tolerance (enterprise is stricter)",
+        choices=[*policy.PROFILES, "none"],
+        default=policy.DEFAULT_PROFILE,
+        help="whose tolerance decides whether a model is fit for the task (enterprise is stricter; "
+        "none = the head to head only)",
     )
     for level in policy.LEVELS:
         v.add_argument(
@@ -663,6 +673,12 @@ def main(argv=None):
     sp.add_argument("workflow", help="test id, e.g. refund-queue")
     sp.add_argument("--a", required=True, help="first model")
     sp.add_argument("--b", required=True, help="second model")
+    sp.add_argument(
+        "--profile",
+        choices=[*policy.PROFILES, "none"],
+        default=policy.DEFAULT_PROFILE,
+        help="whose tolerance decides whether a model is fit for the task (none = the head to head only)",
+    )
     sp.add_argument("--suite", help="only pairs played in this suite")
     sp.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that is good enough")
     sp.add_argument("--out", type=Path, help="write the spec to this file (Markdown) instead of printing it")
@@ -749,7 +765,8 @@ def main(argv=None):
     elif args.cmd == "spec":
         a = resolve_model(args.store, args.a) or args.a
         b = resolve_model(args.store, args.b) or args.b
-        found = verdict(args.store, args.workflow, a, b, args.suite, bar=args.bar)
+        profile = None if args.profile == "none" else args.profile
+        found = verdict(args.store, args.workflow, a, b, args.suite, bar=args.bar, profile=profile)
         found["suite"] = args.suite
         built = spec.build(lambda q, p: rows(args.store, q, p), found)
         text = json.dumps(built, indent=1, default=str) if args.json else spec.markdown(built)
@@ -768,7 +785,7 @@ def main(argv=None):
         a = resolve_model(args.store, args.a) or args.a
         b = resolve_model(args.store, args.b) or args.b
         overrides = {fault: level for level in policy.LEVELS for fault in getattr(args, level)}
-        profile = args.profile or (policy.DEFAULT_PROFILE if overrides else None)
+        profile = None if args.profile == "none" else args.profile
         result = verdict(
             args.store, args.workflow, a, b, args.suite, args.all_versions, args.bar, args.min_pairs, profile, overrides
         )

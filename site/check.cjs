@@ -69,7 +69,7 @@ function same(expected, actual, where) {
 
 async function main() {
   const expected = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'expected.json'), 'utf8'));
-  for (const part of ['verdicts', 'specs', 'flows', 'opponents']) {
+  for (const part of ['verdicts', 'specs', 'judged', 'judged_specs', 'flows', 'opponents']) {
     if (!Array.isArray(expected[part]) || !expected[part].length) {
       throw new Error(`data/expected.json has no ${part}: nothing to compare. Rebuild it with "uv run ledger site".`);
     }
@@ -113,6 +113,30 @@ async function main() {
       } else {
         same(want, JSON.parse(block[1]), `specs[${i}] Markdown JSON block`);
       }
+    }
+    // The same answers read through fitness (ledger/policy.py): both profiles, and a reader's own rule.
+    for (const [i, { overrides, verdict: want }] of expected.judged.entries()) {
+      const args = [want.task, want.a, want.b, want.profile, overrides];
+      const got = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.verdict(t, a, b, p, o), args);
+      same(want, got, `judged[${i}] (${want.task}: ${want.a} vs ${want.b}, ${want.profile}${overrides ? ', own rule' : ''})`);
+    }
+    for (const [i, { overrides, spec: want, markdown: wantText }] of expected.judged_specs.entries()) {
+      const args = [want.task, want.decision.a, want.decision.b, want.decision.profile, overrides];
+      const got = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.spec(t, a, b, p, o), args);
+      same(want, got, `judged_specs[${i}] (${args.slice(0, 4).join(', ')})`);
+      const md = await page.evaluate(
+        async ([t, a, b, p, o]) => window.ledgerDemo.specMarkdownJudged(t, a, b, p, o),
+        args,
+      );
+      const block = /## Machine-readable\n\n```json\n([\s\S]*)\n```\n$/.exec(md);
+      // the downloadable spec must be the command line's text, character for character
+      if (md !== wantText) {
+        const at = [...md].findIndex((ch, k) => ch !== wantText[k]);
+        problems.push(`judged_specs[${i}]: Markdown differs at character ${at}: page ${JSON.stringify(md.slice(at - 30, at + 60))}, command line ${JSON.stringify(wantText.slice(at - 30, at + 60))}`);
+      }
+      compared += 1;
+      if (!block) problems.push(`judged_specs[${i}]: the Markdown is not in the expected shape`);
+      else same(want, JSON.parse(block[1]), `judged_specs[${i}] Markdown JSON block`);
     }
     for (const [i, want] of expected.flows.entries()) {
       const got = await page.evaluate((text) => window.ledgerDemo.flows(text), want.described);

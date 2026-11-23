@@ -55,8 +55,15 @@ window.ledgerDemo = {
   },
   flows: async (text) => (await ledgerReady).ledger.findFlows(text),
   opponents: async (model, openOnly) => (await ledgerReady).ledger.opponents(model, Boolean(openOnly)),
-  verdict: async (task, a, b) => (await ledgerReady).ledger.verdict(task, a, b),
-  spec: async (task, a, b) => (await ledgerReady).ledger.spec(task, a, b),
+  verdict: async (task, a, b, profile = null, overrides = null) => {
+    const { ledger, rules } = await ledgerReady;
+    return ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, overrides);
+  },
+  spec: async (task, a, b, profile = null, overrides = null) => (await ledgerReady).ledger.spec(task, a, b, profile, overrides),
+  specMarkdownJudged: async (task, a, b, profile, overrides = null) => {
+    const { ledger } = await ledgerReady;
+    return ledger.markdown(await ledger.spec(task, a, b, profile, overrides));
+  },
   specMarkdown: async (task, a, b) => {
     const { ledger } = await ledgerReady;
     return ledger.markdown(await ledger.spec(task, a, b));
