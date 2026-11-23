@@ -11,7 +11,7 @@ command line, so the page builds the same graph in the visitor's browser and giv
 import json
 from pathlib import Path
 
-from ledger import cli, load, policy, questions, replay, spec
+from ledger import cli, load, policy, questions, replay, reports, spec
 from ledger.bridges import epoch, gladiator
 
 # Pairs the page is checked against: (task, model a, model b).
@@ -103,7 +103,16 @@ def export(data: Path, store: str, out: Path) -> dict:
             found = cli.verdict(store, task, a, b, profile=profile, overrides=overrides)
             expected["judged"].append({"overrides": overrides, "verdict": found})
             built = spec.build(ask, dict(found, suite=None))
-            expected["judged_specs"].append({"overrides": overrides, "spec": built, "markdown": spec.markdown(built)})
+            title = (built.get("blueprint") or {}).get("title") or built["task"]
+            expected["judged_specs"].append(
+                {
+                    "overrides": overrides,
+                    "spec": built,
+                    "markdown": spec.markdown(built),
+                    "cost": reports.cost_markdown(found, title),
+                    "evidence": reports.evidence_markdown(found, title),
+                }
+            )
     for text in DESCRIBED:
         expected["flows"].append(cli.find_flows(store, text))
     expected["flows"].append(cli.find_flows(store, "zebra unicorns"))

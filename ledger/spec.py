@@ -1,11 +1,13 @@
 """The spec: what a head-to-head on one task tells you to build.
 
-A spec is one readable document in three layers, each a path through the graph:
+A spec is one readable document in four layers, each a path through the graph:
   1. Decision   which of the two models did this task better, how sure that is, and whether it is good enough.
   2. Blueprint  the task as it was tested (brief, rules, tools), the settings the result was earned under, what a
                 run costs, and a guardrail for every hazard the chosen model tripped on, with which steps it can
                 run alone and which need a guard.
-  3. Evidence   the sealed match records, the exact test version and the engine commit behind every line.
+  3. Cost       what the head-to-head attempts cost: per attempt, per passed attempt, and where the figure
+                comes from (ledger/reports.py, which also writes the full cost and evidence reports).
+  4. Evidence   the sealed match records, the exact test version and the engine commit behind every line.
 
 It claims only what was measured: the task as tested, in a simulated world, under these settings. It is a starting
 point for building the real flow, not a promise about it.
@@ -13,7 +15,7 @@ point for building the real flow, not a promise about it.
 
 import json
 
-from ledger import questions
+from ledger import questions, reports
 
 # What to build for each hazard a model tripped on. Keys are hazard names (ledger/bridges/gladiator.py HAZARDS).
 GUARDRAILS = {
@@ -232,7 +234,12 @@ def markdown(spec: dict) -> str:
         "Unforgivable by default for a tool-using workflow: " + ", ".join(bp["unforgivable_defaults"]) + ". "
         "Change the list to fit your flow.",
         "",
-        "## 3. Evidence",
+        "## 3. Cost",
+        "",
+        f"What these {d['pairs']} head-to-head pairs cost. The cost breakdown report has the scenario-by-scenario detail.",
+        "",
+        *reports.cost_lines(models, a, b),
+        "## 4. Evidence",
         "",
         f"- Test version: `{spec['version']}` (package fingerprint `{spec.get('test_fingerprint')}`).",
         "- Sealed match records (public half and private answer key both published; check with `ledger verify`):",

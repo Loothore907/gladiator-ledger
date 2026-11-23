@@ -14,7 +14,7 @@ from typing import Any
 import relate
 from mcp.server.mcpserver import MCPServer
 
-from ledger import cli, policy, questions, spec
+from ledger import cli, policy, questions, reports, spec
 
 INSTRUCTIONS = """\
 Gladiator Ledger answers one question: of two AI models, which does THIS task better, how sure is that, and what
@@ -34,7 +34,7 @@ Walk the person through this loop, one step at a time:
    attempts"). For the head to head, report the verdict word exactly: "better" is settled; "leaning" is ahead but
    could be chance; "no real difference shown" and "not enough evidence" name no winner. When neither is fit,
    offer the models in `fit_on_task`; if that is empty, say no tested model is fit and do not guess at one.
-4. spec: the build plan (decision, blueprint, evidence) as Markdown. Offer it once there is a verdict.
+4. spec: the build plan (decision, blueprint, cost, evidence) as Markdown, and with report="cost" or "evidence" the two reports that go with it. Offer it once there is a verdict.
 
 Rules that are not optional:
 - Make task claims only. Never say a model is better in general, and never rank models by a published score.
@@ -163,10 +163,13 @@ def build(store: str) -> MCPServer:
         tolerance: str = policy.DEFAULT_PROFILE,
         own_levels: dict[str, str] | None = None,
         good_enough_bar: float = cli.GOOD_ENOUGH,
+        report: str = "spec",
     ) -> str:
-        """One Markdown document in three layers: the decision, the blueprint (the job and rules as tested, the
-        tools, the settings the result holds for, a guardrail and an autonomy call for each hazard) and the
-        evidence. Ends with the same content as JSON."""
+        """One Markdown document in four layers: the decision, the blueprint (the job and rules as tested, the
+        tools, the settings the result holds for, a guardrail and an autonomy call for each hazard), the cost
+        and the evidence. Ends with the same content as JSON. `report` picks the document: "spec" (default),
+        "cost" (the cost breakdown, scenario by scenario), "evidence" (fitness with every fault, every
+        scenario and its sealed record) or "all" (the three, one after another)."""
         found = cli.verdict(
             store,
             task,
@@ -177,7 +180,18 @@ def build(store: str) -> MCPServer:
             overrides=own_levels,
         )
         found["suite"] = None
-        return spec.markdown(spec.build(lambda q, p: cli.rows(store, q, p), found))
+        built = spec.build(lambda q, p: cli.rows(store, q, p), found)
+        title = (built.get("blueprint") or {}).get("title") or built["task"]
+        docs = {
+            "spec": lambda: spec.markdown(built),
+            "cost": lambda: reports.cost_markdown(found, title),
+            "evidence": lambda: reports.evidence_markdown(found, title),
+        }
+        if report == "all":
+            return "\n\n".join(write() for write in docs.values())
+        if report not in docs:
+            raise ValueError(f"report must be one of spec, cost, evidence, all (got {report!r})")
+        return docs[report]()
 
     @server.tool(title="Describe the graph: nodes, relationships and the ready-made questions")
     def describe_graph() -> dict[str, Any]:

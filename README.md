@@ -179,7 +179,7 @@ first, or says that none is.
 ```bash
 uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --out spec.md
 ```
-One document in three layers:
+One document in four layers:
 
 - **Decision.** The answer to act on (here: use Haiku, the only one of the two that is fit, ahead but not
   settled), each model's fitness with its reasons, the pair counts, and the comparison.
@@ -187,10 +187,25 @@ One document in three layers:
   for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and for every hazard an autonomy call:
   **can run alone** where the chosen model never fell for it in these matches, **needs a guard** where it did,
   with the guard spelled out ("refuse an action on an item until the lookups it depends on have been made").
+- **Cost.** What these head-to-head attempts cost each model: per attempt, per *passed* attempt (failures
+  included), per 1,000 runs, how much of the reading was served from the provider's cache, and where each
+  figure comes from (the provider's bill, a re-pricing, or the list price).
 - **Evidence.** The sealed match records, the test's fingerprint and the engine version.
 
 It ends with the same content as JSON, and it says plainly what it is: a result for this task, in a simulated world,
 under these settings. A starting point for the real flow, to be tested again once built.
+
+Two more reports are written from the same verdict, so the three cannot disagree:
+
+```bash
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report cost       # the cost breakdown
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report evidence   # the evidence report
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report all --out spec.md
+```
+The **cost breakdown** adds every scenario's cost for both models. The **evidence report** lists each model's
+fitness with every fault and its count, and every scenario with its winner, how it was decided and its sealed
+record. `--report all --out spec.md` writes `spec.md`, `spec.cost.md` and `spec.evidence.md`. On the page the
+same three are download buttons under the result, and a live race offers its own report, labelled as live.
 
 ## How and why Relate is used
 Relate is the store and the query engine, not an export target. Every answer above is a walk through connected

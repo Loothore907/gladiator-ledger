@@ -13,7 +13,151 @@ const FLOAT_KEYS = new Set([
   'seconds_per_attempt',
   'mistakes',
   'attempt_budget_usd',
+  'cost_per_pass',
+  'spent',
+  'calls_per_attempt',
+  'tokens_in',
+  'tokens_cached',
+  'tokens_out',
 ]);
+
+// ---- the reports that go with a spec (ledger/reports.py) ---------------------------------------------------------
+const BASIS = {
+  billed: 'billed: what the provider charged for each call',
+  repriced: "repriced: recomputed from the record's token counts at the provider's published price",
+  list: "list: tokens times the provider's list price",
+  mixed: 'mixed: some calls billed and some at list price within one attempt',
+};
+
+const usd = (x, places = 4) => (x === null || x === undefined ? 'none passed' : `$${fixed(x, places)}`);
+
+export function costLines(models, a, b) {
+  const lines = [
+    '| Model | Cost per attempt | Cost per passed attempt | Per 1,000 runs | Per 1,000 passed runs | Source of the cost |',
+    '|---|---|---|---|---|---|',
+  ];
+  for (const name of [a, b]) {
+    const s = models[name];
+    const perPass = s.cost_per_pass;
+    lines.push(
+      `| \`${name}\` | ${usd(s.cost_per_attempt)} | ${usd(perPass)} | ${usd(s.cost_per_attempt * 1000, 2)} | ` +
+        `${usd(perPass === null ? null : perPass * 1000, 2)} | ${s.cost_basis.join(', ')} |`,
+    );
+  }
+  lines.push(
+    '',
+    '| Model | Calls per attempt | Tokens read | of which re-read from cache | Tokens written | Seconds per attempt |',
+    '|---|---|---|---|---|---|',
+  );
+  for (const name of [a, b]) {
+    const s = models[name];
+    const share = s.tokens_in ? s.tokens_cached / s.tokens_in : 0;
+    lines.push(
+      `| \`${name}\` | ${fixed(s.calls_per_attempt, 1)} | ${fixed(s.tokens_in, 0)} | ${fixed(s.tokens_cached, 0)} (${percent(share)}) | ` +
+        `${fixed(s.tokens_out, 0)} | ${fixed(s.seconds_per_attempt, 0)} |`,
+    );
+  }
+  const used = [...new Set([a, b].flatMap((name) => models[name].cost_basis))].sort(byCodePoint);
+  lines.push(
+    '',
+    '- Cost per passed attempt is everything spent divided by the attempts that passed: what one successful ' +
+      'result costs, failures included.',
+    '- Token counts are averages per attempt. Re-read tokens are the part of the input a provider served from its ' +
+      'cache, which it bills at a fraction of the normal price.',
+    '- The 1,000-run figures are straight multiples of these attempts, not a quote: your prompts, tools and ' +
+      'volume will differ.',
+    `- Source of the cost: ${used.map((x) => BASIS[x] || x).join('; ')}.`,
+    '',
+  );
+  return lines;
+}
+
+const reportHead = (kind, title, v) => [
+  `# ${kind}: ${title}`,
+  '',
+  `Task \`${v.task}\`, version \`${v.version}\`. Compared: \`${v.a}\` and \`${v.b}\`.`,
+  '',
+];
+
+export function costMarkdown(v, title) {
+  const { a, b } = v;
+  const lines = reportHead('Cost breakdown', title, v);
+  if (v.verdict === 'no data') return [...lines, `**No costs.** ${v.notes[0]}`, ''].join('\n');
+  lines.push(`Measured over the ${v.pairs} head-to-head pairs these two models played on this task.`, '');
+  lines.push(...costLines(v.models, a, b));
+  lines.push('## Total spent in these matches', '');
+  for (const name of [a, b]) {
+    const s = v.models[name];
+    lines.push(`- \`${name}\`: $${fixed(s.spent, 4)} over ${s.attempts} attempts, ${s.passed} passed.`);
+  }
+  if (v.rounds && v.rounds.length) {
+    lines.push('', '## Scenario by scenario', '', `| # | \`${a}\` | \`${b}\` | Sealed record |`, '|---|---|---|---|');
+    v.rounds.forEach((r, i) => {
+      const cells = ['a', 'b'].map((side) => `$${fixed(r[`${side}_cost`] || 0, 4)} (${r[`${side}_passed`] ? 'passed' : 'failed'})`);
+      lines.push(`| ${i + 1} | ${cells[0]} | ${cells[1]} | \`${r.run}\` |`);
+    });
+  }
+  lines.push('', 'Costs are for a simulated world under the settings in the spec. Measure again on the real flow.', '');
+  return lines.join('\n');
+}
+
+export function evidenceMarkdown(v, title) {
+  const { a, b } = v;
+  const lines = reportHead('Evidence report', title, v);
+  if (v.verdict === 'no data') return [...lines, `**No evidence.** ${v.notes[0]}`, ''].join('\n');
+  if (v.headline) {
+    lines.push(`**${v.headline}**`, '', `## Fit for this task, at ${v.profile} tolerance`, '');
+    lines.push('Every attempt each model made on this task counts here, whoever the opponent was.', '');
+    for (const name of [a, b]) {
+      const f = v.fit[name];
+      const word = f.fit === null ? 'too few attempts to say' : f.fit ? 'fit' : 'not fit';
+      lines.push(
+        `### \`${name}\`: ${word}`,
+        '',
+        `Passed ${f.passed} of ${f.attempts} attempts (${percent(f.pass_rate)}; bar ${percent(f.bar)}).`,
+        '',
+      );
+      if (f.faults.length) {
+        lines.push('| Fault | Level | Attempts with it | Counts against fitness |', '|---|---|---|---|');
+        for (const x of f.faults) {
+          lines.push(`| ${x.fault} | ${x.level} | ${x.attempts_with} of ${f.attempts} | ${x.breaks ? 'yes' : 'no'} |`);
+        }
+      } else lines.push('No fault recorded.');
+      lines.push('');
+    }
+  }
+  lines.push(
+    '## Head to head',
+    '',
+    `${v.pairs} judged pairs on the same generated worlds: \`${a}\` won ${v.wins[a]}, \`${b}\` won ` +
+      `${v.wins[b]}, ${v.ties} tied (sign test p = ${floatRepr(v.p_value)}).`,
+    '',
+  );
+  for (const n of v.notes) lines.push(`- ${n}`);
+  if (v.notes.length) lines.push('');
+  if (v.rounds && v.rounds.length) {
+    lines.push(`| # | Winner | Decided on | \`${a}\` | \`${b}\` | Sealed record |`, '|---|---|---|---|---|---|');
+    v.rounds.forEach((r, i) => {
+      const winner = r.winner === 'tie' ? 'tie' : `\`${r.winner}\``;
+      lines.push(
+        `| ${i + 1} | ${winner} | ${r.rule} | ${r.a_passed ? 'passed' : 'failed'} | ` +
+          `${r.b_passed ? 'passed' : 'failed'} | \`${r.run}\` |`,
+      );
+    });
+    lines.push('');
+  }
+  lines.push('## Sealed records', '');
+  for (const e of v.evidence) {
+    lines.push(`- \`${e.run}\`, seal \`${str(e.seal_sha256).slice(0, 16)}\`, engine commit \`${str(e.engine_commit).slice(0, 7)}\``);
+  }
+  lines.push(
+    '',
+    "Each record's public half and private answer key are published; `ledger verify` checks every seal, and " +
+      'anyone can re-grade a match from them.',
+    '',
+  );
+  return lines.join('\n');
+}
 
 const CURRENT_VERSION = `MATCH (t:Test {id: $t})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match) WHERE NOT mt.excluded
            RETURN tv.key AS key, tv.version_rank AS rank ORDER BY rank DESC LIMIT 1`;
@@ -119,11 +263,19 @@ export function createLedger(ask, questions, rules) {
   function side(pairs, s) {
     const n = pairs.length;
     const passed = pairs.filter((p) => p[`${s}_passed`]).length;
+    const spent = sum(pairs.map((p) => p[`${s}_cost`] || 0));
     return {
       attempts: n,
       passed,
       pass_rate: passed / n,
-      cost_per_attempt: sum(pairs.map((p) => p[`${s}_cost`] || 0)) / n,
+      cost_per_attempt: spent / n,
+      cost_per_pass: passed ? spent / passed : null,
+      spent,
+      cost_basis: [...new Set(pairs.map((p) => str(p[`${s}_basis`])))].sort(byCodePoint),
+      calls_per_attempt: sum(pairs.map((p) => p[`${s}_calls`] || 0)) / n,
+      tokens_in: sum(pairs.map((p) => p[`${s}_in`] || 0)) / n,
+      tokens_cached: sum(pairs.map((p) => p[`${s}_cached`] || 0)) / n,
+      tokens_out: sum(pairs.map((p) => p[`${s}_out`] || 0)) / n,
       seconds_per_attempt: sum(pairs.map((p) => p[`${s}_time`] || 0)) / n,
       mistakes: sum(pairs.map((p) => p[`${s}_mistakes`] || 0)) / n,
       effort: [...new Set(pairs.map((p) => str(p[`${s}_effort`])))].sort(byCodePoint),
@@ -319,6 +471,8 @@ export function createLedger(ask, questions, rules) {
         rule: p.rule,
         a_passed: p.a_passed,
         b_passed: p.b_passed,
+        a_cost: p.a_cost,
+        b_cost: p.b_cost,
         run: p.run,
         match: p.match,
       }));
@@ -544,7 +698,12 @@ export function createLedger(ask, questions, rules) {
       `Unforgivable by default for a tool-using workflow: ${bp.unforgivable_defaults.join(', ')}. ` +
         'Change the list to fit your flow.',
       '',
-      '## 3. Evidence',
+      '## 3. Cost',
+      '',
+      `What these ${d.pairs} head-to-head pairs cost. The cost breakdown report has the scenario-by-scenario detail.`,
+      '',
+      ...costLines(models, a, b),
+      '## 4. Evidence',
       '',
       `- Test version: \`${spec.version}\` (package fingerprint \`${str(spec.test_fingerprint)}\`).`,
       '- Sealed match records (public half and private answer key both published; check with `ledger verify`):',
