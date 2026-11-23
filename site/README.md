@@ -1,14 +1,20 @@
 # Gladiator Ledger: the browser demo
 
-One static page that answers Ledger's question in the visitor's browser: of these two AI models, which does
-*this* task better, how sure is that, and what should I build? There is no server, no API key and no network
-request beyond the files in this folder.
+One static page that answers Ledger's question in the visitor's browser: of these two AI models, is each fit for
+*this* task, which did it better, and what should I build? There is no server and no API key, and it makes no
+network request beyond the files in this folder unless a race runner is attached (below).
 
 On load the page starts the Relate graph engine (WebAssembly) in a worker, builds the same graph the `ledger`
-command line uses from `data/graph.json`, and then asks it the same Cypher questions. The visitor describes or
-picks a workflow, picks two models that have played each other on it, and gets the verdict, the comparison, the
-build spec (downloadable as the same Markdown `ledger spec` writes) and a small picture of the graph path the
-answer came from. The data is a fixed set of finished matches: the page cannot run new ones.
+command line uses from `data/graph.json`, and then asks it the same Cypher questions. The visitor picks a
+workflow and two models that have played each other on it, chooses whose tolerance for mistakes applies, and gets
+the result as a fight card: the two models, one square per scenario, the comparison, every fault with a level
+they can change, one verdict, and the build spec (the same Markdown `ledger spec` writes). Any scenario replays
+as a race, step by step, from `data/replays/`.
+
+**Live races.** The data is a fixed set of finished matches. The page can also ask a Gladiator race runner for
+one fresh scenario and show it as it happens: open it with `?runner=<address>` for a runner on your own machine,
+or set the address in `data/live.json`. With no runner it says live races are open to the hackathon judges for
+now. A live result is shown with its sealed record and kept apart from the recorded evidence.
 
 ## Files
 
@@ -18,7 +24,7 @@ answer came from. The data is a fixed set of finished matches: the page cannot r
 | `ledger.js` | the answers: a JavaScript mirror of `ledger/cli.py` and `ledger/spec.py` |
 | `pyformat.js` | number and JSON formatting that matches Python's, so wording and the spec file are identical |
 | `worker.js` | the engine worker: builds the graph once, then runs Cypher sent by the page |
-| `data/` | generated: rows and Cypher (`graph.json`, `questions.json`), shared constants (`rules.json`), and the answers the Python computed (`expected.json`) |
+| `data/` | generated: rows and Cypher (`graph.json`, `questions.json`), shared constants (`rules.json`), the answers the Python computed (`expected.json`), one replay file per match record (`replays/`), and the runner's address (`live.json`) |
 | `vendor/relate-wasm/` | the engine, `@relate/relate-wasm` (see `VERSION.txt` there) |
 | `check.cjs` | compares the page's answers with `data/expected.json` |
 
