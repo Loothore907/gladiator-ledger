@@ -85,6 +85,7 @@ function fill(node, attrs, children) {
   return node;
 }
 const el = (tag, attrs, ...children) => fill(document.createElement(tag), attrs, children);
+const svg = (tag, attrs, ...children) => fill(document.createElementNS('http://www.w3.org/2000/svg', tag), attrs, children);
 const $ = (id) => document.getElementById(id);
 
 // ---- state ----------------------------------------------------------------------------------------------------
@@ -591,12 +592,71 @@ async function openRace(v, index) {
       el('span', { class: 'tick wrong' }), 'a wrong decision',
     ),
     finish,
+    await evidenceGraph(v, index),
   );
   if (still) {
     clock = span;
     paint();
   } else start();
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ---- the graph behind a verdict, as a picture -------------------------------------------------------------------
+
+// Live results join the graph in this browser as their own kind of node, linked to the same test version and
+// models as the recorded matches, so they can be drawn beside them without ever being counted in a verdict.
+const ADD_LIVE = `MERGE (l:LiveMatch {run_id: $run})
+SET l.winner = $winner, l.seal = $seal, l.at = $at
+WITH l
+MATCH (tv:TestVersion {key: $version}), (a:Model {name: $a}), (b:Model {name: $b})
+MERGE (l)-[:RAN_ON]->(tv)
+MERGE (l)-[:PLAYED_BY]->(a)
+MERGE (l)-[:PLAYED_BY]->(b)`;
+const LIVE_BETWEEN = `MATCH (l:LiveMatch)-[:RAN_ON]->(:TestVersion {key: $version}),
+      (l)-[:PLAYED_BY]->(:Model {name: $a}), (l)-[:PLAYED_BY]->(:Model {name: $b})
+RETURN l.run_id AS run, l.winner AS winner ORDER BY l.at`;
+
+// The neighbourhood of the graph a verdict is read from: the test version, the two models, and one dot per
+// scenario both played (a Match), each linked to all three. `ring` marks the scenario just watched; live results
+// (asked from the graph) are drawn dashed, off to the side.
+async function evidenceGraph(v, ring = null) {
+  const live = await ask(LIVE_BETWEEN, { version: v.version, a: v.a, b: v.b });
+  const W = 720;
+  const H = 230;
+  const n = v.rounds.length;
+  const gap = Math.min(30, 430 / Math.max(n, 1));
+  const first = W / 2 - 60 - ((n - 1) * gap) / 2;
+  const dots = v.rounds.map((round, i) => ({ x: first + i * gap, y: 118, who: round.winner === v.a ? 'a' : round.winner === v.b ? 'b' : 'tie', ring: i === ring, label: `Scenario ${i + 1}` }));
+  const liveDots = live.map((l, i) => ({ x: W - 110 + i * 26, y: 118, who: l.winner === v.a ? 'a' : l.winner === v.b ? 'b' : 'tie', live: true, label: `Live race ${l.run}` }));
+  const top = { x: W / 2, y: 30 };
+  const left = { x: 150, y: 200 };
+  const right = { x: W - 150, y: 200 };
+  const line = (from, to, cls) => svg('line', { x1: from.x, y1: from.y, x2: to.x, y2: to.y, class: cls });
+  const node = (at, text, cls) => [
+    svg('rect', { x: at.x - 105, y: at.y - 16, width: 210, height: 32, rx: 8, class: `gnode ${cls}` }),
+    svg('text', { x: at.x, y: at.y + 5, 'text-anchor': 'middle', class: 'glabel' }, text),
+  ];
+  const figure = el(
+    'figure',
+    { class: 'graph' },
+    svg(
+      'svg',
+      { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `The graph behind this verdict: ${n} recorded scenarios${live.length ? ` and ${live.length} live` : ''} linking the test version to both models.` },
+      [...dots, ...liveDots].flatMap((d) => [top, left, right].map((to) => line(d, to, `glink${d.ring ? ' ring' : ''}${d.live ? ' live' : ''}`))),
+      node(top, v.version.split('/').pop().split(':')[0], 'task'),
+      node(left, shortName(v.a), 'a'),
+      node(right, shortName(v.b), 'b'),
+      [...dots, ...liveDots].map((d) => svg('circle', { cx: d.x, cy: d.y, r: d.ring || d.live ? 9 : 6, class: `gdot ${d.who}${d.ring ? ' ring' : ''}${d.live ? ' live' : ''}` }, svg('title', null, d.label))),
+    ),
+    el(
+      'figcaption',
+      null,
+      `The graph this verdict is read from. Each dot is one scenario both models played, linked to the test version it used and to each model, and coloured by who won it.`,
+      ring !== null ? ' The ringed one is the race you just watched.' : '',
+      live.length ? ` The dashed ${live.length === 1 ? 'one is the live race' : 'ones are live races'}: now in the graph and linked the same way, but as a different kind of node, so no verdict counts ${live.length === 1 ? 'it' : 'them'}.` : '',
+    ),
+  );
+  return figure;
 }
 
 // ---- a live race: one fresh scenario, played now by a Gladiator runner -------------------------------------------
@@ -756,6 +816,7 @@ async function drawLive(v) {
   const go = el('button', { type: 'button', id: 'live-go' }, 'Race them live');
   const stage = el('div', { id: 'live-stage' });
   const say = el('p', { class: 'finish', id: 'live-result', role: 'status', 'aria-live': 'polite' });
+  const grown = el('div', { id: 'live-graph' });
   go.addEventListener('click', async () => {
     go.disabled = true;
     say.textContent = '';
@@ -786,6 +847,9 @@ async function drawLive(v) {
             ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
             : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${v.wins[v.better]} of ${v.pairs}, but it is now on file.`;
       say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. A live result is kept apart from the recorded evidence the verdict rests on.'));
+      // the result joins the graph, as its own kind of node, and the picture is drawn from the graph again
+      await ask(ADD_LIVE, { run: record.body.run_id, winner, seal: record.sha256, at: Date.now(), version: v.version, a, b });
+      grown.replaceChildren(await evidenceGraph(v));
     } catch (error) {
       say.textContent = `The live race did not run: ${error.message}`;
     } finally {
@@ -798,6 +862,7 @@ async function drawLive(v) {
     el('div', { class: 'race-controls' }, level, profile, code, go),
     stage,
     say,
+    grown,
   );
 }
 const spec_task = (test) => test.split('/').pop();
