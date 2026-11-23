@@ -8,6 +8,10 @@ tool-using task, and answers with a **task claim** in two parts: is each model *
 tolerance for mistakes, and which one **did it better** head to head. Then it writes a **spec** you can build
 from. It never ranks models in general, and when the evidence is thin or level it names no winner.
 
+**There is no leaderboard here, and there cannot be one.** A result belongs to a task. What Ledger holds is a record
+for each tested workflow; for your own flow, that record is a starting point (the nearest thing already tested, and
+which two models are worth racing), and the match on your task is the evidence.
+
 **Where Relate comes in.** [Relate](https://relatedb.ai) is the store and the query engine, not an export target.
 The match records are loaded into one Relate graph, and every answer is a Cypher query over it. A Relate full-text
 index finds the workflow you describe. Storage mode: the embedded Python library with a single-file store
@@ -234,35 +238,14 @@ The matches come from [Gladiator](https://github.com/Loothore907/gladiator-core)
 engine. Each pair of attempts is judged in order: success beats failure; if neither succeeds, getting further wins;
 if both succeed, the more efficient wins; and no real difference is a tie. Ledger re-judges every pair with that rule.
 
-**Across a whole suite, under a budget.**
-```bash
-uv run ledger recommend --suite small-tier --budget 0.05
-```
-```text
-Leaning: openrouter:deepseek/deepseek-v4.1-flash-1017
-
-  model                                        pairs  won  ties  passed  $/attempt  $/clean  mistakes
-  openrouter:deepseek/deepseek-v4.1-flash-1017   272  212     1     218    $0.0047  $0.0059       0.9
-  anthropic:claude-haiku-5-5                     216  147     3     189    $0.0045  $0.0052       0.4
-  openrouter:minimax/minimax-m3.1-flash          268  132     3     177    $0.0093  $0.0140       1.8
-  ...
-Caveats:
-  - deepseek leads claude-haiku-5-5 34-30, but a split like that happens by chance 71% of the time
-    between equal models: a lean, not a settled result.
-  - Beat cycles (2): nemotron > qwen > glm-5.3 > nemotron (9-3, 7-5, 7-5); ...
-```
-DeepSeek and Claude Haiku lead these four workflows at about half a cent per attempt, and their own head-to-head
-is 34 to 30, so Ledger says **leaning**, not better, and shows why. Task by task the same two are not level (the
-table at the top). A suite-wide answer pools different tasks and opponents, which is why the pair-by-pair verdict
-above is the claim to rely on.
-
 **Where models slip** (`uv run ledger ask hazard_profile`). For each model and each hazard a test can generate:
 how many attempts met it, and how many fell for it. The commonest slip is acting without reading: deciding a
 request before looking up the records it depends on (DeepSeek in 12 of 72 attempts; only one model never did it).
 After an ambiguous timeout, ten of the twelve models always checked before retrying.
 
-**Whether the ranking is even a ladder** (`uv run ledger ask beat_cycles`). On the same test, A beat B, B beat C and
-C beat A. Ledger finds these cycles and reports each edge's score, so a cycle of 2-1 wins reads as possible noise.
+**Why there is no overall ranking** (`uv run ledger ask beat_cycles`). On the same test, A beat B, B beat C and C
+beat A: here Nemotron beat Qwen, Qwen beat GLM and GLM beat Nemotron. No ordered list can hold that. Ledger finds
+these cycles and reports each edge's score, so a cycle of 2-1 wins reads as possible noise.
 
 **Whether a test can be trusted** (`uv run ledger ask promotion`). For each test version: did it pass automatic
 validation (a reference player passes and every corner-cutting player is caught), how many models played it, and how
@@ -291,7 +274,7 @@ check it gives the same answers:
 
 ```bash
 uv run ledger build --records data/records --validations data/validations --scores data/epoch --store rebuilt.rl
-uv run ledger recommend --suite small-tier --budget 0.05 --store rebuilt.rl
+uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --store rebuilt.rl
 ```
 
 **Known limits.** Evidence is uneven. Thirteen pairings of small models have 12 to 16 judged pairs on every workflow,
@@ -311,7 +294,7 @@ The contest opened on Nov 11, 2026. Everything in this repository was written af
 | October 2026 | The idea for Gladiator: head-to-head tests of two models on the same task. No code. | Not in any repository |
 | Nov 18–20 | Gladiator's first code: a pilot runner and ten fixed test cases (its first commit is dated Nov 18). **Ledger does not use this version or its tests.** | Private history |
 | Nov 20–22 | The Gladiator engine as Ledger's data uses it: the rebuilt match engine, the tool-workflow test type, the four workflow tests, automatic validation, the test suites, and every match in `data/`. Also two fixes found while building Ledger: the check tool's missing argument, and records naming the engine's own version. | [gladiator-core](https://github.com/Loothore907/gladiator-core), published Nov 22 with a fresh history |
-| Nov 21 onward | **All of Ledger**: the bridges and loader, the graph schema, every Cypher question, the commands (`flows`, `opponents`, `verdict`, `spec`, `verify`, `recommend`), the MCP server, the browser demo page, the tests and the shipped store. | This repository |
+| Nov 21 onward | **All of Ledger**: the bridges and loader, the graph schema, every Cypher question, the commands (`flows`, `opponents`, `verdict`, `spec`, `verify`), the MCP server, the browser demo page, the tests and the shipped store. | This repository |
 
 - **What Ledger takes from Gladiator.** It reads Gladiator's output files (the sealed match and validation
   records). It imports no Gladiator code. One small file is copied from it and marked as such:
