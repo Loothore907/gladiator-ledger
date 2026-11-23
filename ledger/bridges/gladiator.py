@@ -183,6 +183,7 @@ def run_rows(body: dict, seal: str) -> dict:
     matches = []
     can_show: dict[tuple[str, str], dict] = {}  # (test version, fault) -> the fault, once per run
     made = []  # one row per attempt and fault it actually made
+    includes: set[tuple[str, str]] = set()  # (test version, hazard its grader counts), once per run
     for node, attempt in by_key["A"]:
         a, b = by_key["A"][(node, attempt)], by_key["B"].get((node, attempt))
         if b is None:
@@ -206,13 +207,19 @@ def run_rows(body: dict, seal: str) -> dict:
                     "provider": model.split(":", 1)[0],
                     "won": outcome["winner"] == side,
                     "props": attempt_props(res, side, effort_for(settings, side), eff),
+                    # only the hazards this attempt tripped on; which hazards the version includes is said once
+                    # per run (`includes` below), not once per attempt
                     "hazards": [
-                        {"name": name, "count": int(details[counter] or 0)}
+                        {"name": name, "count": int(details[counter])}
                         for counter, name in HAZARDS.items()
-                        if counter in details
+                        if details.get(counter)
                     ],
                 }
             )
+        for res in (a, b):
+            for counter, name in HAZARDS.items():
+                if counter in (res.get("grade_details") or {}):
+                    includes.add((version_key(challenge), name))
         for side, res in (("A", a), ("B", b)):
             for fault in fault_rows(res, challenge["id"]):
                 count = fault.pop("count")
@@ -272,6 +279,7 @@ def run_rows(body: dict, seal: str) -> dict:
             "seal_sha256": seal,
         },
         "matches": matches,
+        "includes": [{"version_key": vkey, "name": name} for vkey, name in sorted(includes)],
         "can_show": [dict(fault, version_key=vkey) for (vkey, _), fault in sorted(can_show.items())],
         "made": made,
     }

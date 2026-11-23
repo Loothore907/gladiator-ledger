@@ -26,7 +26,7 @@ def test_export_carries_what_the_page_needs(tmp_path):
     graph = json.loads((tmp_path / "graph.json").read_text(encoding="utf-8"))
     assert set(graph["rows"]) == {"runs", "checks", "scores"}
     # faults and the faults each attempt made are written from the run rows, after the runs themselves
-    assert set(graph["writes"]) == {"runs", "faults", "made", "checks", "scores"}
+    assert set(graph["writes"]) == {"runs", "includes", "faults", "made", "checks", "scores"}
     assert any(r["made"] for r in graph["rows"]["runs"]) and all(r["can_show"] for r in graph["rows"]["runs"])
     assert graph["rows"]["runs"] and graph["rows"]["checks"] and graph["rows"]["scores"]
     expected = json.loads((tmp_path / "expected.json").read_text(encoding="utf-8"))

@@ -103,6 +103,15 @@ FOREACH (_ IN CASE WHEN h.count > 0 THEN [1] ELSE [] END |
   MERGE (att)-[t:TRIPPED_ON]->(hz) SET t.count = h.count)
 """
 
+# Which hazards each test version includes (its grader counts them), stated once per run and version.
+WRITE_INCLUDES = """
+UNWIND $runs AS r
+UNWIND r.includes AS i
+MATCH (tv:TestVersion {key: i.version_key})
+MERGE (hz:Hazard {name: i.name})
+MERGE (tv)-[:INCLUDES]->(hz)
+"""
+
 # Faults are written after the runs (WRITE creates the attempts and test versions they attach to): first the
 # faults each test version can show, then the ones each attempt made.
 WRITE_FAULTS = """
@@ -151,6 +160,8 @@ def write(evidence: Evidence, store: str) -> dict:
         source = {"name": evidence.source, "description": evidence.description}
         if evidence.runs:
             stats["runs"] = conn.execute(WRITE, {"runs": evidence.runs, "source": source}).stats
+            if any(r.get("includes") for r in evidence.runs):
+                conn.execute(WRITE_INCLUDES, {"runs": evidence.runs})
             if any(r.get("can_show") for r in evidence.runs):
                 faults = conn.execute(WRITE_FAULTS, {"runs": evidence.runs}).stats
                 made = conn.execute(WRITE_MADE, {"runs": evidence.runs}).stats

@@ -43,6 +43,7 @@ def export(data: Path, store: str, out: Path) -> dict:
                 "schema": load.SCHEMA,
                 "writes": {
                     "runs": load.WRITE,
+                    "includes": load.WRITE_INCLUDES,
                     "faults": load.WRITE_FAULTS,
                     "made": load.WRITE_MADE,
                     "checks": load.WRITE_VALIDATIONS,
