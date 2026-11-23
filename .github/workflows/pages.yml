@@ -31,6 +31,7 @@ jobs:
     permissions:
       pages: write
       id-token: write
+      actions: read # the deploy step looks up the artifact uploaded just before it
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -43,5 +44,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      # The deploy step lists this run's artifacts, and on 2026-11-23 it found none a second after the upload
+      # had finished (three failed publishes). Give the listing a moment to catch up.
+      - name: Wait for the uploaded page to be listed
+        run: sleep 20
       - id: deployment
         uses: actions/deploy-pages@v4
