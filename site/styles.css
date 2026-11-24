@@ -53,6 +53,11 @@ h1 em { font-style: normal; text-decoration: underline; text-decoration-color: v
 .live-banner { margin: 12px 0 0; padding: 10px 14px; border-radius: 10px; border: 1.5px solid var(--accent); background: var(--accent-soft); font-weight: 600; }
 .live-banner.refused { border-color: var(--warn); background: var(--warn-soft); }
 .live-jump { margin: 0 0 14px; }
+.start-over { margin: 0 0 10px; }
+#unmet-intro { margin-top: 14px; }
+table.own { border-collapse: collapse; margin: 16px 0; width: 100%; max-width: 640px; }
+table.own caption { text-align: left; font-weight: 600; margin-bottom: 6px; }
+table.own th, table.own td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
 .judge-row { margin: 8px 0 0; }
 .live-banner button { margin-left: 8px; }
 #judge-dialog { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; max-width: min(92vw, 420px); background: var(--surface); color: var(--ink); }
