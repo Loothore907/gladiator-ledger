@@ -96,7 +96,7 @@ function fakeRunner(models, extra) {
       server.asked = ask;
       if (ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
       races -= 1;
-      run.push({ run_id: `live-check-${run.length + 1}`, seal: 'abcdef0123456789', task: ask.task, a: ask.a, b: ask.b, winner: ask.a, a_passed: true, b_passed: false, a_cost_usd: 0.0021, b_cost_usd: 0.0034 });
+      run.push({ run_id: `live-check-${run.length + 1}`, seal: 'abcdef0123456789', task: ask.task, a: ask.a, b: ask.b, winner: ask.a, a_passed: true, b_passed: false, a_cost_usd: 0.0021, b_cost_usd: 0.0034, ...(server.old ? {} : { a_details: { items: 1, correct: 1, wrong: 0, mistakes: {}, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } }, b_details: { items: 1, correct: 0, wrong: 1, mistakes: { 'ALR-1': 'close->escalate' }, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } }, a_termination: 'session_ended', b_termination: 'no_action', a_seconds: 6, b_seconds: 5 }) });
       res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
       const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
       const step = (side, turn, tool_name, tool_args, elapsed_s, error = null) =>
@@ -111,7 +111,7 @@ function fakeRunner(models, extra) {
       step('B', 1, 'escalate_alert', { alert_id: 'ALR-1' }, 5);
       send('attempt_end', { side: 'A', passed: true, termination: 'session_ended', grade_details: { items: 1, correct: 1 } });
       send('attempt_end', { side: 'B', passed: false, termination: 'no_action', grade_details: { items: 1, correct: 0, wrong: 1 } });
-      send('record', { record: { sha256: 'abcdef0123456789', body: { run_id: `live-check-${run.length}`, live: true, verdict: { winner: 'A' }, contestants: { A: { results: [{ passed: true, cost_usd: 0.0021, calls: 3, input_tokens: 900, output_tokens: 40, wall_s: 6, termination: 'session_ended' }] }, B: { results: [{ passed: false, cost_usd: 0.0034, calls: 1, input_tokens: 400, output_tokens: 25, wall_s: 5, termination: 'no_action' }] } } } }, operator: {} });
+      send('record', { record: { sha256: 'abcdef0123456789', body: { run_id: `live-check-${run.length}`, live: true, verdict: { winner: 'A' }, contestants: { A: { results: [{ passed: true, cost_usd: 0.0021, calls: 3, input_tokens: 900, output_tokens: 40, wall_s: 6, termination: 'session_ended', grade_details: { items: 1, correct: 1, wrong: 0, mistakes: {}, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } } }] }, B: { results: [{ passed: false, cost_usd: 0.0034, calls: 1, input_tokens: 400, output_tokens: 25, wall_s: 5, termination: 'no_action', grade_details: { items: 1, correct: 0, wrong: 1, mistakes: { 'ALR-1': 'close->escalate' }, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } } }] } } } }, operator: {} });
       res.end();
     });
   });
@@ -312,9 +312,9 @@ async function main() {
         const hidden = await page.locator('.race .track .tick[hidden]').count();
         if (hidden) problems.push(`${hidden} steps are still hidden after the race ended`);
         // the graph picture under the race: one dot per scenario, and exactly the watched one ringed
-        const dots = await page.locator('#race figure.graph circle').count();
-        const ringed = await page.locator('#race figure.graph circle.ring').count();
-        if (dots !== squares || ringed !== 1) problems.push(`the graph under the race shows ${dots} dots (${ringed} ringed) for ${squares} scenarios`);
+        const dots = await page.locator('#pair-graph figure.graph circle').count();
+        const ringed = await page.locator('#pair-graph figure.graph circle.ring').count();
+        if (dots !== squares || ringed !== 1) problems.push(`the graph picture shows ${dots} dots (${ringed} ringed) for ${squares} scenarios`);
       }
     }
 
@@ -359,33 +359,36 @@ async function main() {
         { timeout: 15000 },
       )
       .then(() => true, () => false);
-    // The Relate graph beside the steps: it is the same graph, so it must show this verdict's own numbers.
+    // The Relate graph in step 3: one simple picture, labelled as a Relate graph, showing this verdict's own
+    // numbers and the question it was read with. The panel that used to sit beside the steps is gone.
     if (example) {
-      await page.evaluate(() => (document.getElementById('spine-details').open = true));
-      await page.waitForFunction(() => document.querySelector('#spine-steps span.on')?.dataset.step === '3' && document.querySelectorAll('#spine-body .sp-dot').length > 0, null, { timeout: 8000 }).catch(() => problems.push('the graph panel did not follow the page to the verdict'));
+      await page.waitForSelector('#pair-graph figure.graph circle', { timeout: 8000 }).catch(() => problems.push('step 3 has no graph picture'));
       const shown = await page.evaluate(async () => {
         const v = await window.ledgerDemo.current();
         return {
           rounds: v.rounds.length,
-          dots: document.querySelectorAll('#spine-body .sp-dot:not(.live)').length,
-          a: document.querySelectorAll('#spine-body .sp-dot.a:not(.live)').length,
+          dots: document.querySelectorAll('#pair-graph circle.gdot:not(.live)').length,
+          a: document.querySelectorAll('#pair-graph circle.gdot.a:not(.live)').length,
           winsA: v.wins[v.a],
-          flows: document.querySelectorAll('#spine-body .sp-flow').length,
-          lit: document.querySelectorAll('#spine-body .sp-flow.on').length,
-          chosen: document.querySelectorAll('#spine-body .sp-model.a, #spine-body .sp-model.b').length,
-          stats: document.getElementById('spine-stats')?.innerText || '',
-          query: document.querySelector('#spine-body pre')?.innerText || '',
-          badge: document.querySelector('#spine .relate-badge')?.innerText || '',
+          pictures: document.querySelectorAll('figure.graph').length,
+          stats: document.getElementById('graph-stats')?.innerText || '',
+          query: document.querySelector('#pair-graph pre')?.textContent || '',
+          badge: document.querySelector('#pair-graph .relate-badge')?.innerText || '',
+          old: document.querySelectorAll('#spine, #spine-body, .frame').length,
         };
       });
-      if (shown.dots !== shown.rounds || shown.a !== shown.winsA) problems.push(`the graph panel shows ${shown.dots} scenarios (${shown.a} won by the first model), the verdict has ${shown.rounds} (${shown.winsA})`);
-      if (shown.flows !== 4 || shown.lit !== 1 || shown.chosen !== 2) problems.push(`the graph panel should show 4 workflows with 1 lit and 2 chosen models: ${JSON.stringify(shown)}`);
-      if (!new RegExp(`^${shown.rounds} rows · .* ms`).test(shown.stats) || !shown.query.includes('MATCH')) problems.push(`the graph panel does not show the query behind the step and what it returned: ${JSON.stringify(shown.stats)}`);
-      if (!/relate/i.test(shown.badge)) problems.push('the graph panel is not labelled as a Relate graph');
-      // a scenario in the picture opens its replay
-      await page.locator('#spine-body .sp-dot:not(.live)').first().click();
-      await page.waitForSelector('#race .track .tick', { state: 'attached', timeout: 8000 }).catch(() => problems.push('clicking a scenario in the graph panel did not open its replay'));
+      if (shown.dots !== shown.rounds || shown.a !== shown.winsA) problems.push(`the graph picture shows ${shown.dots} scenarios (${shown.a} won by the first model), the verdict has ${shown.rounds} (${shown.winsA})`);
+      if (shown.pictures !== 1) problems.push(`the page should have one graph picture, it has ${shown.pictures}`);
+      if (shown.old) problems.push('the graph panel beside the steps is still on the page');
+      if (!new RegExp(`${shown.rounds} rows · .* ms`).test(shown.stats) || !shown.query.includes('MATCH')) problems.push(`the graph picture does not show the query behind it and what it returned: ${JSON.stringify(shown.stats)}`);
+      if (!/relate/i.test(shown.badge)) problems.push('the graph picture is not labelled as a Relate graph');
+      // a scenario in the picture opens its replay, and is then the ringed one
+      await page.locator('#pair-graph circle.gdot:not(.live)').first().click();
+      await page.waitForSelector('#race .track .tick', { state: 'attached', timeout: 8000 }).catch(() => problems.push('clicking a scenario in the graph picture did not open its replay'));
+      await page.waitForSelector('#pair-graph circle.gdot.ring', { timeout: 8000 }).catch(() => problems.push('the scenario being watched is not ringed in the graph picture'));
     }
+    const foot = await page.locator('footer').innerText();
+    if (/cannot run new/.test(foot) || !/Live races/.test(foot)) problems.push('the small print still says the page cannot run new matches, or does not explain live races');
     for (const id of ['download-spec', 'download-cost', 'download-evidence', 'download-all']) {
       if (example && !(await page.locator(`#${id}`).count())) problems.push(`the result offers no ${id} button`);
     }
@@ -501,20 +504,22 @@ async function main() {
       const off = await live.locator('#live-stage .track .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
       if (off) problems.push(`${off} live steps are drawn past the end of the track`);
       // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
-      await live.waitForSelector('#live-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
-      const drawn = await live.locator('#live-graph circle').count();
+      await live.waitForSelector('#pair-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
+      const drawn = await live.locator('#pair-graph circle').count();
       if (drawn !== pair.pairs + 1) problems.push(`the graph after the live race shows ${drawn} dots, not ${pair.pairs} recorded + 1 live`);
       const after = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
       if (after.pairs !== pair.pairs || after.wins[pair.a] !== pair.wins[pair.a]) problems.push('a live result changed the recorded verdict');
       const ask = runner.asked;
       if (!(ask.a === pair.a && ask.b === pair.b && ask.task === pair.task.split('/').pop())) problems.push(`the page asked the runner for ${JSON.stringify(ask)}`);
       if (ask.token !== 'session-1' || 'code' in ask || 'invite' in ask) problems.push(`a race must carry the session and nothing else secret: ${JSON.stringify(Object.keys(ask))}`);
-      // the live tally: one race so far between these two, won by the first, and not mixed into the record
-      await live.waitForFunction(() => /Live races so far/.test(document.getElementById('live-tally').innerText), null, { timeout: 5000 }).catch(() => problems.push('the live tally did not appear after a race'));
-      const tallied = await live.locator('#live-tally').innerText();
-      if (!/ 1, .* 0 \(1 live race on this task/.test(tallied) || !tallied.includes('kept apart from')) problems.push(`the live tally is wrong: ${JSON.stringify(tallied)}`);
-      await live.evaluate(() => (document.getElementById('spine-details').open = true));
-      await live.waitForFunction(() => document.querySelectorAll('#spine-body .sp-dot.live').length === 1, null, { timeout: 6000 }).catch(() => problems.push('the live race did not appear in the graph panel beside the steps'));
+      // the race is written up on the page: who passed, what the other got wrong (the item, what it chose and what
+      // was right), and the first draft of the pair's live history, kept apart from the record
+      await live.waitForSelector('#live-history .race-card', { timeout: 5000 }).catch(() => problems.push('the live race was not written up on the page'));
+      const written = await live.locator('#live-history').innerText();
+      for (const part of ['First draft from 1 live race', 'won 1', 'won 0', 'Live race 1', 'the only one to pass', '1 of 1 items right', 'wrong decision', 'stopped before finishing', 'ALR-1: it chose "escalate alert", the right decision was "close alert"', 'live-check-1', 'not a verdict', 'kept apart from']) {
+        if (!written.includes(part)) problems.push(`the live write-up lacks ${JSON.stringify(part)}: ${JSON.stringify(written.slice(0, 600))}`);
+      }
+      if ((await live.locator('#live-history .race-card').count()) !== 1) problems.push('one live race should be written up once');
       // the money and the races left are read again after a race
       await live.waitForFunction(() => document.getElementById('live-budget').innerText.includes('2 live races left'), null, { timeout: 5000 }).catch(() => problems.push('the budget line was not refreshed after the race'));
       if (!(await live.locator('#live-budget').innerText()).includes('OpenRouter $29.99 of $30.00')) problems.push('the provider budget was not refreshed after the race');
@@ -580,6 +585,9 @@ async function main() {
         if (!(await first.locator('#live-prior').innerText()).includes('never met')) problems.push('a pair with no record is not described as one in the live panel');
         await first.locator('#live-go').click();
         await first.waitForFunction(() => document.getElementById('live-result').innerText.includes('the first these two have played'), null, { timeout: 10000 }).catch(() => problems.push('a first race between two models is not described as the first evidence'));
+        await first.waitForFunction(() => /met once/.test(document.getElementById('band-live')?.innerText || ''), null, { timeout: 6000 }).catch(() => problems.push('after a first live race the no-verdict band does not say the two have now met live'));
+        if (!(await first.locator('#live-history').innerText()).includes('all that is known')) problems.push('the live history of a pair with no record does not say it is all that is known');
+        if ((await first.locator('#pair-graph circle.live').count()) !== 1) problems.push('a first live race is not drawn in the graph picture of a pair with no record');
         if (runner.asked.a !== neverMet.a || runner.asked.b !== neverMet.b) problems.push(`the page raced ${runner.asked.a} vs ${runner.asked.b}, not the pair chosen in step 2`);
         if (!(await first.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
         await first.close();
@@ -630,8 +638,10 @@ async function main() {
       await pickPair(back);
       await back.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('the sign-in was not kept for the next visit'));
       // and the tally is still there: it lives on the runner, not in the page
-      if (!(await back.locator('#live-tally').innerText()).includes('Live races so far')) problems.push('the live tally was lost on the next visit');
-      if ((await back.locator('#live-graph circle.live').count()) < 1) problems.push('earlier live races are not drawn in the graph on the next visit');
+      await back.waitForSelector('#live-history .race-card', { timeout: 6000 }).catch(() => problems.push('the live history was lost on the next visit'));
+      const kept = await back.locator('#live-history').innerText();
+      if (!kept.includes('First draft from') || !kept.includes('it chose')) problems.push(`the live history on the next visit does not carry the write-ups: ${JSON.stringify(kept.slice(0, 300))}`);
+      if ((await back.locator('#pair-graph circle.live').count()) < 1) problems.push('earlier live races are not drawn in the graph on the next visit');
       await context.close();
     } finally {
       runner.close();
