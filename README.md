@@ -310,10 +310,11 @@ uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --store rebu
 **Known limits.** Evidence is uneven. Thirteen pairings of small models have 12 to 16 judged pairs on every workflow,
 enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read "not enough evidence", which is
 the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
-that only resembles one of these four needs its own test. The page and the assistant work over this fixed set of
-finished matches and cannot run new ones. In two of the four (refund queue and incident triage) one obstacle, a
-record that changes mid-task with a notice, was weaker than intended in the versions played here
-([docs/DISCLOSURE.md](docs/DISCLOSURE.md)).
+that only resembles one of these four needs its own test. Every verdict from the page and the assistant rests on this fixed set of
+finished matches. A live race (judges only for now) runs on a separate Gladiator runner; the page writes it up and
+keeps a live history of the pair beside the record, never counted in a verdict. In two of the four (refund queue
+and incident triage) one obstacle, a record that changes mid-task with a notice, was weaker than intended in the
+versions played here ([docs/DISCLOSURE.md](docs/DISCLOSURE.md)).
 
 `data/epoch/` holds one file from Epoch AI's Benchmarking Hub (the Capabilities Index), used under the Creative
 Commons Attribution licence; see [data/epoch/README.md](data/epoch/README.md) for the credit.

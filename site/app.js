@@ -64,8 +64,8 @@ window.ledgerDemo = {
     const { ledger } = await ledgerReady;
     return ledger.markdown(await ledger.spec(task, a, b, profile, overrides));
   },
-  // the verdict now on screen (what the graph panel is drawn from)
-  current: async () => spine.v,
+  // the verdict now on screen (what the graph picture is drawn from)
+  current: async () => shown.v,
   // the cost breakdown and the evidence report for one judged pair, as the command line writes them
   reports: async (task, a, b, profile, overrides = null) => {
     const { ledger, rules } = await ledgerReady;
@@ -204,7 +204,6 @@ function drawFlows() {
       );
     }),
   );
-  drawSpine();
 }
 
 function firstSentence(text) {
@@ -227,7 +226,7 @@ function startOver() {
   if (!mayLeave()) return;
   turn += 1;
   Object.assign(state, { task: null, flow: null, a: null, b: null, partners: new Map(), models: [], overrides: {} });
-  spine.v = null;
+  shown.v = null;
   $('step-models').hidden = true;
   $('step-verdict').hidden = true;
   $('verdict-body').replaceChildren();
@@ -242,7 +241,7 @@ async function chooseFlow(flow) {
   $('start-over').hidden = false;
   const mine = ++turn;
   Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [], overrides: {} });
-  spine.v = null;
+  shown.v = null;
   drawFlows();
   const models = await ledger.modelsOnFlow(flow.test);
   if (mine !== turn) return;
@@ -255,7 +254,6 @@ async function chooseFlow(flow) {
     'Pick the two you are choosing between. A record is shown where there is one; it never limits what you can pick.';
   drawFirst();
   $('second-model').hidden = true;
-  drawSpine();
   $('step-models').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -306,7 +304,7 @@ async function chooseFirst(model) {
   }
   const mine = ++turn;
   Object.assign(state, { a: model, b: null });
-  spine.v = null;
+  shown.v = null;
   $('step-verdict').hidden = true;
   const partners = await ledger.partnersOnFlow(state.task, model);
   const scores = await ledger.scoresOf([model, ...partners.map((p) => p.model)]);
@@ -314,7 +312,6 @@ async function chooseFirst(model) {
   state.partners = new Map(partners.map((p) => [p.model, p.pairs]));
   state.scores = new Map(scores.map((s) => [s.model, s]));
   drawSecond();
-  drawSpine();
   await drawSuggestions(mine);
 }
 
@@ -435,8 +432,8 @@ async function showVerdict(scroll = false) {
     const own = await ask(OWN_RECORD, { version: judged.version, a: state.a, b: state.b });
     if (mine !== turn) return;
     drawNoRecord(judged, own);
-    spine.v = judged;
-    drawSpine();
+    shown.v = judged;
+    drawPairGraph(judged);
     drawLive(judged);
     $('step-verdict').hidden = false;
     if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -445,8 +442,8 @@ async function showVerdict(scroll = false) {
   const spec = await ledger.build({ ...judged, suite: null });
   if (mine !== turn) return;
   drawVerdict(spec, judged);
-  spine.v = judged;
-  drawSpine();
+  shown.v = judged;
+  drawPairGraph(judged);
   drawLive(judged);
   $('step-verdict').hidden = false;
   if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -478,6 +475,7 @@ function drawNoRecord(v, own) {
       el('p', { class: 'band-kind' }, 'No head-to-head yet'),
       el('p', { class: 'headline', id: 'verdict-headline' }, `${shortName(v.a)} and ${shortName(v.b)} have never met on this task, so there is no verdict.`),
       el('p', { class: 'small' }, 'A verdict needs the two models to play the same generated worlds. What each did against other opponents is below; it does not say which of these two does the task better.'),
+      el('p', { class: 'small', id: 'band-live', hidden: true }),
     ),
     el(
       'table',
@@ -486,6 +484,7 @@ function drawNoRecord(v, own) {
       el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Model'), el('th', { scope: 'col' }, 'Attempts passed'), el('th', { scope: 'col' }, 'Cost per attempt'))),
       el('tbody', null, row(v.a), row(v.b)),
     ),
+    el('div', { id: 'pair-graph', class: 'pair-graph' }),
     el('div', { id: 'live', class: 'race live' }),
   );
 }
@@ -750,8 +749,8 @@ async function openRace(v, index) {
     laneLegend(),
     ...lanes.map((lane) => lane.node),
     finish,
-    await evidenceGraph(v, index),
   );
+  drawPairGraph(v, index);
   if (still) {
     clock = span;
     paint();
@@ -759,214 +758,12 @@ async function openRace(v, index) {
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// ---- the Relate graph as the spine of the page ------------------------------------------------------------------
-//
-// One picture of the graph that follows the visitor through the steps. Each step lights up the part of the graph
-// it was read from and shows the Cypher that Relate ran for it, with how many rows came back and how long it took.
-// The picture is drawn from the same answers the steps use, so it cannot disagree with them.
-
-const spine = { v: null }; // the verdict on screen, when there is one
-let spineTurn = 0;
+const shown = { v: null }; // the verdict on screen, when there is one
 
 async function timed(query, params) {
   const before = performance.now();
   const rows = await ask(query, params);
   return { rows: rows.length, ms: performance.now() - before };
-}
-
-const SPINE_W = 480;
-const trim = (text, most) => (text.length > most ? `${text.slice(0, most - 1)}…` : text);
-
-async function drawSpine() {
-  const box = $('spine-body');
-  if (!box || !state.flows) return;
-  const mine = ++spineTurn;
-  const v = state.a && state.b ? spine.v : null;
-  const step = v ? 3 : state.a ? 2 : state.task ? 1 : 0;
-  for (const chip of document.querySelectorAll('#spine-steps span')) chip.classList.toggle('on', Number(chip.dataset.step) === step);
-
-  const parts = [];
-  let y = 0;
-  const heading = (text) => {
-    parts.push(svg('text', { x: 0, y: y + 12, class: 'sp-head' }, text));
-    y += 22;
-  };
-
-  // --- workflows: every tested workflow, the chosen one lit
-  heading('WORKFLOWS TESTED');
-  const flows = state.flows.flows;
-  const fw = (SPINE_W - 8 * (flows.length - 1)) / flows.length;
-  const chosenFlowX = [];
-  flows.forEach((f, i) => {
-    const x = i * (fw + 8);
-    const on = f.test === state.task;
-    if (on) chosenFlowX.push(x + fw / 2);
-    const g = svg(
-      'g',
-      { class: `sp-flow${on ? ' on' : state.task ? ' off' : ''}`, tabindex: 0, role: 'button', 'aria-label': `Workflow ${f.title}` },
-      svg('rect', { x, y, width: fw, height: 44, rx: 8 }),
-      svg('text', { x: x + fw / 2, y: y + 19, 'text-anchor': 'middle', class: 'sp-name' }, trim(f.title, 16)),
-      svg('text', { x: x + fw / 2, y: y + 34, 'text-anchor': 'middle', class: 'sp-sub' }, `${f.models} models`),
-      svg('title', null, `${f.title}: ${f.models} models, ${f.pairs} judged pairs. Click to choose it.`),
-    );
-    g.addEventListener('click', () => chooseFlow(f));
-    parts.push(g);
-  });
-  y += 44;
-  const flowBottom = y;
-
-  // --- models tested on the chosen workflow
-  let modelsTop = 0;
-  const at = new Map(); // model id -> where its dot is
-  if (step >= 1) {
-    y += 22;
-    heading('MODELS TESTED ON IT');
-    modelsTop = y;
-    const list = availableModels().sort((p, q) => q.pairs - p.pairs || (p.model < q.model ? -1 : 1));
-    const half = Math.ceil(list.length / 2);
-    list.forEach((m, i) => {
-      const col = i < half ? 0 : 1;
-      const row = i < half ? i : i - half;
-      const cx = col * (SPINE_W / 2) + 22;
-      const cy = y + row * 24 + 9;
-      const cls = m.model === state.a ? 'a' : m.model === state.b ? 'b' : state.a && state.partners.has(m.model) ? 'met' : state.a ? 'unmet' : 'plain';
-      at.set(m.model, { x: cx, y: cy });
-      const met = state.a && state.partners.has(m.model) ? ` · ${plural(state.partners.get(m.model), 'pair')} with ${shortName(state.a)}` : '';
-      const g = svg(
-        'g',
-        { class: `sp-model ${cls}`, tabindex: 0, role: 'button', 'aria-label': `Model ${shortName(m.model)}` },
-        svg('circle', { cx, cy, r: cls === 'a' || cls === 'b' ? 8 : 5.5 }),
-        svg('text', { x: cx + 14, y: cy + 4, class: 'sp-name' }, trim(shortName(m.model), 24)),
-        svg('title', null, `${m.model}: ${plural(m.pairs, 'judged pair')} on this workflow${met}. Click to pick it.`),
-      );
-      g.addEventListener('click', () => (state.a && m.model !== state.a ? chooseSecond(m.model) : chooseFirst(m.model)));
-      parts.push(g);
-    });
-    y += half * 24 + 2;
-    // the workflow leads to its models
-    const from = chosenFlowX[0] ?? SPINE_W / 2;
-    parts.unshift(svg('path', { d: `M${from} ${flowBottom} C ${from} ${flowBottom + 26}, ${SPINE_W / 2} ${modelsTop - 34}, ${SPINE_W / 2} ${modelsTop - 20}`, class: 'sp-link' }));
-  }
-
-  // --- the scenarios the two chosen models both played, the live races, and the faults each made
-  if (v) {
-    y += 20;
-    const a = at.get(v.a);
-    const b = at.get(v.b);
-    heading('SCENARIOS BOTH PLAYED');
-    const top = y;
-    if (v.verdict === 'no data') {
-      parts.push(svg('text', { x: 0, y: y + 14, class: 'sp-sub' }, 'None: these two have never met on this task, so there is no verdict.'));
-      y += 26;
-    } else {
-      const perRow = 12;
-      v.rounds.forEach((round, i) => {
-        const cx = 14 + (i % perRow) * 30;
-        const cy = y + 12 + Math.floor(i / perRow) * 28;
-        const who = round.winner === v.a ? 'a' : round.winner === v.b ? 'b' : 'tie';
-        const dot = svg(
-          'circle',
-          { cx, cy, r: 10, class: `sp-dot ${who}`, tabindex: 0, role: 'button', 'aria-label': `Scenario ${i + 1}` },
-          svg('title', null, `Scenario ${i + 1}: ${who === 'tie' ? 'a tie' : `${shortName(round.winner)} won`} on ${round.rule}. Click to replay it.`),
-        );
-        dot.addEventListener('click', async () => {
-          await openRace(v, i);
-          $('race')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
-        parts.push(dot);
-      });
-      y += Math.ceil(v.rounds.length / perRow) * 28 + 4;
-      parts.push(svg('text', { x: 0, y: y + 12, class: 'sp-name' }, `${shortName(v.a)} ${v.wins[v.a]} · ${shortName(v.b)} ${v.wins[v.b]}${v.ties ? ` · ${v.ties} tied` : ''}`));
-      parts.push(svg('text', { x: 0, y: y + 28, class: 'sp-sub' }, 'One dot per generated world, coloured by who won it. Click one to replay it.'));
-      y += 36;
-    }
-    // both models lead to the scenarios they played
-    if (a && b) {
-      // each runs down the gutter beside its column, clear of the names, then along to the scenarios
-      const route = (from, gutter, level, land) => `M${from.x - 8} ${from.y} H${from.x - gutter} V${top - level} H${land} V${top + 2}`;
-      parts.unshift(svg('path', { d: route(a, 13, 30, 8), class: 'sp-link a' }));
-      parts.unshift(svg('path', { d: route(b, 17, 26, 20), class: 'sp-link b' }));
-    }
-
-    const live = await ask(LIVE_BETWEEN, { version: v.version, a: v.a, b: v.b });
-    if (mine !== spineTurn) return;
-    if (live.length) {
-      y += 12;
-      heading('LIVE RACES');
-      parts.push(svg('rect', { x: 0, y: y - 2, width: SPINE_W, height: 46, rx: 8, class: 'sp-livebox' }));
-      live.slice(-14).forEach((l, i) => {
-        const who = l.winner === v.a ? 'a' : l.winner === v.b ? 'b' : 'tie';
-        parts.push(svg('circle', { cx: 18 + i * 30, cy: y + 14, r: 9, class: `sp-dot live ${who}` }, svg('title', null, `Live race ${l.run}: ${who === 'tie' ? 'no winner' : `${shortName(l.winner)} won`}`)));
-      });
-      const won = (m) => live.filter((l) => l.winner === m).length;
-      parts.push(svg('text', { x: 8, y: y + 38, class: 'sp-sub' }, `${shortName(v.a)} ${won(v.a)} · ${shortName(v.b)} ${won(v.b)} · dashed: raced live, never counted in the verdict`));
-      y += 50;
-    }
-
-    if (v.fit) {
-      y += 14;
-      heading('FAULTS EACH MADE ON THIS TASK');
-      const colW = (SPINE_W - 12) / 2;
-      let tallest = 0;
-      [v.a, v.b].forEach((name, col) => {
-        const f = v.fit[name];
-        const x = col * (colW + 12);
-        let fy = y;
-        const word = f.fit === null ? 'too few attempts' : f.fit ? 'fit' : 'not fit';
-        parts.push(svg('rect', { x, y: fy, width: 5, height: 30, rx: 2.5, class: `sp-bar ${col ? 'b' : 'a'}` }));
-        parts.push(svg('text', { x: x + 12, y: fy + 12, class: 'sp-name' }, trim(shortName(name), 24)));
-        parts.push(svg('text', { x: x + 12, y: fy + 27, class: `sp-sub${f.fit === false ? ' bad' : ''}` }, `${f.passed} of ${f.attempts} passed · ${word} (${v.profile})`));
-        fy += 38;
-        const made = f.faults.filter((q) => q.attempts_with && q.kind_of === null);
-        for (const q of made.slice(0, 5)) {
-          const bad = q.breaks;
-          parts.push(
-            svg(
-              'g',
-              { class: `sp-fault${bad ? ' bad' : ''}` },
-              svg('rect', { x, y: fy, width: colW, height: 26, rx: 7 }),
-              svg('text', { x: x + 9, y: fy + 17, class: 'sp-name' }, `${bad ? '✕ ' : ''}${trim(q.fault, 27)}`),
-              svg('text', { x: x + colW - 9, y: fy + 17, 'text-anchor': 'end', class: 'sp-sub' }, `${q.attempts_with} of ${f.attempts}`),
-              svg('title', null, `${q.fault} (${q.level}): in ${q.attempts_with} of ${f.attempts} attempts${bad ? ', which makes it not fit under this tolerance' : ''}`),
-            ),
-          );
-          fy += 31;
-        }
-        if (!made.length) {
-          parts.push(svg('text', { x: x + 2, y: fy + 14, class: 'sp-sub' }, 'no faults recorded'));
-          fy += 24;
-        } else if (made.length > 5) {
-          parts.push(svg('text', { x: x + 2, y: fy + 12, class: 'sp-sub' }, `+ ${made.length - 5} more`));
-          fy += 20;
-        }
-        tallest = Math.max(tallest, fy - y);
-      });
-      y += tallest;
-    }
-  }
-
-  // --- what this step read from the graph, as the Cypher Relate ran
-  let read;
-  if (step === 0) read = { title: 'Step 1 reads the tested workflows', query: questionsText.flows, params: {} };
-  else {
-    const version = v && v.version !== 'all versions' ? v.version : await ledger.currentVersion(state.task);
-    if (step === 1) read = { title: 'Step 2 reads the models tested on this workflow', query: ledger.text.modelsOnFlow, params: { test_id: state.task, version_key: version } };
-    else if (step === 2) read = { title: `Step 2 reads who has met ${shortName(state.a)} here`, query: ledger.text.partnersOnFlow, params: { test_id: state.task, version_key: version, model: state.a } };
-    else read = { title: 'Step 3 reads the scenarios both models played', query: questionsText.pair_on_task, params: { test_id: state.task, a: v.a, b: v.b, suite: null, version_key: version } };
-  }
-  const ran = await timed(read.query, read.params);
-  if (mine !== spineTurn) return;
-
-  box.replaceChildren(
-    svg('svg', { viewBox: `0 0 ${SPINE_W} ${Math.max(y + 6, 70)}`, role: 'img', 'aria-label': 'The Relate graph behind this page: workflows, the models tested on them, the scenarios two models both played and the faults each made' }, parts),
-    el(
-      'div',
-      { class: 'sp-read' },
-      el('p', { class: 'sp-read-title' }, read.title),
-      el('pre', null, read.query.trim()),
-      el('p', { class: 'sp-read-stats', id: 'spine-stats' }, `${plural(ran.rows, 'row')} · ${ran.ms < 1 ? 'under 1' : Math.round(ran.ms)} ms · run by Relate in this browser tab`),
-    ),
-  );
 }
 
 // ---- the graph behind a verdict, as a picture -------------------------------------------------------------------
@@ -991,10 +788,11 @@ async function evidenceGraph(v, ring = null) {
   const live = await ask(LIVE_BETWEEN, { version: v.version, a: v.a, b: v.b });
   const W = 720;
   const H = 230;
-  const n = v.rounds.length;
+  const rounds = v.rounds || [];
+  const n = rounds.length;
   const gap = Math.min(30, 430 / Math.max(n, 1));
   const first = W / 2 - 60 - ((n - 1) * gap) / 2;
-  const dots = v.rounds.map((round, i) => ({ x: first + i * gap, y: 118, who: round.winner === v.a ? 'a' : round.winner === v.b ? 'b' : 'tie', ring: i === ring, label: `Scenario ${i + 1}` }));
+  const dots = rounds.map((round, i) => ({ index: i, x: first + i * gap, y: 118, who: round.winner === v.a ? 'a' : round.winner === v.b ? 'b' : 'tie', ring: i === ring, label: `Scenario ${i + 1}` }));
   const liveDots = live.map((l, i) => ({ x: W - 110 + i * 26, y: 118, who: l.winner === v.a ? 'a' : l.winner === v.b ? 'b' : 'tie', live: true, label: `Live race ${l.run}` }));
   const top = { x: W / 2, y: 30 };
   const left = { x: 150, y: 200 };
@@ -1014,17 +812,43 @@ async function evidenceGraph(v, ring = null) {
       node(top, v.version.split('/').pop().split(':')[0], 'task'),
       node(left, shortName(v.a), 'a'),
       node(right, shortName(v.b), 'b'),
-      [...dots, ...liveDots].map((d) => svg('circle', { cx: d.x, cy: d.y, r: d.ring || d.live ? 9 : 6, class: `gdot ${d.who}${d.ring ? ' ring' : ''}${d.live ? ' live' : ''}` }, svg('title', null, d.label))),
+      [...dots, ...liveDots].map((d) => svg('circle', { cx: d.x, cy: d.y, r: d.ring || d.live ? 9 : 6, class: `gdot ${d.who}${d.ring ? ' ring' : ''}${d.live ? ' live' : ''}`, ...(d.live ? {} : { tabindex: 0, role: 'button', onclick: () => openRace(v, d.index) }) }, svg('title', null, d.live ? d.label : `${d.label}: watch it`))),
     ),
     el(
       'figcaption',
       null,
-      `The graph this verdict is read from. Each dot is one scenario both models played, linked to the test version it used and to each model, and coloured by who won it.`,
+      n
+        ? 'Each dot is one scenario both models played, linked to the test version it used and to each model, and coloured by who won it. Click a dot to watch that scenario.'
+        : 'The test version and the two models are in the graph, but no recorded scenario links them yet.',
       ring !== null ? ' The ringed one is the race you just watched.' : '',
       live.length ? ` The dashed ${live.length === 1 ? 'one is the live race' : 'ones are live races'}: now in the graph and linked the same way, but as a different kind of node, so no verdict counts ${live.length === 1 ? 'it' : 'them'}.` : '',
     ),
   );
   return figure;
+}
+
+// The one home of that picture in step 3, labelled for what it is: a Relate graph, with the question it was read
+// with and what came back. It is drawn again when a scenario is watched (ringed) and when live races join it.
+async function drawPairGraph(v, ring = null) {
+  const box = $('pair-graph');
+  if (!box) return;
+  const version = v.version !== 'all versions' ? v.version : await ledger.currentVersion(v.task);
+  const query = questionsText.pair_on_task;
+  const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version });
+  const figure = await evidenceGraph(v, ring);
+  if ($('pair-graph') !== box) return;
+  box.replaceChildren(
+    el('h3', { class: 'pair-graph-title' }, el('span', { class: 'relate-badge' }, 'Relate graph'), ' The evidence behind this answer'),
+    figure,
+    el(
+      'p',
+      { class: 'note small', id: 'graph-stats' },
+      `Read from the graph with one Cypher query: ${plural(ran.rows, 'row')} · ${ran.ms < 1 ? 'under 1' : Math.round(ran.ms)} ms · run by `,
+      el('a', { href: 'https://relatedb.ai', rel: 'noopener' }, 'Relate'),
+      ' in this browser tab.',
+    ),
+    el('details', { class: 'graph-query' }, el('summary', null, 'Show the query'), el('pre', null, query.trim())),
+  );
 }
 
 // ---- a live race: one fresh scenario, played now by a Gladiator runner -------------------------------------------
@@ -1387,7 +1211,6 @@ async function drawLive(v) {
   const money = el('p', { class: 'note small', id: 'live-budget' });
   const stage = el('div', { id: 'live-stage' });
   const say = el('p', { class: 'finish', id: 'live-result', role: 'status', 'aria-live': 'polite' });
-  const grown = el('div', { id: 'live-graph' });
 
   // what is left to spend, by provider, and how many races this sign-in has left
   const showBudget = (options, left) => {
@@ -1401,10 +1224,13 @@ async function drawLive(v) {
   };
   showBudget(runner.options, session.races_left);
 
-  // The live races the runner has on file, by every signed-in visitor: a running tally for the two models
-  // chosen, shown beside the record and never added to it. A runner too old to list them shows nothing.
-  const tally = el('p', { id: 'live-tally', class: 'live-tally', hidden: true });
+  // The live races on file for the two models chosen: each one written up (who passed, what each got wrong), and
+  // together a first draft of how the pair compares. Shown beside the record and never added to it. The runner
+  // lists every signed-in visitor's races; a race just run here is added from its own sealed record, so the
+  // write-up does not wait on the list.
+  const history = el('div', { id: 'live-history', class: 'live-history', hidden: true });
   let liveRaces = [];
+  const mine = new Map(); // run_id -> the facts of a race run in this visit
   const loadRaces = async () => {
     try {
       const response = await fetch(`${runner.base}/races`);
@@ -1414,22 +1240,21 @@ async function drawLive(v) {
     }
   };
   const showTally = async (a, b, r) => {
-    const between = liveRaces.filter((x) => x.task === task && ((x.a === a && x.b === b) || (x.a === b && x.b === a)));
-    tally.hidden = !between.length;
+    const listed = liveRaces.filter((x) => x.task === task && ((x.a === a && x.b === b) || (x.a === b && x.b === a)));
+    const between = [...listed.map((x) => (x.a_details ? x : mine.get(x.run_id) || x)), ...[...mine.values()].filter((x) => !listed.some((y) => y.run_id === x.run_id))];
+    history.hidden = !between.length;
     if (!between.length) return;
-    const won = (m) => between.filter((x) => x.winner === m).length;
-    const none = between.filter((x) => !x.winner).length;
-    const recorded = r.verdict === 'no data' ? 'There are no recorded scenarios between them.' : `They are kept apart from the ${plural(r.pairs, 'recorded scenario')} the verdict rests on.`;
-    tally.replaceChildren(
-      el('strong', null, `Live races so far: ${shortName(a)} ${won(a)}, ${shortName(b)} ${won(b)}`),
-      none ? `, ${none} with no winner` : '',
-      ` (${plural(between.length, 'live race')} on this task, by everyone signed in). ${recorded}`,
-    );
+    history.replaceChildren(...liveHistory(between, a, b, r));
+    const note = $('band-live');
+    if (note) {
+      note.hidden = false;
+      note.textContent = `Live, they have now met ${between.length === 1 ? 'once' : `${between.length} times`}: the first draft of their history is below. It is not a verdict yet.`;
+    }
     // they join the graph as live results, so the picture shows them too
-    for (const x of between) await ask(ADD_LIVE, { run: x.run_id, winner: x.winner, seal: x.seal, at: Number(x.run_id.replace(/\D/g, '').slice(0, 14)), version: r.version, a: x.a, b: x.b });
-    if (r.rounds) grown.replaceChildren(await evidenceGraph(r));
-    drawSpine(); // the live races are in the graph now: show them in the picture beside the steps
+    for (const x of between) await ask(ADD_LIVE, { run: x.run_id, winner: x.winner, seal: x.seal, at: Number(String(x.run_id).replace(/\D/g, '').slice(0, 14)), version: r.version, a: x.a, b: x.b });
+    await drawPairGraph(r);
   };
+  await loadRaces();
   await loadRaces();
 
   // what the record says about this pair: it may favour one, lean, name no favourite, or not exist at all
@@ -1496,9 +1321,9 @@ async function drawLive(v) {
           'Download the live race report',
         ),
       );
-      // the result joins the graph, as its own kind of node, and the picture is drawn from the graph again
-      await ask(ADD_LIVE, { run: record.body.run_id, winner, seal: record.sha256, at: Date.now(), version: r.version, a, b });
-      grown.replaceChildren(r.rounds ? await evidenceGraph(r) : '');
+      // written up below from its own sealed record; it joins the graph and the pair's live history there
+      const facts = raceFacts(record, task, a, b);
+      mine.set(facts.run_id, facts);
     } catch (error) {
       say.textContent = `The live race did not run: ${error.message}`;
     } finally {
@@ -1518,15 +1343,131 @@ async function drawLive(v) {
     title,
     el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
     prior,
-    tally,
     el('div', { class: 'race-controls' }, level, profile, go),
     money,
     stage,
     say,
-    grown,
+    history,
   );
 }
 const spec_task = (test) => test.split('/').pop();
+
+// ---- a live race written up: what each model did, what it got wrong, and the history of the pair ----------------
+//
+// The same few facts describe a race whether it finished a moment ago in this browser (read from its sealed
+// record) or was run earlier by anyone signed in (read from the runner's list): who played, who passed, what the
+// grader found for each side, what it cost and how it ended.
+
+function raceFacts(record, task, a, b) {
+  const body = record.body;
+  const first = (side) => (((body.contestants || {})[side] || {}).results || [])[0] || {};
+  const winner = (body.verdict || {}).winner;
+  const out = { run_id: body.run_id, seal: record.sha256, task, a, b, winner: winner === 'A' ? a : winner === 'B' ? b : null };
+  for (const [side, s] of [['A', 'a'], ['B', 'b']]) {
+    const x = first(side);
+    Object.assign(out, { [`${s}_passed`]: Boolean(x.passed), [`${s}_cost_usd`]: x.cost_usd || 0, [`${s}_details`]: x.grade_details || {}, [`${s}_termination`]: x.termination, [`${s}_seconds`]: x.wall_s || 0 });
+  }
+  return out;
+}
+
+// One model's side of a race, whichever side it played on.
+function sideOf(x, model) {
+  const s = x.a === model ? 'a' : 'b';
+  return { passed: x[`${s}_passed`], cost: x[`${s}_cost_usd`] || 0, details: x[`${s}_details`] || null, termination: x[`${s}_termination`], seconds: x[`${s}_seconds`] || 0 };
+}
+
+// The faults the grader counted for one side, in the page's own names.
+function faultsOf(side) {
+  if (!side.details) return null; // an older race, listed without its grade
+  const found = Object.entries(rules.fault_counters)
+    .filter(([counter]) => side.details[counter])
+    .map(([counter, name]) => ({ name, times: side.details[counter] }));
+  if (rules.ending_faults[side.termination]) found.push({ name: rules.ending_faults[side.termination], times: 1 });
+  return found;
+}
+
+// Which items a model decided wrongly, in the task's own words where the grader gave the tool behind each outcome.
+function mistakesOf(side) {
+  const details = side.details || {};
+  const tools = details.outcome_tools || {};
+  const say = (outcome) => (tools[outcome] ? tools[outcome].replaceAll('_', ' ') : outcome);
+  return Object.entries(details.mistakes || {}).map(([item, pair]) => {
+    const [expected, chosen] = String(pair).split('->');
+    return `${item}: it chose "${say(chosen)}", the right decision was "${say(expected)}"`;
+  });
+}
+
+function raceSide(x, model, cls) {
+  const side = sideOf(x, model);
+  const faults = faultsOf(side);
+  const mistakes = mistakesOf(side);
+  const d = side.details || {};
+  return el(
+    'div',
+    { class: `race-side ${cls}` },
+    el('p', { class: 'race-side-name' }, shortName(model)),
+    el('p', { class: 'race-side-result' }, el('strong', { class: side.passed ? 'pass' : 'fail' }, side.passed ? '✓ Passed' : '✕ Did not pass'), d.items ? ` · ${d.correct} of ${d.items} items right` : ''),
+    faults === null
+      ? el('p', { class: 'note' }, 'The grade of this earlier race is not listed.')
+      : faults.length
+        ? el('ul', { class: 'race-faults' }, faults.map((f) => el('li', null, `${f.name}${f.times > 1 ? ` ×${f.times}` : ''}`)))
+        : el('p', { class: 'note' }, 'No faults.'),
+    d.wrong && !d.mistakes ? el('p', { class: 'note' }, 'This race was graded before the grader named the item, so its record does not say which decision was wrong. Races from now on do.') : null,
+    mistakes.length ? el('ul', { class: 'race-mistakes' }, mistakes.slice(0, 6).map((m) => el('li', null, m)), mistakes.length > 6 ? el('li', null, `and ${mistakes.length - 6} more`) : null) : null,
+    el('p', { class: 'note' }, `$${fixed(side.cost, 4)} · ${fixed(side.seconds, 0)} s`),
+  );
+}
+
+// One race as a card: the headline, both sides, and the sealed record it is filed under.
+function raceCard(x, a, b, number, open) {
+  const both = sideOf(x, a).passed && sideOf(x, b).passed;
+  const neither = !sideOf(x, a).passed && !sideOf(x, b).passed;
+  const how = !x.winner ? 'no winner' : both ? `${shortName(x.winner)} won on efficiency (both passed)` : neither ? `${shortName(x.winner)} got further (neither passed)` : `${shortName(x.winner)} won: the only one to pass`;
+  return el(
+    'details',
+    { class: 'race-card', open },
+    el('summary', null, el('strong', null, `Live race ${number}`), ` · ${how}`),
+    el('div', { class: 'race-sides' }, raceSide(x, a, 'a'), raceSide(x, b, 'b')),
+    el('p', { class: 'note' }, 'Sealed record ', el('code', null, x.run_id), ', seal ', el('code', null, String(x.seal).slice(0, 12)), '.'),
+  );
+}
+
+// The pair's live history on this task: a first draft of how they compare, from every live race on file.
+function liveHistory(races, a, b, r) {
+  const n = races.length;
+  const won = (m) => races.filter((x) => x.winner === m).length;
+  const none = races.filter((x) => !x.winner).length;
+  const passed = (m) => races.filter((x) => sideOf(x, m).passed).length;
+  const tallyOf = (m) => {
+    const counts = new Map();
+    let graded = 0;
+    for (const x of races) {
+      const faults = faultsOf(sideOf(x, m));
+      if (faults === null) continue;
+      graded += 1;
+      for (const f of faults) counts.set(f.name, (counts.get(f.name) || 0) + 1);
+    }
+    const list = [...counts].sort((p, q) => q[1] - p[1]).map(([name, k]) => `${name} in ${k} of ${graded}`);
+    return list.length ? list.join(', ') : graded ? 'no faults' : 'grades not listed';
+  };
+  const recorded = r.verdict === 'no data' ? 'There are no recorded scenarios between them yet, so this is all that is known.' : `It is kept apart from the ${plural(r.pairs, 'recorded scenario')} the verdict rests on.`;
+  return [
+    el('h5', null, `Live history: ${shortName(a)} vs ${shortName(b)} on this task`),
+    el(
+      'p',
+      { class: 'live-draft', id: 'live-draft' },
+      el('strong', null, `First draft from ${plural(n, 'live race')}: ${shortName(a)} won ${won(a)}, ${shortName(b)} won ${won(b)}${none ? `, ${none} with no winner` : ''}.`),
+      ` ${shortName(a)} passed ${passed(a)} of ${n}; ${shortName(b)} passed ${passed(b)} of ${n}.`,
+    ),
+    el('ul', { class: 'live-faults' }, el('li', null, el('strong', null, shortName(a)), `: ${tallyOf(a)}`), el('li', null, el('strong', null, shortName(b)), `: ${tallyOf(b)}`)),
+    el('p', { class: 'note' }, `A draft, not a verdict: each race is one fresh scenario, and a verdict needs ${rules.min_pairs} scenarios both models played. ${recorded} Every signed-in visitor's races are counted.`),
+    ...races
+      .map((x, i) => [x, i + 1])
+      .reverse()
+      .map(([x, number], i) => raceCard(x, a, b, number, i === 0)),
+  ];
+}
+
 
 // The report of one live race, from the sealed record the runner handed back. It is one scenario, and it says so:
 // a live result never joins the recorded evidence a verdict rests on.
@@ -1634,6 +1575,7 @@ function fightCard(spec, v) {
   const tally = { both: 0, sole: 0, neither: 0 };
   for (const r of v.rounds) tally[stateOf(r)] += 1;
   const arena = [
+    el('div', { id: 'pair-graph', class: 'pair-graph' }),
     el('h3', { class: 'center' }, `The arena: ${plural(v.pairs, 'scenario')}`),
     el(
       'p',
@@ -1987,8 +1929,6 @@ async function start() {
     status.classList.add('error');
     return;
   }
-  // the graph panel is open beside the steps on a wide screen, and folded away above them on a narrow one
-  $('spine-details').open = window.matchMedia('(min-width: 1240px)').matches;
   announceLive();
   setUpSignIn();
   $('flow-text').disabled = false;
