@@ -45,6 +45,52 @@ body {
 }
 .top, main, .foot { max-width: 760px; margin: 0 auto; padding: 0 16px; }
 .top { padding-top: 40px; }
+/* The Relate graph: beside the steps on a wide screen, folded away above them on a narrow one. */
+#spine { max-width: 760px; margin: 18px auto 0; padding: 0 16px; }
+#spine details { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 12px 14px; }
+#spine summary { cursor: pointer; font-weight: 700; list-style-position: inside; }
+.relate-badge { display: inline-block; padding: 2px 9px; margin-right: 6px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 1px; }
+.spine-intro { margin: 8px 0 10px; font-size: 14px; }
+.spine-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; font-size: 13px; }
+.spine-steps span { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+.spine-steps span.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+#spine-body svg { display: block; width: 100%; height: auto; overflow: visible; }
+.sp-head { font: 700 11px var(--sans); letter-spacing: 0.06em; fill: var(--muted); }
+.sp-name { font: 600 12px var(--sans); fill: var(--ink); }
+.sp-sub { font: 11.5px var(--sans); fill: var(--muted); }
+.sp-sub.bad { fill: var(--stop); font-weight: 600; }
+.sp-link { fill: none; stroke: var(--line); stroke-width: 1.6; }
+.sp-link.a { stroke: var(--side-a); stroke-width: 2; opacity: 0.7; } .sp-link.b { stroke: var(--side-b); stroke-width: 2; opacity: 0.7; }
+.sp-flow, .sp-model, .sp-dot { cursor: pointer; }
+.sp-flow rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.4; }
+.sp-flow.on rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+.sp-flow.off { opacity: 0.55; }
+.sp-flow:hover rect, .sp-flow:focus-visible rect { stroke: var(--accent); }
+.sp-model circle { fill: var(--neutral-soft); stroke: var(--muted); stroke-width: 1.2; }
+.sp-model.unmet { opacity: 0.5; }
+.sp-model.met circle { fill: var(--surface); stroke: var(--ink); stroke-width: 1.6; }
+.sp-model.a circle { fill: var(--side-a); stroke: var(--surface); stroke-width: 2; } .sp-model.b circle { fill: var(--side-b); stroke: var(--surface); stroke-width: 2; }
+.sp-model.a .sp-name, .sp-model.b .sp-name { font-weight: 800; }
+.sp-model:hover .sp-name, .sp-model:focus-visible .sp-name { text-decoration: underline; }
+.sp-dot { stroke: var(--surface); stroke-width: 2; }
+.sp-dot.a, .sp-bar.a { fill: var(--side-a); } .sp-dot.b, .sp-bar.b { fill: var(--side-b); } .sp-dot.tie { fill: var(--muted); }
+.sp-dot:hover, .sp-dot:focus-visible { stroke: var(--ink); }
+.sp-dot.live { fill: var(--surface); stroke-width: 2.4; stroke-dasharray: 3 2.5; cursor: default; }
+.sp-dot.live.a { stroke: var(--side-a); } .sp-dot.live.b { stroke: var(--side-b); } .sp-dot.live.tie { stroke: var(--muted); }
+.sp-livebox { fill: none; stroke: var(--accent); stroke-width: 1.4; stroke-dasharray: 6 4; }
+.sp-fault rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.sp-fault.bad rect { fill: var(--stop-soft); stroke: var(--stop); stroke-width: 1.6; }
+.sp-fault.bad .sp-name, .sp-fault.bad .sp-sub { fill: var(--stop); }
+.sp-read { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.sp-read-title { margin: 0 0 6px; font-weight: 700; font-size: 14px; }
+.sp-read pre { margin: 0; max-height: 170px; overflow: auto; font: 11.5px/1.5 var(--mono); background: var(--sunken); border-radius: 8px; padding: 9px 11px; white-space: pre-wrap; }
+.sp-read-stats { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+@media (min-width: 1240px) {
+  .top, .foot { max-width: 1280px; }
+  .frame { display: grid; grid-template-columns: minmax(0, 760px) 480px; gap: 28px; max-width: 1280px; margin: 0 auto; padding: 0 16px; align-items: start; }
+  .frame > main { grid-column: 1; grid-row: 1; max-width: none; margin: 0; padding: 0; }
+  #spine { grid-column: 2; grid-row: 1; position: sticky; top: 12px; max-width: none; margin: 40px 0 0; padding: 0; max-height: calc(100vh - 24px); overflow: auto; }
+}
 .brand { margin: 0 0 8px; font-size: 14px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
 h1 { margin: 0 0 12px; font-size: clamp(26px, 5vw, 36px); line-height: 1.15; letter-spacing: -0.01em; text-wrap: balance; }
 h1 em { font-style: normal; text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 5px; }

@@ -341,6 +341,33 @@ async function main() {
         { timeout: 15000 },
       )
       .then(() => true, () => false);
+    // The Relate graph beside the steps: it is the same graph, so it must show this verdict's own numbers.
+    if (example) {
+      await page.evaluate(() => (document.getElementById('spine-details').open = true));
+      await page.waitForFunction(() => document.querySelector('#spine-steps span.on')?.dataset.step === '3' && document.querySelectorAll('#spine-body .sp-dot').length > 0, null, { timeout: 8000 }).catch(() => problems.push('the graph panel did not follow the page to the verdict'));
+      const shown = await page.evaluate(async () => {
+        const v = await window.ledgerDemo.current();
+        return {
+          rounds: v.rounds.length,
+          dots: document.querySelectorAll('#spine-body .sp-dot:not(.live)').length,
+          a: document.querySelectorAll('#spine-body .sp-dot.a:not(.live)').length,
+          winsA: v.wins[v.a],
+          flows: document.querySelectorAll('#spine-body .sp-flow').length,
+          lit: document.querySelectorAll('#spine-body .sp-flow.on').length,
+          chosen: document.querySelectorAll('#spine-body .sp-model.a, #spine-body .sp-model.b').length,
+          stats: document.getElementById('spine-stats')?.innerText || '',
+          query: document.querySelector('#spine-body pre')?.innerText || '',
+          badge: document.querySelector('#spine .relate-badge')?.innerText || '',
+        };
+      });
+      if (shown.dots !== shown.rounds || shown.a !== shown.winsA) problems.push(`the graph panel shows ${shown.dots} scenarios (${shown.a} won by the first model), the verdict has ${shown.rounds} (${shown.winsA})`);
+      if (shown.flows !== 4 || shown.lit !== 1 || shown.chosen !== 2) problems.push(`the graph panel should show 4 workflows with 1 lit and 2 chosen models: ${JSON.stringify(shown)}`);
+      if (!new RegExp(`^${shown.rounds} rows · .* ms`).test(shown.stats) || !shown.query.includes('MATCH')) problems.push(`the graph panel does not show the query behind the step and what it returned: ${JSON.stringify(shown.stats)}`);
+      if (!/relate/i.test(shown.badge)) problems.push('the graph panel is not labelled as a Relate graph');
+      // a scenario in the picture opens its replay
+      await page.locator('#spine-body .sp-dot:not(.live)').first().click();
+      await page.waitForSelector('#race .track .tick', { state: 'attached', timeout: 8000 }).catch(() => problems.push('clicking a scenario in the graph panel did not open its replay'));
+    }
     for (const id of ['download-spec', 'download-cost', 'download-evidence', 'download-all']) {
       if (example && !(await page.locator(`#${id}`).count())) problems.push(`the result offers no ${id} button`);
     }
@@ -462,6 +489,8 @@ async function main() {
       await live.waitForFunction(() => /Live races so far/.test(document.getElementById('live-tally').innerText), null, { timeout: 5000 }).catch(() => problems.push('the live tally did not appear after a race'));
       const tallied = await live.locator('#live-tally').innerText();
       if (!/ 1, .* 0 \(1 live race on this task/.test(tallied) || !tallied.includes('kept apart from')) problems.push(`the live tally is wrong: ${JSON.stringify(tallied)}`);
+      await live.evaluate(() => (document.getElementById('spine-details').open = true));
+      await live.waitForFunction(() => document.querySelectorAll('#spine-body .sp-dot.live').length === 1, null, { timeout: 6000 }).catch(() => problems.push('the live race did not appear in the graph panel beside the steps'));
       // the money and the races left are read again after a race
       await live.waitForFunction(() => document.getElementById('live-budget').innerText.includes('2 live races left'), null, { timeout: 5000 }).catch(() => problems.push('the budget line was not refreshed after the race'));
       if (!(await live.locator('#live-budget').innerText()).includes('OpenRouter $29.99 of $30.00')) problems.push('the provider budget was not refreshed after the race');
