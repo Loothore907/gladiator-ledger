@@ -79,7 +79,7 @@ function fakeRunner(models, extra) {
     if (req.url === '/options') {
       const tasks = ['refund-queue', 'access-review', 'incident-triage', 'inventory-transfer'].map((id) => ({ id, name: id, levels: ['easy', 'standard'] }));
       const budgets = [{ provider: 'openrouter', limit_usd: 30, left_usd: 30 - (3 - races) * 0.0055 }, { provider: 'google', limit_usd: 20, left_usd: 0.1 }];
-      return json(res, 200, { tasks, models: [...models, extra], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true });
+      return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true });
     }
     if (req.url === '/races') return json(res, 200, { races: run });
     if (!['/race', '/signin'].includes(req.url) || req.method !== 'POST') return res.writeHead(404, cors).end();
@@ -283,6 +283,15 @@ async function main() {
     if (!clicked) problems.push('no pair of models could be clicked: the click-through tested nothing');
     // The race: open a scenario of the pair on screen, skip to the end, and require both lanes to show the grade
     // and the finish line to name the same winner the square does.
+    // (the click-through ends on whatever pair is last in the list, which may be one that never met: go to a
+    // pair with a settled record)
+    {
+      const known = expected.judged.find((j) => j.verdict.better && !j.overrides).verdict;
+      await page.locator('#flow-cards button', { hasText: known.task.includes('refund') ? 'Refund' : known.task.includes('incident') ? 'Incident' : known.task.includes('access') ? 'Access' : 'Inventory' }).first().click();
+      await page.locator(`#first-list input[value="${known.a}"]`).check();
+      await page.locator(`#second-list input[value="${known.b}"]`).check();
+      await page.waitForSelector('.rounds button.round', { timeout: 8000 }).catch(() => {});
+    }
     const squares = await page.locator('.rounds button.round').count();
     if (!squares) problems.push('the arena has no scenario to open');
     else {
@@ -312,14 +321,21 @@ async function main() {
     // A pair that has never met on a task can still be picked: the result says there is no verdict, shows each
     // model's own record, and names no winner. (Looked for on every workflow: the data has such pairs.)
     let unmetSeen = 0;
-    for (const card of await page.locator('#flow-cards button').all()) {
+    let neverMet = null; // { card, a, b }: a pair with no record, raced live further down
+    const cards = await page.locator('#flow-cards button').all();
+    for (const [index, card] of cards.entries()) {
       await card.click();
       await page.waitForSelector('#first-list input');
       for (const first of await page.locator('#first-list input').all()) {
         await first.check();
-        await page.waitForSelector('#second-list input, #unmet-list input');
-        const unmet = page.locator('#unmet-list input');
+        await page.waitForSelector('#second-list input');
+        // every other model tested on the flow is offered as the second, in one list
+        const offered = await page.locator('#second-list input').count();
+        const tested = await page.locator('#first-list input').count();
+        if (offered !== tested - 1) problems.push(`the second-model list offers ${offered} models, but ${tested - 1} others were tested on this flow`);
+        const unmet = page.locator('#second-list label', { hasText: 'no head-to-head' }).locator('input');
         if (!(await unmet.count())) continue;
+        neverMet = { card: index, a: await first.inputValue(), b: await unmet.first().inputValue() };
         await unmet.first().check();
         await page.waitForFunction(() => !document.getElementById('step-verdict').hidden && /never met/.test(document.getElementById('verdict-headline')?.innerText || ''), null, { timeout: 8000 }).catch(() => problems.push('a pair that never met did not get a plain "no verdict" result'));
         if ((await page.locator('table.own tbody tr').count()) !== 2) problems.push('the no-verdict result does not show each model\'s own record');
@@ -329,6 +345,8 @@ async function main() {
       }
       if (unmetSeen) break;
     }
+    if (await page.locator('#unmet-list, #live-a, #live-b').count()) problems.push('the page has a second place to choose models');
+    if (!unmetSeen) problems.push('no pair that never met was found to check (the data should have some)');
     if (!unmetSeen) problems.push('no pair that never met was found to check (the data should have some)');
 
     // The example button must walk all three steps on its own and end on a drawn verdict with enough evidence.
@@ -446,6 +464,12 @@ async function main() {
       if (!(await live.locator('#live-jump').count())) problems.push('a signed-in visitor has no way straight to the live race from the top of the result');
       if (live.url().includes('judge-invite')) problems.push('the invite is still in the address bar after signing in');
       if (await live.locator('#live input').count()) problems.push('a signed-in visitor is still asked to type something');
+      // one place to choose the pair: the live panel names the two models from step 2 and offers no others
+      if ((await live.locator('#live select').count()) !== 2) problems.push('the live panel has a model chooser of its own (only difficulty and scoring may be chosen there)');
+      const named = await live.locator('#live-pair').innerText();
+      const chosen = await live.evaluate(() => [...document.querySelectorAll('#first-list input:checked, #second-list input:checked')].map((i) => i.closest('label').querySelector('.name').innerText));
+      if (chosen.length !== 2 || !chosen.every((name) => named.includes(name))) problems.push(`the live panel names ${JSON.stringify(named)}, step 2 has ${JSON.stringify(chosen)}`);
+      if (!(await live.locator('#first-list label', { hasText: 'can race live' }).count())) problems.push('step 2 does not say which models can be raced live');
       if (!(await live.locator('#live-prior').innerText()).includes('the record')) problems.push('the live panel does not state what the record expects');
       const budget = await live.locator('#live-budget').innerText();
       for (const part of ['OpenRouter $30.00 of $30.00', 'Google $0.10 of $20.00', '3 live races left', 'Gemini']) {
@@ -495,15 +519,6 @@ async function main() {
       await live.waitForFunction(() => document.getElementById('live-budget').innerText.includes('2 live races left'), null, { timeout: 5000 }).catch(() => problems.push('the budget line was not refreshed after the race'));
       if (!(await live.locator('#live-budget').innerText()).includes('OpenRouter $29.99 of $30.00')) problems.push('the provider budget was not refreshed after the race');
 
-      // Any two models on the runner's list can be raced. With no record between them the page says so, both ways.
-      await live.locator('#live-b').selectOption(NEWCOMER);
-      await live.waitForFunction(() => document.getElementById('live-prior').innerText.includes('never met'), null, { timeout: 5000 }).catch(() => problems.push('a pair with no record is not described as one'));
-      await live.locator('#live-go').click();
-      await live.waitForFunction(() => document.getElementById('live-result').innerText.includes('the first these two have played'), null, { timeout: 10000 }).catch(() => problems.push('a first race between two models is not described as the first evidence'));
-      if (runner.asked.b !== NEWCOMER) problems.push('the page did not race the model that was picked');
-      if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
-      await live.locator('#live-a').selectOption(NEWCOMER);
-      if (!(await live.locator('#live-go').isDisabled())) problems.push('the same model can be raced against itself');
       // A live result that has not been downloaded is not thrown away by a stray click: the page asks first.
       let asked = 0;
       let answer = 'dismiss';
@@ -524,8 +539,8 @@ async function main() {
       if (asked !== 3) problems.push('the page asked again about a live result that was already let go');
       await live.close();
 
-      // A model on screen that is not on the live list is never swapped for another one: its place stays empty,
-      // the page says why, and nothing can be raced until the visitor chooses.
+      // A pair with a model that is not on the live list is not raced as some other pair: the panel says which
+      // model cannot be raced and offers no race at all.
       const other = await context.newPage();
       await other.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
       await other.evaluate(() => window.ledgerDemo.ready());
@@ -536,15 +551,30 @@ async function main() {
       if (!offList) problems.push('no second model off the live list was found to check');
       else {
         await other.locator(`#second-list input[value="${offList}"]`).check();
-        await other.waitForSelector('#live-go', { timeout: 8000 });
-        if ((await other.locator('#live-b').inputValue()) !== '') problems.push('a model that is not on the live list was swapped for another one');
-        if ((await other.locator('#live-a').inputValue()) !== pair.a) problems.push('the model that is on the live list was not kept');
-        if (!(await other.locator('#live-absent').isVisible())) problems.push('the page does not say that a model on screen cannot be raced live');
-        if (!(await other.locator('#live-go').isDisabled())) problems.push('a race can be started before the missing model is replaced');
-        await other.locator('#live-b').selectOption(pair.b);
-        if (await other.locator('#live-go').isDisabled()) problems.push('choosing a model from the live list did not make the race available');
+        await other.waitForSelector('#live-absent', { timeout: 8000 }).catch(() => problems.push('the page does not say that a model on screen cannot be raced live'));
+        if (await other.locator('#live-go').count()) problems.push('a race is offered for a pair with a model that is not on the live list');
       }
       await other.close();
+
+      // Two models that never met, both on the live list: chosen in step 2 like any pair, raced, and described as
+      // the first evidence between them, before and after.
+      if (neverMet) {
+        runner.more = [neverMet.a, neverMet.b];
+        const first = await context.newPage();
+        await first.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+        await first.evaluate(() => window.ledgerDemo.ready());
+        await first.locator('#flow-cards button').nth(neverMet.card).click();
+        await first.locator(`#first-list input[value="${neverMet.a}"]`).check();
+        await first.locator(`#second-list input[value="${neverMet.b}"]`).check();
+        await first.waitForSelector('#live-go', { timeout: 8000 }).catch(() => problems.push('a pair that never met, both on the live list, is not offered a live race'));
+        if (!(await first.locator('#live-prior').innerText()).includes('never met')) problems.push('a pair with no record is not described as one in the live panel');
+        await first.locator('#live-go').click();
+        await first.waitForFunction(() => document.getElementById('live-result').innerText.includes('the first these two have played'), null, { timeout: 10000 }).catch(() => problems.push('a first race between two models is not described as the first evidence'));
+        if (runner.asked.a !== neverMet.a || runner.asked.b !== neverMet.b) problems.push(`the page raced ${runner.asked.a} vs ${runner.asked.b}, not the pair chosen in step 2`);
+        if (!(await first.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
+        await first.close();
+        runner.more = [];
+      }
 
       // An invitation the runner does not accept is said so at the top: never a silent fall back to the public page.
       const wrong = await browser.newPage();

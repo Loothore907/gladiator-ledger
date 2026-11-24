@@ -101,7 +101,7 @@ h1 em { font-style: normal; text-decoration: underline; text-decoration-color: v
 .live-jump { margin: 0 0 14px; }
 .live-tally { margin: 0 0 10px; padding: 8px 12px; border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; }
 .start-over { margin: 0 0 10px; }
-#unmet-intro { margin-top: 14px; }
+.live-pair { margin: 0 0 6px; font-size: 17px; }
 table.own { border-collapse: collapse; margin: 16px 0; width: 100%; max-width: 640px; }
 table.own caption { text-align: left; font-weight: 600; margin-bottom: 6px; }
 table.own th, table.own td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }

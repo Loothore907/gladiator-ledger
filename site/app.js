@@ -274,13 +274,18 @@ function option(group, id, checked, disabled, sub, onpick, compact = false) {
   );
 }
 
+// The models the runner will race live, known once the visitor is signed in. A model's card says so, so a pair for
+// a live race is chosen here, in the one place models are chosen.
+let liveModels = null;
+const liveTag = (model) => (liveModels && liveModels.has(model) ? ' · can race live' : '');
+
 // First model: every model with judged pairs on this flow, most evidence first, as compact cards.
 function drawFirst() {
   const models = [...state.models].sort((x, y) => y.pairs - x.pairs || (x.model < y.model ? -1 : 1));
   $('first-list').className = 'options compact';
   $('first-list').replaceChildren(
     ...models.map((m) =>
-      option('first', m.model, m.model === state.a, false, plural(m.pairs, 'judged pair'), () => chooseFirst(m.model), true),
+      option('first', m.model, m.model === state.a, false, plural(m.pairs, 'judged pair') + liveTag(m.model), () => chooseFirst(m.model), true),
     ),
   );
 }
@@ -319,45 +324,33 @@ function onPaper(model) {
 function drawSecond() {
   $('second-model').hidden = false;
   const mine = state.scores.get(state.a);
-  const met = state.models
-    .filter((m) => m.model !== state.a && state.partners.has(m.model))
-    .map((m) => ({ ...m, paper: onPaper(m.model) }))
-    .map((m) => ({ ...m, met: state.partners.get(m.model) }))
+  // every other model tested on this flow, in one list: the ones that have played the first model come first
+  // (most head-to-head evidence first), then the ones that never met it
+  const others = state.models
+    .filter((m) => m.model !== state.a)
+    .map((m) => ({ ...m, paper: onPaper(m.model), met: state.partners.get(m.model) || 0 }))
     .sort((x, y) => y.met - x.met || (x.paper.gap ?? Infinity) - (y.paper.gap ?? Infinity) || (x.model < y.model ? -1 : 1));
+  const met = others.filter((m) => m.met);
   const enough = met.filter((m) => m.met >= rules.min_pairs).length;
   $('second-intro').textContent =
-    `${plural(met.length, 'model')} ${met.length === 1 ? 'has' : 'have'} played ${shortName(state.a)} on this flow` +
-    ', listed with the most head-to-head evidence first. ' +
-    (enough
-      ? `${enough} of them ${enough === 1 ? 'has' : 'have'} the ${rules.min_pairs} judged pairs a verdict needs. `
-      : `None has the ${rules.min_pairs} judged pairs a verdict needs yet, so no winner will be named. `) +
+    `All ${plural(others.length, 'other model')} tested on this flow. ${met.length} ${met.length === 1 ? 'has' : 'have'} played ${shortName(state.a)} on it` +
+    (met.length ? ` (${enough} with the ${rules.min_pairs} judged pairs a verdict needs)` : '') +
+    `; the rest have not, so those pairs have no verdict yet. ` +
     (mine ? `${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index; a close score only makes the match fair.` : '');
   $('second-list').className = 'options';
   $('second-list').replaceChildren(
-    ...met.map((m) =>
+    ...others.map((m) =>
       option(
         'second',
         m.model,
         m.model === state.b,
         false,
-        `${plural(m.met, 'judged pair')} against ${shortName(state.a)}: ` +
-          `${m.met >= rules.min_pairs ? 'enough for a verdict' : 'too few for a verdict yet'} · ${m.paper.text}`,
+        (m.met
+          ? `${plural(m.met, 'judged pair')} against ${shortName(state.a)}: ${m.met >= rules.min_pairs ? 'enough for a verdict' : 'too few for a verdict yet'} · ${m.paper.text}`
+          : `no head-to-head with ${shortName(state.a)} yet: no verdict, each model's own record only`) + liveTag(m.model),
         () => chooseSecond(m.model),
       ),
     ),
-  );
-  // Models tested on this flow that have never met the first one. There is no verdict for such a pair, and the
-  // page says so; they can still be picked, to see each one's own record and (signed in) to race them live.
-  const unmet = state.models
-    .filter((m) => m.model !== state.a && !state.partners.has(m.model))
-    .sort((x, y) => y.pairs - x.pairs || (x.model < y.model ? -1 : 1));
-  $('unmet-intro').hidden = !unmet.length;
-  $('unmet-intro').textContent = unmet.length
-    ? `${plural(unmet.length, 'more model')} tested on this flow ${unmet.length === 1 ? 'has' : 'have'} never met ${shortName(state.a)} on it. ` +
-      'No verdict exists for these pairs. Pick one to see each model\'s own record on this task, and to race them live if you are signed in.'
-    : '';
-  $('unmet-list').replaceChildren(
-    ...unmet.map((m) => option('second', m.model, m.model === state.b, false, `no head-to-head with ${shortName(state.a)} yet`, () => chooseSecond(m.model), true)),
   );
 }
 
@@ -1241,8 +1234,12 @@ async function announceLive() {
   }
   const session = await signIn(runner);
   if (session) {
+    // the cards in step 2 can now say which models race live
+    liveModels = new Set(runner.options.models);
+    if (state.task) drawFirst();
+    if (state.a) drawSecond();
     const left = session.races_left === null || session.races_left === undefined ? '' : ` ${plural(session.races_left, 'live race')} left on this sign-in.`;
-    show(`You are signed in for live races.${left} Pick a workflow and two models below, then press "Race them live".`, false, true);
+    show(`You are signed in for live races.${left} Pick a workflow and two models marked "can race live", then press "Race them live".`, false, true);
   } else if (signInOutcome === 'refused') {
     show('This invitation link was not accepted by the race runner, so you are seeing the public page. Check that the link is complete and exactly as it was given to you. Recorded races still play.', true);
   } else if (signInOutcome === 'unreachable') {
@@ -1257,6 +1254,9 @@ function signOut() {
   runnerPromise = null;
   wantsRunner = false;
   signInOutcome = 'none';
+  liveModels = null;
+  if (state.task) drawFirst();
+  if (state.a) drawSecond();
   $('live-banner').hidden = true;
   $('judge-open').hidden = false;
   if (!$('step-verdict').hidden) showVerdict();
@@ -1352,26 +1352,25 @@ async function drawLive(v) {
     box.replaceChildren(title, el('p', { class: 'note' }, !offered ? 'This runner does not offer this task.' : 'The live budgets are used up for now. Recorded races still play.'));
     return;
   }
-  // Any two models on the runner's list can be raced. The pair being looked at is the starting choice where it is on it.
-  // A model on screen that is not on the live list is never swapped for another one: its place is left empty,
-  // with a line saying why, until the visitor chooses.
-  const missing = [v.a, v.b].filter((m) => !models.includes(m));
-  const pick = (id, label, chosen) =>
-    el(
-      'select',
-      { id, 'aria-label': label },
-      models.includes(chosen) ? null : el('option', { value: '', selected: true }, 'choose a model…'),
-      models.map((m) => el('option', { value: m, selected: m === chosen }, shortName(m))),
+  // The live race is between the two models chosen in step 2: the page has one place to choose a pair, and every
+  // part of it is about that pair. If one of them is not on the live list, there is no race to offer, and the
+  // panel says which models can be raced.
+  const [a, b] = [v.a, v.b];
+  const missing = [a, b].filter((m) => !models.includes(m));
+  if (missing.length) {
+    box.replaceChildren(
+      title,
+      el(
+        'p',
+        { class: 'note', id: 'live-absent' },
+        `${missing.map(shortName).join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on the live list, so this pair cannot be raced live. `,
+        'To race live, pick two models marked "can race live" in step 2: ',
+        models.map(shortName).join(', '),
+        '.',
+      ),
     );
-  const pickA = pick('live-a', 'First model', v.a);
-  const pickB = pick('live-b', 'Second model', v.b);
-  const absent = el(
-    'p',
-    { class: 'note', id: 'live-absent', hidden: !missing.length },
-    missing.length
-      ? `${missing.map(shortName).join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on the live list (small models only for now), so ${missing.length === 1 ? 'it' : 'they'} cannot be raced live. Choose from the list to race a different pair.`
-      : '',
-  );
+    return;
+  }
   const level = el('select', { id: 'live-level', 'aria-label': 'Difficulty' }, offered.levels.map((x) => el('option', { value: x, selected: x === 'standard' }, `${x} difficulty`)));
   const profile = el('select', { id: 'live-profile', 'aria-label': 'What matters most' }, runner.options.profiles.map((x) => el('option', { value: x, selected: x === 'budget' }, `${x} scoring`)));
   const go = el('button', { type: 'button', id: 'live-go' }, 'Race them live');
@@ -1424,36 +1423,20 @@ async function drawLive(v) {
   };
   await loadRaces();
 
-  // the record for whichever two are chosen: it may favour one, lean, name no favourite, or not exist at all
-  let recordFor = v;
-  const readRecord = async () => {
-    const [a, b] = [pickA.value, pickB.value];
-    go.disabled = !a || !b || a === b;
-    if (go.disabled) {
-      tally.hidden = true;
-      prior.textContent = !a || !b ? 'Choose the two models to race.' : 'Choose two different models.';
-      return;
-    }
-    recordFor = a === v.a && b === v.b ? v : await ledger.verdict(v.task, a, b, null, rules.good_enough, rules.min_pairs, state.profile, null);
-    const r = recordFor;
-    const text =
-      r.verdict === 'no data'
-        ? `${shortName(a)} and ${shortName(b)} have never met on this task in the record. This race would be the first evidence, and one race is not a verdict.`
-        : r.verdict === 'better'
-          ? `On this tested workflow the record favours ${shortName(r.better)}: it won ${r.wins[r.better]} of their ${r.pairs} scenarios.`
-          : r.verdict === 'leaning'
-            ? `On this tested workflow the record leans to ${shortName(r.better)} (${r.wins[r.better]} of ${r.pairs}), not settled.`
-            : `On this tested workflow the record names no favourite between them (${r.wins[a]} to ${r.wins[b]} over ${plural(r.pairs, 'scenario')}).`;
-    prior.textContent = `${text} Now put that to the test: one new scenario, generated this minute, never seen by either model.`;
-    await showTally(a, b, r);
-  };
-  pickA.addEventListener('change', readRecord);
-  pickB.addEventListener('change', readRecord);
-  await readRecord();
+  // what the record says about this pair: it may favour one, lean, name no favourite, or not exist at all
+  const r = v;
+  prior.textContent =
+    (r.verdict === 'no data'
+      ? `${shortName(a)} and ${shortName(b)} have never met on this task in the record. This race would be the first evidence, and one race is not a verdict.`
+      : r.verdict === 'better'
+        ? `On this tested workflow the record favours ${shortName(r.better)}: it won ${r.wins[r.better]} of their ${r.pairs} scenarios.`
+        : r.verdict === 'leaning'
+          ? `On this tested workflow the record leans to ${shortName(r.better)} (${r.wins[r.better]} of ${r.pairs}), not settled.`
+          : `On this tested workflow the record names no favourite between them (${r.wins[a]} to ${r.wins[b]} over ${plural(r.pairs, 'scenario')}).`) +
+    ' Now put that to the test: one new scenario, generated this minute, never seen by either model.';
+  await showTally(a, b, r);
 
   go.addEventListener('click', async () => {
-    const [a, b] = [pickA.value, pickB.value];
-    const r = recordFor;
     go.disabled = true;
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
@@ -1522,7 +1505,17 @@ async function drawLive(v) {
       }
     }
   });
-  box.replaceChildren(title, absent, prior, tally, el('div', { class: 'race-controls' }, pickA, el('span', { class: 'note' }, 'vs'), pickB, level, profile, go), money, stage, say, grown);
+  box.replaceChildren(
+    title,
+    el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
+    prior,
+    tally,
+    el('div', { class: 'race-controls' }, level, profile, go),
+    money,
+    stage,
+    say,
+    grown,
+  );
 }
 const spec_task = (test) => test.split('/').pop();
 
