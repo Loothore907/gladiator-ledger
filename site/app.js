@@ -1412,6 +1412,7 @@ function raceSide(x, model, cls) {
       : faults.length
         ? el('ul', { class: 'race-faults' }, faults.map((f) => el('li', null, `${f.name}${f.times > 1 ? ` ×${f.times}` : ''}`)))
         : el('p', { class: 'note' }, 'No faults.'),
+    d.wrong && !d.mistakes ? el('p', { class: 'note' }, 'This race was graded before the grader named the item, so its record does not say which decision was wrong. Races from now on do.') : null,
     mistakes.length ? el('ul', { class: 'race-mistakes' }, mistakes.slice(0, 6).map((m) => el('li', null, m)), mistakes.length > 6 ? el('li', null, `and ${mistakes.length - 6} more`) : null) : null,
     el('p', { class: 'note' }, `$${fixed(side.cost, 4)} · ${fixed(side.seconds, 0)} s`),
   );
