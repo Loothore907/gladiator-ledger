@@ -481,6 +481,13 @@ async function main() {
       await live.locator('#live-go').click();
       await live.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('the live race never reported a result'));
       const said = await live.locator('#live-result').innerText();
+      // the winner of the race gets the green box: it did this task better, in this test, with these settings
+      const box = live.locator('#live-winner.win');
+      if (!(await box.count())) problems.push('the live race has no winner box');
+      else {
+        const text = await box.innerText();
+        for (const part of ['won', 'did this task better than', 'standard difficulty', 'budget scoring', 'It passed the test and the other did not']) if (!text.includes(part)) problems.push(`the winner box lacks ${JSON.stringify(part)}: ${JSON.stringify(text)}`);
+      }
       const want = pair.better === pair.a ? 'in line with the record' : 'against the record';
       if (!said.includes(want)) problems.push(`the live result should read "${want}": ${JSON.stringify(said)}`);
       if (!said.includes('live-check-1')) problems.push('the live result does not name its sealed record');
