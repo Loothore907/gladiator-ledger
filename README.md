@@ -58,7 +58,7 @@ really ran.
 
 **Live races (hackathon judges for now, coming soon for everyone).** Under the recorded scenarios the page can
 ask a [Gladiator race runner](https://github.com/Loothore907/gladiator-core/blob/main/docs/DEPLOYMENT.md) for one
-fresh scenario between any two models on the runner's list (the two on screen to begin with). It first states
+fresh scenario between the two models chosen in step 2 (each model's card says whether it can race live). It first states
 what the record expects, or that the two have never met on this task, then streams the race as it happens, then
 says whether the result was in line with the record or against it. Judges sign in once, with the "Judge sign-in"
 button and their access code (or an invitation link that carries it); nobody else is shown a race button. The panel shows what is left of each provider's live budget, and a
