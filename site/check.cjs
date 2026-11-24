@@ -292,14 +292,15 @@ async function main() {
       const opened = await page.waitForSelector('#race-end', { timeout: 10000 }).then(() => true, () => false);
       if (!opened) problems.push('opening a scenario did not load its replay');
       else {
-        if (!(await page.locator('.race .tick').count())) problems.push('the replay has no steps to show');
+        if (!(await page.locator('.race .track .tick').count())) problems.push('the replay has no steps to show');
+        if ((await page.locator('.race .legend.marks > span').count()) < 6) problems.push('the replay has no legend saying what each mark means');
         await page.locator('#race-end').click();
         const finish = await page.locator('#race-finish').innerText();
         const outcomes = await page.locator('.race .outcome:not([hidden])').count();
         if (outcomes !== 2) problems.push(`the finished race shows ${outcomes} of 2 grades`);
         const winner = /won by (.+?) \(/.exec(label || '');
         if (winner && !finish.startsWith(winner[1])) problems.push(`the square says ${JSON.stringify(label)} but the race ends ${JSON.stringify(finish)}`);
-        const hidden = await page.locator('.race .tick[hidden]').count();
+        const hidden = await page.locator('.race .track .tick[hidden]').count();
         if (hidden) problems.push(`${hidden} steps are still hidden after the race ended`);
         // the graph picture under the race: one dot per scenario, and exactly the watched one ringed
         const dots = await page.locator('#race figure.graph circle').count();
@@ -435,12 +436,18 @@ async function main() {
       for (const part of ['# Live race report', 'live-check-1', '$0.0021', '$0.0034', 'This race cost $0.0055', 'kept apart from the recorded matches']) {
         if (!liveText.includes(part)) problems.push(`the live race report lacks ${JSON.stringify(part)}`);
       }
-      const ticks = await live.locator('#live-stage .tick').count();
+      const ticks = await live.locator('#live-stage .track .tick').count();
       if (ticks !== 6) problems.push(`the live lanes show ${ticks} of the 6 streamed steps`);
       if ((await live.locator('#live-stage .outcome:not([hidden])').count()) !== 2) problems.push('the live lanes do not both show a grade');
-      if (!(await live.locator('#live-stage .tick.timeout').count())) problems.push('the timed-out step is not marked');
-      if (!(await live.locator('#live-stage .tick.again').count())) problems.push('acting on the same item again is not marked');
-      const off = await live.locator('#live-stage .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
+      if (!(await live.locator('#live-stage .track .tick.timeout').count())) problems.push('the timed-out step is not marked');
+      if (!(await live.locator('#live-stage .track .tick.again').count())) problems.push('acting on the same item again is not marked');
+      // the marks are explained, and each lane counts what happened: lane A of the stand-in race had 4 steps, one
+      // timed out and one repeated an action; lane B had none of either
+      if ((await live.locator('#live-stage .legend.marks > span').count()) < 6) problems.push('the live lanes have no legend saying what each mark means');
+      const chips = await live.locator('#live-stage .lane').evaluateAll((lanes) => lanes.map((lane) => [...lane.querySelectorAll('.counts .chip:not([hidden])')].map((c) => c.innerText.trim())));
+      if (!(chips[0] || []).includes('4 steps') || !chips[0].includes('1 timed out') || !chips[0].includes('1 acted again')) problems.push(`lane A's running counts are wrong: ${JSON.stringify(chips[0])}`);
+      if (!(chips[1] || []).includes('2 steps') || chips[1].some((c) => /timed out|acted again|wrong|refused/.test(c))) problems.push(`lane B's running counts are wrong: ${JSON.stringify(chips[1])}`);
+      const off = await live.locator('#live-stage .track .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
       if (off) problems.push(`${off} live steps are drawn past the end of the track`);
       // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
       await live.waitForSelector('#live-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
