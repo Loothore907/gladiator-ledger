@@ -27,6 +27,11 @@ built from the same statements; and an MCP server gives AI assistants the same g
 > about 40% too low). Every cost here is now the provider's billed figure where one exists, and every scenario
 > decided on efficiency was re-judged. What changed and how: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
 
+> **A weaker obstacle in two workflows (2026-11-24).** In refund queue and incident triage, as played here, a
+> record change announced mid-task often came too early or too late to matter, so a model that ignored the notice
+> was often not penalised. No match, cost or verdict changes. What it means for reading those results, and the
+> fixed test versions: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
+
 ## The idea in one table
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index: a tie on paper.
 Here are the same two models on four workflows, sixteen judged pairs each, played on the same generated worlds.
@@ -269,9 +274,12 @@ After an ambiguous timeout, ten of the twelve models always checked before retry
 beat A: here Nemotron beat Qwen, Qwen beat GLM and GLM beat Nemotron. No ordered list can hold that. Ledger finds
 these cycles and reports each edge's score, so a cycle of 2-1 wins reads as possible noise.
 
-**Whether a test can be trusted** (`uv run ledger ask promotion`). For each test version: did it pass automatic
-validation (a reference player passes and every corner-cutting player is caught), how many models played it, and how
-often a pair had a clear winner. The four current workflows each have 12 models, 84 pairs and 99–100% decisive pairs.
+**Whether a test can be trusted** (`uv run ledger ask promotion`). For each test version: whether its validation
+record says it passed automatic validation (a reference player must pass and corner-cutting players must be caught),
+how many models played it, and how often a pair had a clear winner. The four current workflows each have 12 models,
+205 pairs and 98–100% decisive pairs. Validation records are read as sealed: two of the four (refund-queue 2.2.0 and
+incident-triage 1.2.0) pass by the rule they were made under and not by the stricter one Gladiator has used since
+2026-11-24 ([docs/DISCLOSURE.md](docs/DISCLOSURE.md)).
 
 **Which results are out of date** (`uv run ledger ask stale_results`). Matches played on a test version that has
 since been replaced. The shipped store holds current versions only, so this is empty today.
@@ -303,7 +311,9 @@ uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --store rebu
 enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read "not enough evidence", which is
 the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
 that only resembles one of these four needs its own test. The page and the assistant work over this fixed set of
-finished matches and cannot run new ones.
+finished matches and cannot run new ones. In two of the four (refund queue and incident triage) one obstacle, a
+record that changes mid-task with a notice, was weaker than intended in the versions played here
+([docs/DISCLOSURE.md](docs/DISCLOSURE.md)).
 
 `data/epoch/` holds one file from Epoch AI's Benchmarking Hub (the Capabilities Index), used under the Creative
 Commons Attribution licence; see [data/epoch/README.md](data/epoch/README.md) for the credit.

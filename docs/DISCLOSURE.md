@@ -40,6 +40,37 @@ accounts and plan credits. Each record includes its exact model ids, prices and 
 that played it. Each match's private half (`operator.json`, the answer key of its generated worlds) is published
 beside the record now that the match is over; `ledger verify` checks it against the fingerprint in the record.
 
+**A weaker obstacle in two workflows, found on 2026-11-24.** A Gladiator test can change a record while the model
+works and say so in a tool result; the model must then decide by the new facts. In refund-queue 2.2.0 and
+incident-triage 1.2.0, the versions every match here was played on, each such change was planned for a fixed number
+of tool calls. Often the model had not read the record yet, or had already decided everything that depended on it,
+so ignoring the notice cost nothing. Gladiator's own validation had missed this, because it judged each
+corner-cutting player on 20 generated worlds: its player that ignores the notices got through 2 of 20 for
+refund-queue and 1 of 20 for incident-triage, with 3 allowed. Played on 100 worlds at the standard level, the level
+of every match here, it gets through 25 and 24, against 15% allowed. Access review and inventory transfer are not
+affected.
+
+What changed in Gladiator: validation now plays such a player on more worlds until the answer is clear
+([gladiator-core#13](https://github.com/Loothore907/gladiator-core/pull/13)); a change can be announced when the
+model first looks the record up, on a record where it overturns a decision that is still ahead
+([gladiator-core#12](https://github.com/Loothore907/gladiator-core/pull/12)); and refund-queue 2.3.0 and
+incident-triage 1.3.0 are built that way
+([gladiator-core#16](https://github.com/Loothore907/gladiator-core/pull/16)). There the same player gets through 0
+of 100 worlds.
+
+What it means here. Nothing was re-run and no record changed.
+- **No result changes.** No match, pass, fault count, cost, fitness call or verdict is different. Both models played
+  the same world, and every decision was graded on the facts at the time it was made.
+- **What those results were earned on.** On these two workflows, ignoring a change notice often went unpunished. A
+  model that ignores such notices will have looked better here than it would on the fixed versions. Ledger does not
+  count this obstacle as a hazard of its own (where ignoring a notice did matter, it shows as a wrong decision), so
+  no "can run alone" call in a spec rests on it.
+- **The validation question.** `ledger ask promotion` still reports both versions as validated with no failed
+  checks. It reads the validation records as sealed, and those were made under the earlier rule. By the rule
+  Gladiator uses now, the two versions are not valid at the standard level.
+- **The fixed versions.** Ledger holds no match played on them, and a result on one version of a test says nothing
+  about another. Live races use the same versions as the records, so a live result and the record stay comparable.
+
 **Costs corrected on 2026-11-23.** The author checked the recorded costs against the providers' real balances and
 found the Gladiator engine had priced two kinds of call wrongly: Claude Haiku 5.5's cache reads were charged as
 plain input (recorded about four times too high), and models run through OpenRouter were priced from the list
