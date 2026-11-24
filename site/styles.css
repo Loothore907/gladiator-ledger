@@ -415,4 +415,6 @@ figure.graph figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted
 .pc-dot[role='button']:hover, .pc-dot[role='button']:focus-visible { stroke: var(--ink); }
 .pc-label { font: 12px var(--sans); fill: var(--muted); }
 .pc-label.me, .pc-label.first { fill: var(--ink); font-weight: 650; }
-.second-all { margin: 12px 0 0; } .second-all select { max-width: 100%; }
+.more-group { margin: 12px 0 6px; font-weight: 650; font-size: 14.5px; }
+#second-more { margin-top: 12px; }
+#live-early-label { margin: 8px 0 0; }

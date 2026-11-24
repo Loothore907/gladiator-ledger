@@ -80,7 +80,7 @@ function fakeRunner(models, extra) {
     if (req.url === '/options') {
       const tasks = ['refund-queue', 'access-review', 'incident-triage', 'inventory-transfer'].map((id) => ({ id, name: id, levels: ['easy', 'standard'] }));
       const budgets = [{ provider: 'openrouter', limit_usd: 30, left_usd: 30 - (3 - races) * 0.0055 }, { provider: 'google', limit_usd: 20, left_usd: 0.1 }];
-      return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }] }) });
+      return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }], batch_pass_rate: 0.8 }) });
     }
     if (req.url === '/races') return json(res, 200, { races: run, batches });
     if (!['/race', '/signin'].includes(req.url) || req.method !== 'POST') return res.writeHead(404, cors).end();
@@ -113,7 +113,7 @@ function fakeRunner(models, extra) {
           a_attempts: 10, a_passed: 9, a_not_run: 0, a_cost_usd: 0.021, a_seconds: 31, a_faults: { wrong: 1 }, a_endings: {},
           b_attempts: 10, b_passed: 10, b_not_run: 0, b_cost_usd: 0.0202, b_seconds: 28, b_faults: {}, b_endings: {},
           scenarios, pairs: 10, a_wins: 5, b_wins: 3, ties: 2, same_result: 9, p_value: 0.7266 };
-        if (!same) Object.assign(batch, { b_attempts: 8, b_passed: 8, b_not_run: 2, pairs: 8, ties: 0, scenarios: scenarios.map((x, i) => (i < 8 ? x : { a_passed: null, b_passed: null, winner: null })) });
+        if (!same) Object.assign(batch, { early_stop: ask.early_stop === false ? null : { side: 'A', model: ask.a, failed: 3, runs: 10, pass_rate: 0.8 }, b_attempts: 8, b_passed: 8, b_not_run: 2, pairs: 8, ties: 0, scenarios: scenarios.map((x, i) => (i < 8 ? x : { a_passed: null, b_passed: null, winner: null })) });
         batches.push(batch);
         send('batch', { batch });
         return res.end();
@@ -139,6 +139,15 @@ function fakeRunner(models, extra) {
     });
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
+// Choose the second model the way a visitor does: its card, opening the list of other models if it is in there.
+async function pickSecond(page, model) {
+  const card = page.locator(`#second-model input[name="second"][value="${model}"]`);
+  await card.waitFor({ state: 'attached' });
+  const folded = await card.evaluate((input) => Boolean(input.closest('#second-more')) && !document.getElementById('second-more').open);
+  if (folded) await page.locator('#second-more-summary').click();
+  await card.check();
 }
 
 async function main() {
@@ -277,18 +286,18 @@ async function main() {
       if (!firsts.length) problems.push(`flow ${f}: no first model to pick`);
       for (const a of firsts) {
         // empty the list first, so what is read next is this model's opponents and not the previous model's
-        await page.evaluate(() => document.getElementById('second-all').replaceChildren());
+        await page.evaluate(() => ['second-list', 'second-more-list'].forEach((id) => document.getElementById(id).replaceChildren()));
         await page.locator(`#first-list input[value="${a}"]`).check();
         const met = await page
-          .waitForFunction(() => document.querySelectorAll('#second-all option:not([value=""])').length > 0, null, { timeout: 5000 })
+          .waitForFunction(() => document.querySelectorAll('#second-model input[name="second"]').length > 0, null, { timeout: 5000 })
           .then(() => true, () => false);
         if (!met) {
           problems.push(`flow ${f}, ${a}: no second model to pick`);
           continue;
         }
-        for (const b of await page.locator('#second-all option:not([value=""])').evaluateAll((all) => all.map((x) => x.value))) {
+        for (const b of await page.locator('#second-model input[name="second"]').evaluateAll((all) => all.map((x) => x.value))) {
           await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
-          await page.locator('#second-all').selectOption(b);
+          await pickSecond(page, b);
           const drawn = await page
             .waitForFunction(
               () => !document.getElementById('step-verdict').hidden && document.getElementById('verdict-body').innerText.trim().length > 200,
@@ -312,14 +321,20 @@ async function main() {
       const known = expected.judged.find((j) => j.verdict.better && !j.overrides).verdict;
       await page.locator('#flow-cards button', { hasText: known.task.includes('refund') ? 'Refund' : known.task.includes('incident') ? 'Incident' : known.task.includes('access') ? 'Access' : 'Inventory' }).first().click();
       await page.locator(`#first-list input[value="${known.a}"]`).check();
-      await page.locator('#second-all').selectOption(known.b);
+      await pickSecond(page, known.b);
       // step 2 groups the second model by how close it is to the first in capability and in cost: the
       // first-choice pairings are cards, every model is in the one list, and the picture marks the first model
-      const groups = await page.locator('#second-all optgroup').evaluateAll((all) => all.map((g) => [g.label, g.children.length]));
-      const firstChoice = (groups.find(([label]) => label.startsWith('First-choice')) || [])[1] || 0;
-      const cards = await page.locator('#second-list input').count();
-      if (cards < firstChoice || cards > firstChoice + 1) problems.push(`step 2 shows ${cards} cards for ${firstChoice} first-choice pairings (plus the chosen model at most)`);
-      if ((await page.locator('#second-list input:checked').count()) !== 1) problems.push('the model chosen from the list is not shown as the chosen card');
+      const firstChoice = await page.locator('#second-list input').count();
+      if ((await page.locator(`#second-model input[name="second"]:checked`).count()) !== 1) problems.push('the chosen second model is not shown as chosen');
+      // every other model is a card that can be clicked, in the list under the picture; the reference list of
+      // models this platform cannot run holds none that can be picked
+      const elsewhere = await page.locator('#second-more-list input').count();
+      if (firstChoice + elsewhere !== (await page.locator('#first-list input').count()) - 1) problems.push(`step 2 offers ${firstChoice} + ${elsewhere} second models, not every other model`);
+      if (!(await page.locator('#second-more-list .more-group').count())) problems.push('the list of other models is not grouped by how close each is');
+      const pickable = await page.locator('#first-list input').evaluateAll((all) => all.map((x) => x.title || x.closest('label').title));
+      await page.waitForFunction(() => /Not on this platform yet/.test(document.getElementById('suggest-summary').innerText), null, { timeout: 6000 }).catch(() => problems.push('the reference list does not say its models are not on this platform'));
+      const reference = await page.locator('#suggest-body').innerText();
+      if (pickable.some((id) => id && reference.includes(id))) problems.push('the reference list holds a model that can be picked');
       if ((await page.locator('#second-chart .pc-dot.me').count()) !== 1 || !(await page.locator('#second-chart .pc-band').count())) problems.push('the pairing picture does not mark the first model and the band around it');
       const inBand = await page.locator('#second-chart .pc-dot.first').count();
       if (inBand !== firstChoice) problems.push(`the picture fills ${inBand} dots for ${firstChoice} first-choice pairings`);
@@ -362,15 +377,15 @@ async function main() {
       await page.waitForSelector('#first-list input');
       for (const first of await page.locator('#first-list input').all()) {
         await first.check();
-        await page.waitForSelector('#second-all option:not([value=""])', { state: 'attached' });
+        await page.waitForSelector('#second-model input[name="second"]', { state: 'attached' });
         // every other model is offered as the second, in one list
-        const offered = await page.locator('#second-all option:not([value=""])').count();
+        const offered = await page.locator('#second-model input[name="second"]').count();
         const tested = await page.locator('#first-list input').count();
         if (offered !== tested - 1) problems.push(`the second-model list offers ${offered} models, but ${tested - 1} others can be chosen first`);
-        const unmet = page.locator('#second-all option', { hasText: 'no head-to-head' });
+        const unmet = page.locator('#second-model label', { hasText: 'no head-to-head' }).locator('input');
         if (!(await unmet.count())) continue;
         neverMet = { card: index, a: await first.inputValue(), b: await unmet.first().getAttribute('value') };
-        await page.locator('#second-all').selectOption(neverMet.b);
+        await pickSecond(page, neverMet.b);
         await page.waitForFunction(() => !document.getElementById('step-verdict').hidden && /never met/.test(document.getElementById('verdict-headline')?.innerText || ''), null, { timeout: 8000 }).catch(() => problems.push('a pair that never met did not get a plain "no verdict" result'));
         if ((await page.locator('table.own tbody tr').count()) !== 2) problems.push('the no-verdict result does not show each model\'s own record');
         if (await page.locator('#verdict-band.win').count()) problems.push('a pair that never met was given a winner');
@@ -472,7 +487,7 @@ async function main() {
         await live.evaluate(() => window.ledgerDemo.ready());
         await live.locator('#flow-cards button', { hasText: pair.task.includes('refund') ? 'Refund' : pair.task.includes('incident') ? 'Incident' : pair.task.includes('access') ? 'Access' : 'Inventory' }).first().click();
         await live.locator(`#first-list input[value="${pair.a}"]`).check();
-        await live.locator('#second-all').selectOption(pair.b);
+        await pickSecond(live, pair.b);
         await live.waitForSelector('#live h4');
       };
       // Nobody is offered a live race without a runner, or with one but no invitation: nothing to press or type.
@@ -500,11 +515,11 @@ async function main() {
       await live.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('an invitation link did not open live races'));
       if (!(await live.locator('#live-jump').count())) problems.push('a signed-in visitor has no way straight to the live race from the top of the result');
       if (live.url().includes('judge-invite')) problems.push('the invite is still in the address bar after signing in');
-      if (await live.locator('#live input').count()) problems.push('a signed-in visitor is still asked to type something');
+      if (await live.locator('#live input:not([type="checkbox"])').count()) problems.push('a signed-in visitor is still asked to type something');
       // one place to choose the pair: the live panel names the two models from step 2 and offers no others
       if ((await live.locator('#live select').count()) !== 4 || (await live.locator('#live-who option').count()) !== 3) problems.push('the live panel may choose difficulty, scoring, how many scenarios, and which of the two chosen models play: nothing else');
       const named = await live.locator('#live-pair').innerText();
-      const chosen = await live.evaluate(() => [...document.querySelectorAll('#first-list input:checked, #second-list input:checked')].map((i) => i.closest('label').querySelector('.name').innerText));
+      const chosen = await live.evaluate(() => [...document.querySelectorAll('#first-list input:checked, #second-model input[name="second"]:checked')].map((i) => i.closest('label').querySelector('.name').innerText));
       if (chosen.length !== 2 || !chosen.every((name) => named.includes(name))) problems.push(`the live panel names ${JSON.stringify(named)}, step 2 has ${JSON.stringify(chosen)}`);
       if (!(await live.locator('#first-list label', { hasText: 'can race live' }).count())) problems.push('step 2 does not say which models can be raced live');
       if (!(await live.locator('#live-prior').innerText()).includes('the record')) problems.push('the live panel does not state what the record expects');
@@ -588,7 +603,9 @@ async function main() {
       if (!(await live.locator('#batch-band.win').count())) problems.push('the winner of a batch does not get the green box');
       // scenarios one side did not play are said plainly, and every count stands on the scenarios both played
       const unplayed = await live.locator('#batch-unplayed').innerText().catch(() => '');
-      if (!unplayed.includes('Only 8 of the 10 scenarios were played by both') || !unplayed.includes('did not play 2')) problems.push(`a batch cut short does not say so: ${JSON.stringify(unplayed)}`);
+      if (runner.asked.early_stop !== true) problems.push('a batch did not ask the runner to stop early by default');
+      if (!(await live.locator('#live-early').isVisible())) problems.push('a batch does not offer the early stop');
+      if (!/^Stopped early: .* did not pass 3 of the 10 scenarios asked for, so it could no longer pass 80%/.test(unplayed) || !unplayed.includes('8 scenarios were played by both')) problems.push(`a batch cut short does not say so: ${JSON.stringify(unplayed)}`);
       const cutShort = await live.locator('#live-batch').innerText();
       for (const part of ['8 of 8 played (100%); 2 not played', '9 of 10 played (90%)', '8 fresh scenarios (of 10 asked for)']) if (!cutShort.includes(part)) problems.push(`the cut-short batch lacks ${JSON.stringify(part)}: ${JSON.stringify(cutShort.slice(0, 700))}`);
       if ((await live.locator('#live-stage .bsq.skip').count()) !== 2) problems.push('scenarios that were not played are not marked on the lane');
@@ -627,21 +644,21 @@ async function main() {
       await other.evaluate(() => window.ledgerDemo.ready());
       await other.locator('#flow-cards button', { hasText: pair.task.includes('refund') ? 'Refund' : pair.task.includes('incident') ? 'Incident' : pair.task.includes('access') ? 'Access' : 'Inventory' }).first().click();
       await other.locator(`#first-list input[value="${pair.a}"]`).check();
-      await other.waitForSelector('#second-all option:not([value=""])', { state: 'attached' });
-      const offList = await other.locator('#second-all option:not([value=""])').evaluateAll((inputs, b) => inputs.map((i) => i.value).find((value) => value !== b), pair.b);
+      await other.waitForSelector('#second-model input[name="second"]', { state: 'attached' });
+      const offList = await other.locator('#second-model input[name="second"]').evaluateAll((inputs, b) => inputs.map((i) => i.value).find((value) => value !== b), pair.b);
       if (!offList) problems.push('no second model off the live list was found to check');
       else {
-        await other.locator('#second-all').selectOption(offList);
+        await pickSecond(other, offList);
         await other.waitForSelector('#live-absent', { timeout: 8000 }).catch(() => problems.push('the page does not say that a model on screen cannot be raced live'));
         if (await other.locator('#live-go').count()) problems.push('a race is offered for a pair with a model that is not on the live list');
       }
       // A model the platform can run but that has no record at all is still offered, and says so: a record is
       // information, never a condition. (The stand-in runner offers one such model.)
-      const fresh = other.locator(`#second-all option[value="${NEWCOMER}"]`);
+      const fresh = other.locator(`#second-model input[name="second"][value="${NEWCOMER}"]`);
       if (!(await fresh.count())) problems.push('a model the runner offers, with no record, is not offered in step 2');
       else {
         if (!(await other.locator('#first-list label', { hasText: 'not tested on this workflow yet' }).count())) problems.push('a model with no record is not described as one on its card');
-        await other.locator('#second-all').selectOption(NEWCOMER);
+        await pickSecond(other, NEWCOMER);
         await other.waitForFunction(() => /never met/.test(document.getElementById('verdict-headline')?.innerText || ''), null, { timeout: 8000 }).catch(() => problems.push('choosing a model with no record did not give a plain "no verdict" result'));
         await other.waitForSelector('#live-go', { timeout: 8000 }).catch(() => problems.push('a model with no record, on the live list, cannot be raced'));
       }
@@ -656,7 +673,7 @@ async function main() {
         await first.evaluate(() => window.ledgerDemo.ready());
         await first.locator('#flow-cards button').nth(neverMet.card).click();
         await first.locator(`#first-list input[value="${neverMet.a}"]`).check();
-        await first.locator('#second-all').selectOption(neverMet.b);
+        await pickSecond(first, neverMet.b);
         await first.waitForSelector('#live-go', { timeout: 8000 }).catch(() => problems.push('a pair that never met, both on the live list, is not offered a live race'));
         if (!(await first.locator('#live-prior').innerText()).includes('never met')) problems.push('a pair with no record is not described as one in the live panel');
         await first.locator('#live-go').click();

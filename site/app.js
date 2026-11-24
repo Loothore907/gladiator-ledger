@@ -307,7 +307,8 @@ async function chooseFirst(model) {
   }
   const mine = ++turn;
   Object.assign(state, { a: model, b: null });
-  $('second-all').replaceChildren(); // the last model's pairings must not be choosable while this one's load
+  $('second-more-list').replaceChildren(); // the last model's pairings must not be choosable while this one's load
+  $('second-more').open = false;
   $('second-list').replaceChildren();
   shown.v = null;
   $('step-verdict').hidden = true;
@@ -441,26 +442,31 @@ function drawSecond() {
       ? `${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index and costs about $${fixed(cost.cost, 4)} an attempt in our matches${cost.basis === 'this task' ? ' on this task' : ' (on other tasks; it has not played this one)'}. `
       : `${shortName(state.a)} cannot be placed yet (no published score, or no cost measured), so no pairing can be called close. `) +
     (firsts.length
-      ? `${plural(firsts.length, 'model')} ${firsts.length === 1 ? 'is' : 'are'} close to it on both: the first-choice pairings below. Any other model can still be chosen from the list under them.`
-      : `No model is close to it on both, so there is no first-choice pairing. Choose any model from the list below.`);
+      ? `${plural(firsts.length, 'model')} ${firsts.length === 1 ? 'is' : 'are'} close to it on both: the first-choice pairings below. Any other model can still be chosen: open "Choose a different model" under the picture.`
+      : `No model is close to it on both, so there is no first-choice pairing. Choose any model from the list under the picture.`);
   const head = (m) =>
     (m.met
       ? `${plural(m.met, 'judged pair')} against ${shortName(state.a)}: ${m.met >= rules.min_pairs ? 'enough for a verdict' : 'too few for a verdict yet'}`
       : `no head-to-head with ${shortName(state.a)} yet: no verdict, each model's own record only`);
-  // the cards: the first-choice pairings, and the chosen model if it was picked from the list
-  const cards = [...firsts, ...others.filter((m) => m.model === state.b && m.place.group !== 'first')];
+  const cards = firsts; // every other model is a card too, in the list under the picture
   $('second-list').className = 'options';
   $('second-list').replaceChildren(...cards.map((m) => option('second', m.model, m.model === state.b, false, `${head(m)} · ${m.place.text}${liveTag(m.model)}`, () => chooseSecond(m.model))));
   $('second-chart-box').replaceChildren(pairingChart(others));
-  const all = $('second-all');
-  all.replaceChildren(
-    el('option', { value: '', selected: !state.b }, `All ${plural(others.length, 'other model')} you can choose…`),
-    ...GROUPS.map(([group, label]) => {
-      const inGroup = others.filter((m) => m.place.group === group);
-      return inGroup.length ? el('optgroup', { label }, inGroup.map((m) => el('option', { value: m.model, selected: m.model === state.b }, `${shortName(m.model)}: ${head(m).split(':')[0]}${m.place.ratio && m.place.ratio >= 1.25 ? `, ${fixed(m.place.ratio, 1)}× ${cost && state.costs.get(m.model).cost > cost.cost ? 'dearer' : 'cheaper'}` : ''}${liveTag(m.model)}`))) : '';
+  // Every other model, as cards to click, grouped by how close each is. Folded away when there are first-choice
+  // pairings to look at first; open when there are none, or when the chosen model is in here.
+  const rest = others.filter((m) => m.place.group !== 'first');
+  const more = $('second-more');
+  more.hidden = !rest.length;
+  $('second-more-summary').textContent = firsts.length ? `Choose a different model: all ${plural(rest.length, 'other model')} you can pick` : `All ${plural(rest.length, 'model')} you can pick`;
+  $('second-more-list').replaceChildren(
+    ...GROUPS.filter(([group]) => group !== 'first').flatMap(([group, label]) => {
+      const inGroup = rest.filter((m) => m.place.group === group);
+      return inGroup.length
+        ? [el('p', { class: 'more-group' }, label), el('div', { class: 'options' }, inGroup.map((m) => option('second', m.model, m.model === state.b, false, `${head(m)} · ${m.place.text}${liveTag(m.model)}`, () => chooseSecond(m.model))))]
+        : [];
     }),
   );
-  all.onchange = () => all.value && chooseSecond(all.value);
+  if (!firsts.length || rest.some((m) => m.model === state.b)) more.open = true;
 }
 
 // Worth testing next: models close on paper that have NOT played the first one on this flow. The page cannot run
@@ -472,18 +478,20 @@ async function drawSuggestions(mine = turn) {
   const body = $('suggest-body');
   $('suggest').hidden = false;
   if (found.note) {
-    $('suggest-summary').textContent = 'Close on paper, not matched on this flow yet';
+    $('suggest-summary').textContent = 'Not on this platform yet: models close on paper (for reference)';
     $('suggest-intro').textContent = found.note;
     body.replaceChildren();
     return;
   }
-  const untested = found.candidates.filter((c) => !state.partners.has(c.model));
-  $('suggest-summary').textContent = `Worth testing next: ${plural(untested.length, 'model')} close on paper with no match against ${shortName(state.a)} on this flow`;
+  // models that can be chosen are in the lists above; what is left here cannot be run on this platform yet
+  const here = new Set(availableModels().map((m) => m.model));
+  const untested = found.candidates.filter((c) => !state.partners.has(c.model) && !here.has(c.model));
+  $('suggest-summary').textContent = `Not on this platform yet: ${plural(untested.length, 'model')} close to ${shortName(state.a)} on paper (for reference)`;
   $('suggest-intro').textContent =
     `These score closest to ${shortName(state.a)}${found.open_only ? ' among open-weights models' : ''} but have not ` +
-    'played it on this flow, so there is no verdict to show. This page cannot run new matches.';
+    'played it on this flow, and this platform cannot run them yet, so they cannot be picked. Every model that can be picked is in the lists above.';
   if (!untested.length) {
-    body.replaceChildren(el('p', { class: 'note' }, 'Every close model has already played it on this flow: see the list above.'));
+    body.replaceChildren(el('p', { class: 'note' }, 'Every close model can already be picked in the lists above.'));
     return;
   }
   body.replaceChildren(
@@ -1389,6 +1397,13 @@ async function drawLive(v) {
     relabel();
   });
   whoPick.addEventListener('change', relabel);
+  // Early stop, where the runner has it: a batch ends once a model can no longer pass the share asked of it.
+  const passRate = runner.options.batch_pass_rate;
+  const earlyBox = el('input', { type: 'checkbox', id: 'live-early', checked: true });
+  const early = el('label', { class: 'check', id: 'live-early-label', hidden: true }, earlyBox, ` Stop the batch early once a model can no longer pass ${percent(passRate || 0)} of its scenarios (saves the rest of the money)`);
+  const showEarly = () => (early.hidden = !passRate || Number(runsPick.value) === 1);
+  runsPick.addEventListener('change', showEarly);
+  whoPick.addEventListener('change', showEarly);
   const prior = el('p', { class: 'note', id: 'live-prior' });
   const money = el('p', { class: 'note small', id: 'live-budget' });
   const stage = el('div', { id: 'live-stage' });
@@ -1483,7 +1498,7 @@ async function drawLive(v) {
       const response = await fetch(`${runner.base}/race`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, a: ma, b: mb, runs, difficulty: level.value, profile: profile.value, token: session.token || '' }),
+        body: JSON.stringify({ task, a: ma, b: mb, runs, difficulty: level.value, profile: profile.value, early_stop: earlyBox.checked, token: session.token || '' }),
       });
       if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
       let batch = null;
@@ -1632,6 +1647,7 @@ async function drawLive(v) {
     el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
     prior,
     el('div', { class: 'race-controls' }, sizes.length ? [whoPick, runsPick] : null, level, profile, go),
+    early,
     expect,
     money,
     stage,
@@ -1671,6 +1687,10 @@ function batchFaults(x, s) {
 function batchUnplayed(x) {
   const missing = x.runs - x.pairs;
   if (!missing) return null;
+  if (x.early_stop) {
+    const e = x.early_stop;
+    return `Stopped early: ${shortName(e.model)} did not pass ${e.failed} of the ${e.runs} scenarios asked for, so it could no longer pass ${percent(e.pass_rate)} of them. No further scenario was started, which saved the rest of the money. ${plural(x.pairs, 'scenario')} ${x.pairs === 1 ? 'was' : 'were'} played by both lanes, and every count here is over those.`;
+  }
   const who = [x.a_not_run ? `${shortName(x.a)}${x.same_model ? ' (lane 1)' : ''} did not play ${x.a_not_run}` : '', x.b_not_run ? `${shortName(x.b)}${x.same_model ? ' (lane 2)' : ''} did not play ${x.b_not_run}` : ''].filter(Boolean).join('; ');
   return `Only ${x.pairs} of the ${x.runs} scenarios were played by both lanes: ${who}. The batch reached its spending cap, or a provider stopped answering. Those scenarios are left out of every count here.`;
 }
