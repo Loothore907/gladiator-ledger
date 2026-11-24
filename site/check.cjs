@@ -103,15 +103,17 @@ function fakeRunner(models, extra) {
         const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
         const same = ask.a === ask.b;
         for (let n = 1; n <= 10; n += 1) {
-          send('step', { side: 'A', attempt: n, tool_name: 'never_sent_by_a_real_runner' });
+          send('step', { side: 'A', attempt: n, turn: 0, tool_name: 'list_alerts' });
           send('attempt_end', { side: 'A', attempt: n, passed: n !== 3, termination: 'session_ended' });
-          send('attempt_end', { side: 'B', attempt: n, passed: true, termination: 'session_ended' });
+          // in a batch between two models, the second runs out of money after eight scenarios
+          send('attempt_end', same || n <= 8 ? { side: 'B', attempt: n, passed: true, termination: 'session_ended' } : { side: 'B', attempt: n, passed: false, termination: 'not_run' });
         }
         const scenarios = Array.from({ length: 10 }, (_, i) => ({ a_passed: i !== 2, b_passed: true, winner: i === 2 ? 'B' : i < 6 ? 'A' : i < 8 ? 'B' : 'tie' }));
         const batch = { run_id: `live-batch-${batches.length + 1}`, seal: 'fedcba9876543210', task: ask.task, a: ask.a, b: ask.b, same_model: same, runs: 10, difficulty: ask.difficulty, profile: ask.profile, spent_usd: 0.0412,
           a_attempts: 10, a_passed: 9, a_not_run: 0, a_cost_usd: 0.021, a_seconds: 31, a_faults: { wrong: 1 }, a_endings: {},
           b_attempts: 10, b_passed: 10, b_not_run: 0, b_cost_usd: 0.0202, b_seconds: 28, b_faults: {}, b_endings: {},
           scenarios, pairs: 10, a_wins: 5, b_wins: 3, ties: 2, same_result: 9, p_value: 0.7266 };
+        if (!same) Object.assign(batch, { b_attempts: 8, b_passed: 8, b_not_run: 2, pairs: 8, ties: 0, scenarios: scenarios.map((x, i) => (i < 8 ? x : { a_passed: null, b_passed: null, winner: null })) });
         batches.push(batch);
         send('batch', { batch });
         return res.end();
@@ -409,7 +411,7 @@ async function main() {
       await page.waitForSelector('#pair-graph circle.gdot.ring', { timeout: 8000 }).catch(() => problems.push('the scenario being watched is not ringed in the graph picture'));
     }
     const foot = await page.locator('footer').innerText();
-    if (/cannot run new/.test(foot) || !/Live races/.test(foot)) problems.push('the small print still says the page cannot run new matches, or does not explain live races');
+    if (!/This view cannot start a match/.test(foot) || /real money/.test(foot)) problems.push('the small print of the public page should say this view cannot start a match');
     for (const id of ['download-spec', 'download-cost', 'download-evidence', 'download-all']) {
       if (example && !(await page.locator(`#${id}`).count())) problems.push(`the result offers no ${id} button`);
     }
@@ -551,6 +553,10 @@ async function main() {
       // A batch: the same test ten times in one go. First one model on both lanes (a steadiness check), then the pair.
       if ((await live.locator('#live-runs option:not([disabled])').count()) !== 2) problems.push('the live panel does not offer exactly the batch sizes the runner has');
       if ((await live.locator('#live-runs option[disabled]').count()) !== 2) problems.push('the bigger batch sizes are not shown as coming');
+      // before any money is spent: what the record says of each model on this task, and what the run should cost
+      const before = await live.locator('#live-expect').innerText();
+      if (!/Before you run/.test(before) || (before.match(/recorded attempts on this task/g) || []).length !== 2 || !/should cost about \$/.test(before)) problems.push(`the live panel does not say what to expect before a run: ${JSON.stringify(before)}`);
+      if (!(await live.locator('#foot-view').innerText()).includes('real money')) problems.push('the small print of a signed-in page does not say live runs spend real money');
       await live.locator('#live-who').selectOption('a');
       if ((await live.locator('#live-runs').inputValue()) !== '10' || !(await live.locator('#live-go').innerText()).includes('batch of 10')) problems.push('choosing one model on both lanes did not switch to a batch');
       await live.locator('#live-go').click();
@@ -560,14 +566,21 @@ async function main() {
       for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'wrong decision in 1', '$0.0412', 'live-batch-1', 'kept apart from']) {
         if (!steady.toUpperCase().includes(part.toUpperCase())) problems.push(`the steadiness result lacks ${JSON.stringify(part)}: ${JSON.stringify(steady.slice(0, 500))}`);
       }
+      if (!(await live.locator('#live-stage .batch-lane').first().innerText()).includes('10 steps so far')) problems.push('a batch lane does not count steps as they happen');
       const squares = await live.locator('#live-stage .bsq').evaluateAll((all) => [all.length, all.filter((x) => x.classList.contains('pass')).length, all.filter((x) => x.classList.contains('fail')).length]);
       if (squares.join() !== '20,19,1') problems.push(`the batch squares show ${squares} (all, passed, failed), not 20,19,1`);
       if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('# Live batch report')) problems.push('the batch offers no report');
       await live.locator('#live-who').selectOption('pair');
       await live.locator('#live-go').click();
-      await live.waitForFunction(() => /won 5 of 10 scenarios/.test(document.getElementById('batch-band')?.innerText || ''), null, { timeout: 10000 }).catch(() => problems.push('a batch between the pair did not name who won more scenarios'));
+      await live.waitForFunction(() => /won 5 of 8 scenarios both played/.test(document.getElementById('batch-band')?.innerText || ''), null, { timeout: 10000 }).catch(() => problems.push('a batch between the pair did not name who won more scenarios'));
       if (runner.asked.a !== pair.a || runner.asked.b !== pair.b) problems.push('a pair batch did not race the pair chosen in step 2');
       if (!(await live.locator('#batch-band.win').count())) problems.push('the winner of a batch does not get the green box');
+      // scenarios one side did not play are said plainly, and every count stands on the scenarios both played
+      const unplayed = await live.locator('#batch-unplayed').innerText().catch(() => '');
+      if (!unplayed.includes('Only 8 of the 10 scenarios were played by both') || !unplayed.includes('did not play 2')) problems.push(`a batch cut short does not say so: ${JSON.stringify(unplayed)}`);
+      const cutShort = await live.locator('#live-batch').innerText();
+      for (const part of ['8 of 8 played (100%); 2 not played', '9 of 10 played (90%)', '8 fresh scenarios (of 10 asked for)']) if (!cutShort.includes(part)) problems.push(`the cut-short batch lacks ${JSON.stringify(part)}: ${JSON.stringify(cutShort.slice(0, 700))}`);
+      if ((await live.locator('#live-stage .bsq.skip').count()) !== 2) problems.push('scenarios that were not played are not marked on the lane');
       await live.waitForFunction(() => document.querySelectorAll('#live-batches li').length === 2, null, { timeout: 6000 }).catch(() => problems.push('the batches on file are not listed'));
       const afterBatch = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
       if (afterBatch.pairs !== pair.pairs) problems.push('a live batch changed the recorded verdict');
@@ -681,6 +694,7 @@ async function main() {
       // and out again: back to the public page
       await typed.locator('#judge-out').click();
       await typed.waitForSelector('#live-soon', { timeout: 8000 }).catch(() => problems.push('signing out did not return to the public page'));
+      if (!(await typed.locator('#foot-view').innerText()).includes('cannot start a match')) problems.push('after signing out the small print is still the signed-in one');
       if (await typed.locator('#live-go').count()) problems.push('a signed-out visitor is still offered a live race');
       await typed.context().close();
 
