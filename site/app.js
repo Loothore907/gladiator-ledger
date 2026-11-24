@@ -1125,12 +1125,43 @@ async function drawLive(v) {
   };
   showBudget(runner.options, session.races_left);
 
+  // The live races the runner has on file, by every signed-in visitor: a running tally for the two models
+  // chosen, shown beside the record and never added to it. A runner too old to list them shows nothing.
+  const tally = el('p', { id: 'live-tally', class: 'live-tally', hidden: true });
+  let liveRaces = [];
+  const loadRaces = async () => {
+    try {
+      const response = await fetch(`${runner.base}/races`);
+      liveRaces = response.ok ? (await response.json()).races || [] : [];
+    } catch {
+      liveRaces = [];
+    }
+  };
+  const showTally = async (a, b, r) => {
+    const between = liveRaces.filter((x) => x.task === task && ((x.a === a && x.b === b) || (x.a === b && x.b === a)));
+    tally.hidden = !between.length;
+    if (!between.length) return;
+    const won = (m) => between.filter((x) => x.winner === m).length;
+    const none = between.filter((x) => !x.winner).length;
+    const recorded = r.verdict === 'no data' ? 'There are no recorded scenarios between them.' : `They are kept apart from the ${plural(r.pairs, 'recorded scenario')} the verdict rests on.`;
+    tally.replaceChildren(
+      el('strong', null, `Live races so far: ${shortName(a)} ${won(a)}, ${shortName(b)} ${won(b)}`),
+      none ? `, ${none} with no winner` : '',
+      ` (${plural(between.length, 'live race')} on this task, by everyone signed in). ${recorded}`,
+    );
+    // they join the graph as live results, so the picture shows them too
+    for (const x of between) await ask(ADD_LIVE, { run: x.run_id, winner: x.winner, seal: x.seal, at: Number(x.run_id.replace(/\D/g, '').slice(0, 14)), version: r.version, a: x.a, b: x.b });
+    if (r.rounds) grown.replaceChildren(await evidenceGraph(r));
+  };
+  await loadRaces();
+
   // the record for whichever two are chosen: it may favour one, lean, name no favourite, or not exist at all
   let recordFor = v;
   const readRecord = async () => {
     const [a, b] = [pickA.value, pickB.value];
     go.disabled = !a || !b || a === b;
     if (go.disabled) {
+      tally.hidden = true;
       prior.textContent = !a || !b ? 'Choose the two models to race.' : 'Choose two different models.';
       return;
     }
@@ -1145,6 +1176,7 @@ async function drawLive(v) {
             ? `On this tested workflow the record leans to ${shortName(r.better)} (${r.wins[r.better]} of ${r.pairs}), not settled.`
             : `On this tested workflow the record names no favourite between them (${r.wins[a]} to ${r.wins[b]} over ${plural(r.pairs, 'scenario')}).`;
     prior.textContent = `${text} Now put that to the test: one new scenario, generated this minute, never seen by either model.`;
+    await showTally(a, b, r);
   };
   pickA.addEventListener('change', readRecord);
   pickB.addEventListener('change', readRecord);
@@ -1214,12 +1246,14 @@ async function drawLive(v) {
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
         showBudget(options, renewed ? renewed.races_left : null);
+        await loadRaces();
+        await showTally(a, b, r);
       } catch {
         /* the next race will say what is wrong */
       }
     }
   });
-  box.replaceChildren(title, absent, prior, el('div', { class: 'race-controls' }, pickA, el('span', { class: 'note' }, 'vs'), pickB, level, profile, go), money, stage, say, grown);
+  box.replaceChildren(title, absent, prior, tally, el('div', { class: 'race-controls' }, pickA, el('span', { class: 'note' }, 'vs'), pickB, level, profile, go), money, stage, say, grown);
 }
 const spec_task = (test) => test.split('/').pop();
 

@@ -73,6 +73,7 @@ function fakeRunner(models, extra) {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' };
   const json = (res, status, value) => res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }).end(JSON.stringify(value));
   let races = 3;
+  const run = []; // the live races this stand-in has 'run', as the real runner lists them
   const server = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
     if (req.url === '/options') {
@@ -80,6 +81,7 @@ function fakeRunner(models, extra) {
       const budgets = [{ provider: 'openrouter', limit_usd: 30, left_usd: 30 - (3 - races) * 0.0055 }, { provider: 'google', limit_usd: 20, left_usd: 0.1 }];
       return json(res, 200, { tasks, models: [...models, extra], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true });
     }
+    if (req.url === '/races') return json(res, 200, { races: run });
     if (!['/race', '/signin'].includes(req.url) || req.method !== 'POST') return res.writeHead(404, cors).end();
     let body = '';
     req.on('data', (chunk) => (body += chunk));
@@ -94,6 +96,7 @@ function fakeRunner(models, extra) {
       server.asked = ask;
       if (ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
       races -= 1;
+      run.push({ run_id: `live-check-${run.length + 1}`, seal: 'abcdef0123456789', task: ask.task, a: ask.a, b: ask.b, winner: ask.a, a_passed: true, b_passed: false, a_cost_usd: 0.0021, b_cost_usd: 0.0034 });
       res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
       const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
       const step = (side, turn, tool_name, tool_args, elapsed_s, error = null) =>
@@ -108,7 +111,7 @@ function fakeRunner(models, extra) {
       step('B', 1, 'escalate_alert', { alert_id: 'ALR-1' }, 5);
       send('attempt_end', { side: 'A', passed: true, termination: 'session_ended', grade_details: { items: 1, correct: 1 } });
       send('attempt_end', { side: 'B', passed: false, termination: 'no_action', grade_details: { items: 1, correct: 0, wrong: 1 } });
-      send('record', { record: { sha256: 'abcdef0123456789', body: { run_id: 'live-check-1', live: true, verdict: { winner: 'A' }, contestants: { A: { results: [{ passed: true, cost_usd: 0.0021, calls: 3, input_tokens: 900, output_tokens: 40, wall_s: 6, termination: 'session_ended' }] }, B: { results: [{ passed: false, cost_usd: 0.0034, calls: 1, input_tokens: 400, output_tokens: 25, wall_s: 5, termination: 'no_action' }] } } } }, operator: {} });
+      send('record', { record: { sha256: 'abcdef0123456789', body: { run_id: `live-check-${run.length}`, live: true, verdict: { winner: 'A' }, contestants: { A: { results: [{ passed: true, cost_usd: 0.0021, calls: 3, input_tokens: 900, output_tokens: 40, wall_s: 6, termination: 'session_ended' }] }, B: { results: [{ passed: false, cost_usd: 0.0034, calls: 1, input_tokens: 400, output_tokens: 25, wall_s: 5, termination: 'no_action' }] } } } }, operator: {} });
       res.end();
     });
   });
@@ -448,6 +451,10 @@ async function main() {
       const ask = runner.asked;
       if (!(ask.a === pair.a && ask.b === pair.b && ask.task === pair.task.split('/').pop())) problems.push(`the page asked the runner for ${JSON.stringify(ask)}`);
       if (ask.token !== 'session-1' || 'code' in ask || 'invite' in ask) problems.push(`a race must carry the session and nothing else secret: ${JSON.stringify(Object.keys(ask))}`);
+      // the live tally: one race so far between these two, won by the first, and not mixed into the record
+      await live.waitForFunction(() => /Live races so far/.test(document.getElementById('live-tally').innerText), null, { timeout: 5000 }).catch(() => problems.push('the live tally did not appear after a race'));
+      const tallied = await live.locator('#live-tally').innerText();
+      if (!/ 1, .* 0 \(1 live race on this task/.test(tallied) || !tallied.includes('kept apart from')) problems.push(`the live tally is wrong: ${JSON.stringify(tallied)}`);
       // the money and the races left are read again after a race
       await live.waitForFunction(() => document.getElementById('live-budget').innerText.includes('2 live races left'), null, { timeout: 5000 }).catch(() => problems.push('the budget line was not refreshed after the race'));
       if (!(await live.locator('#live-budget').innerText()).includes('OpenRouter $29.99 of $30.00')) problems.push('the provider budget was not refreshed after the race');
@@ -546,6 +553,9 @@ async function main() {
       await back.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
       await pickPair(back);
       await back.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('the sign-in was not kept for the next visit'));
+      // and the tally is still there: it lives on the runner, not in the page
+      if (!(await back.locator('#live-tally').innerText()).includes('Live races so far')) problems.push('the live tally was lost on the next visit');
+      if ((await back.locator('#live-graph circle.live').count()) < 1) problems.push('earlier live races are not drawn in the graph on the next visit');
       await context.close();
     } finally {
       runner.close();
