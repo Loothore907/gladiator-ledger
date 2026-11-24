@@ -93,6 +93,6 @@ and copies one small scoring file, marked in the source. The full statement is `
 
 ## Links to fill in
 - Repository: https://github.com/Loothore907/gladiator-ledger
-- Working demo: https://loothore907.github.io/gladiator-ledger/
+- Working demo: https://ledger.gladiatorbench.com/
 - Live races for judges: (the page's address and the access code for its "Judge sign-in" button; they go in the private testing instructions)
 - Video: (if recorded)
