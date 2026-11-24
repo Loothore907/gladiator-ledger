@@ -30,6 +30,12 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   fresh world per attempt (`instances: generator`), only through `ledger import` (which checks it against the
   fingerprint in the record), and **never for a holdout or fixed test**. The graph is still built from `record.json`
   and Gladiator's `validations/*.json` only.
+- **A record informs a choice; it never limits one (owner, 2026-11-24).** Any model the platform can run can be
+  chosen, with or without a history, and the page shows whatever record exists. The only limit is availability
+  (the runner has the model's key and price). There is one place to choose the two models, and the verdict, the
+  graph and the live race are all about that pair. Honesty comes from the same world, settings and judge for
+  both, and from saying how much evidence there is. The hosted live list stays to small models for the demo and
+  grows as capability does.
 - **Published scores only pick opponents.** The `epoch` bridge loads Epoch AI's Capabilities Index (CC BY 4.0,
   credited in `data/epoch/README.md`). Never rank or recommend by a published score, and join an Epoch name to a
   Gladiator model id only when it is an exact match (`MODEL_IDS` in `ledger/bridges/epoch.py`).
