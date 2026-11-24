@@ -241,6 +241,10 @@ flowchart LR
 - **Storage.** Embedded Python library (`relate-db`), a single-file store (`data/ledger.rl`), opened read-only for
   every question. In the browser, the WebAssembly build with an in-memory store, built from the same statements.
 - **Retrieval.** A full-text index over the workflow text, for "describe your flow".
+- **On show.** The page draws the graph beside the steps ("Relate graph: the graph behind your answer"): the
+  workflows, the models tested on the one you chose, the scenarios your two models both played, the faults each
+  made and any live races. Each step lights up the part it reads and shows the Cypher Relate ran for it, with the
+  rows returned and the time taken in your browser.
 - **Agents.** The same store served read-only over MCP, including free-form read-only Cypher.
 - **Safe to rebuild.** The loader `MERGE`s on stable keys behind uniqueness constraints, so loading the same records
   again changes nothing. The records stay the master copy; the store is a view of them.

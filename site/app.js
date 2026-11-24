@@ -43,7 +43,7 @@ const getJson = (path) =>
   });
 
 const ledgerReady = Promise.all([getJson('./data/questions.json'), getJson('./data/rules.json')]).then(
-  ([questions, rules]) => ({ rules, ledger: createLedger(ask, questions, rules) }),
+  ([questions, rules]) => ({ rules, questions, ledger: createLedger(ask, questions, rules) }),
 );
 ledgerReady.catch(() => {});
 
@@ -64,6 +64,8 @@ window.ledgerDemo = {
     const { ledger } = await ledgerReady;
     return ledger.markdown(await ledger.spec(task, a, b, profile, overrides));
   },
+  // the verdict now on screen (what the graph panel is drawn from)
+  current: async () => spine.v,
   // the cost breakdown and the evidence report for one judged pair, as the command line writes them
   reports: async (task, a, b, profile, overrides = null) => {
     const { ledger, rules } = await ledgerReady;
@@ -115,6 +117,7 @@ const state = {
 const names = new Map(); // model id -> display name, as the graph has it
 let ledger;
 let rules;
+let questionsText; // the named questions, as the Cypher text Relate runs
 let turn = 0; // guards against a slow answer landing after a newer choice
 let searchTurn = 0;
 
@@ -201,6 +204,7 @@ function drawFlows() {
       );
     }),
   );
+  drawSpine();
 }
 
 function firstSentence(text) {
@@ -223,6 +227,7 @@ function startOver() {
   if (!mayLeave()) return;
   turn += 1;
   Object.assign(state, { task: null, flow: null, a: null, b: null, partners: new Map(), models: [], overrides: {} });
+  spine.v = null;
   $('step-models').hidden = true;
   $('step-verdict').hidden = true;
   $('verdict-body').replaceChildren();
@@ -237,6 +242,7 @@ async function chooseFlow(flow) {
   $('start-over').hidden = false;
   const mine = ++turn;
   Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [], overrides: {} });
+  spine.v = null;
   drawFlows();
   const models = await ledger.modelsOnFlow(flow.test);
   if (mine !== turn) return;
@@ -249,6 +255,7 @@ async function chooseFlow(flow) {
     'Pick the two you are choosing between.';
   drawFirst();
   $('second-model').hidden = true;
+  drawSpine();
   $('step-models').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -285,6 +292,7 @@ async function chooseFirst(model) {
   }
   const mine = ++turn;
   Object.assign(state, { a: model, b: null });
+  spine.v = null;
   $('step-verdict').hidden = true;
   const partners = await ledger.partnersOnFlow(state.task, model);
   const scores = await ledger.scoresOf([model, ...partners.map((p) => p.model)]);
@@ -292,6 +300,7 @@ async function chooseFirst(model) {
   state.partners = new Map(partners.map((p) => [p.model, p.pairs]));
   state.scores = new Map(scores.map((s) => [s.model, s]));
   drawSecond();
+  drawSpine();
   await drawSuggestions(mine);
 }
 
@@ -424,6 +433,8 @@ async function showVerdict(scroll = false) {
     const own = await ask(OWN_RECORD, { version: judged.version, a: state.a, b: state.b });
     if (mine !== turn) return;
     drawNoRecord(judged, own);
+    spine.v = judged;
+    drawSpine();
     drawLive(judged);
     $('step-verdict').hidden = false;
     if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -432,6 +443,8 @@ async function showVerdict(scroll = false) {
   const spec = await ledger.build({ ...judged, suite: null });
   if (mine !== turn) return;
   drawVerdict(spec, judged);
+  spine.v = judged;
+  drawSpine();
   drawLive(judged);
   $('step-verdict').hidden = false;
   if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -742,6 +755,216 @@ async function openRace(v, index) {
     paint();
   } else start();
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ---- the Relate graph as the spine of the page ------------------------------------------------------------------
+//
+// One picture of the graph that follows the visitor through the steps. Each step lights up the part of the graph
+// it was read from and shows the Cypher that Relate ran for it, with how many rows came back and how long it took.
+// The picture is drawn from the same answers the steps use, so it cannot disagree with them.
+
+const spine = { v: null }; // the verdict on screen, when there is one
+let spineTurn = 0;
+
+async function timed(query, params) {
+  const before = performance.now();
+  const rows = await ask(query, params);
+  return { rows: rows.length, ms: performance.now() - before };
+}
+
+const SPINE_W = 480;
+const trim = (text, most) => (text.length > most ? `${text.slice(0, most - 1)}…` : text);
+
+async function drawSpine() {
+  const box = $('spine-body');
+  if (!box || !state.flows) return;
+  const mine = ++spineTurn;
+  const v = state.a && state.b ? spine.v : null;
+  const step = v ? 3 : state.a ? 2 : state.task ? 1 : 0;
+  for (const chip of document.querySelectorAll('#spine-steps span')) chip.classList.toggle('on', Number(chip.dataset.step) === step);
+
+  const parts = [];
+  let y = 0;
+  const heading = (text) => {
+    parts.push(svg('text', { x: 0, y: y + 12, class: 'sp-head' }, text));
+    y += 22;
+  };
+
+  // --- workflows: every tested workflow, the chosen one lit
+  heading('WORKFLOWS TESTED');
+  const flows = state.flows.flows;
+  const fw = (SPINE_W - 8 * (flows.length - 1)) / flows.length;
+  const chosenFlowX = [];
+  flows.forEach((f, i) => {
+    const x = i * (fw + 8);
+    const on = f.test === state.task;
+    if (on) chosenFlowX.push(x + fw / 2);
+    const g = svg(
+      'g',
+      { class: `sp-flow${on ? ' on' : state.task ? ' off' : ''}`, tabindex: 0, role: 'button', 'aria-label': `Workflow ${f.title}` },
+      svg('rect', { x, y, width: fw, height: 44, rx: 8 }),
+      svg('text', { x: x + fw / 2, y: y + 19, 'text-anchor': 'middle', class: 'sp-name' }, trim(f.title, 16)),
+      svg('text', { x: x + fw / 2, y: y + 34, 'text-anchor': 'middle', class: 'sp-sub' }, `${f.models} models`),
+      svg('title', null, `${f.title}: ${f.models} models, ${f.pairs} judged pairs. Click to choose it.`),
+    );
+    g.addEventListener('click', () => chooseFlow(f));
+    parts.push(g);
+  });
+  y += 44;
+  const flowBottom = y;
+
+  // --- models tested on the chosen workflow
+  let modelsTop = 0;
+  const at = new Map(); // model id -> where its dot is
+  if (step >= 1) {
+    y += 22;
+    heading('MODELS TESTED ON IT');
+    modelsTop = y;
+    const list = [...state.models].sort((p, q) => q.pairs - p.pairs || (p.model < q.model ? -1 : 1));
+    const half = Math.ceil(list.length / 2);
+    list.forEach((m, i) => {
+      const col = i < half ? 0 : 1;
+      const row = i < half ? i : i - half;
+      const cx = col * (SPINE_W / 2) + 22;
+      const cy = y + row * 24 + 9;
+      const cls = m.model === state.a ? 'a' : m.model === state.b ? 'b' : state.a && state.partners.has(m.model) ? 'met' : state.a ? 'unmet' : 'plain';
+      at.set(m.model, { x: cx, y: cy });
+      const met = state.a && state.partners.has(m.model) ? ` · ${plural(state.partners.get(m.model), 'pair')} with ${shortName(state.a)}` : '';
+      const g = svg(
+        'g',
+        { class: `sp-model ${cls}`, tabindex: 0, role: 'button', 'aria-label': `Model ${shortName(m.model)}` },
+        svg('circle', { cx, cy, r: cls === 'a' || cls === 'b' ? 8 : 5.5 }),
+        svg('text', { x: cx + 14, y: cy + 4, class: 'sp-name' }, trim(shortName(m.model), 24)),
+        svg('title', null, `${m.model}: ${plural(m.pairs, 'judged pair')} on this workflow${met}. Click to pick it.`),
+      );
+      g.addEventListener('click', () => (state.a && m.model !== state.a ? chooseSecond(m.model) : chooseFirst(m.model)));
+      parts.push(g);
+    });
+    y += half * 24 + 2;
+    // the workflow leads to its models
+    const from = chosenFlowX[0] ?? SPINE_W / 2;
+    parts.unshift(svg('path', { d: `M${from} ${flowBottom} C ${from} ${flowBottom + 26}, ${SPINE_W / 2} ${modelsTop - 34}, ${SPINE_W / 2} ${modelsTop - 20}`, class: 'sp-link' }));
+  }
+
+  // --- the scenarios the two chosen models both played, the live races, and the faults each made
+  if (v) {
+    y += 20;
+    const a = at.get(v.a);
+    const b = at.get(v.b);
+    heading('SCENARIOS BOTH PLAYED');
+    const top = y;
+    if (v.verdict === 'no data') {
+      parts.push(svg('text', { x: 0, y: y + 14, class: 'sp-sub' }, 'None: these two have never met on this task, so there is no verdict.'));
+      y += 26;
+    } else {
+      const perRow = 12;
+      v.rounds.forEach((round, i) => {
+        const cx = 14 + (i % perRow) * 30;
+        const cy = y + 12 + Math.floor(i / perRow) * 28;
+        const who = round.winner === v.a ? 'a' : round.winner === v.b ? 'b' : 'tie';
+        const dot = svg(
+          'circle',
+          { cx, cy, r: 10, class: `sp-dot ${who}`, tabindex: 0, role: 'button', 'aria-label': `Scenario ${i + 1}` },
+          svg('title', null, `Scenario ${i + 1}: ${who === 'tie' ? 'a tie' : `${shortName(round.winner)} won`} on ${round.rule}. Click to replay it.`),
+        );
+        dot.addEventListener('click', async () => {
+          await openRace(v, i);
+          $('race')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        parts.push(dot);
+      });
+      y += Math.ceil(v.rounds.length / perRow) * 28 + 4;
+      parts.push(svg('text', { x: 0, y: y + 12, class: 'sp-name' }, `${shortName(v.a)} ${v.wins[v.a]} · ${shortName(v.b)} ${v.wins[v.b]}${v.ties ? ` · ${v.ties} tied` : ''}`));
+      parts.push(svg('text', { x: 0, y: y + 28, class: 'sp-sub' }, 'One dot per generated world, coloured by who won it. Click one to replay it.'));
+      y += 36;
+    }
+    // both models lead to the scenarios they played
+    if (a && b) {
+      // each runs down the gutter beside its column, clear of the names, then along to the scenarios
+      const route = (from, gutter, level, land) => `M${from.x - 8} ${from.y} H${from.x - gutter} V${top - level} H${land} V${top + 2}`;
+      parts.unshift(svg('path', { d: route(a, 13, 30, 8), class: 'sp-link a' }));
+      parts.unshift(svg('path', { d: route(b, 17, 26, 20), class: 'sp-link b' }));
+    }
+
+    const live = await ask(LIVE_BETWEEN, { version: v.version, a: v.a, b: v.b });
+    if (mine !== spineTurn) return;
+    if (live.length) {
+      y += 12;
+      heading('LIVE RACES');
+      parts.push(svg('rect', { x: 0, y: y - 2, width: SPINE_W, height: 46, rx: 8, class: 'sp-livebox' }));
+      live.slice(-14).forEach((l, i) => {
+        const who = l.winner === v.a ? 'a' : l.winner === v.b ? 'b' : 'tie';
+        parts.push(svg('circle', { cx: 18 + i * 30, cy: y + 14, r: 9, class: `sp-dot live ${who}` }, svg('title', null, `Live race ${l.run}: ${who === 'tie' ? 'no winner' : `${shortName(l.winner)} won`}`)));
+      });
+      const won = (m) => live.filter((l) => l.winner === m).length;
+      parts.push(svg('text', { x: 8, y: y + 38, class: 'sp-sub' }, `${shortName(v.a)} ${won(v.a)} · ${shortName(v.b)} ${won(v.b)} · dashed: raced live, never counted in the verdict`));
+      y += 50;
+    }
+
+    if (v.fit) {
+      y += 14;
+      heading('FAULTS EACH MADE ON THIS TASK');
+      const colW = (SPINE_W - 12) / 2;
+      let tallest = 0;
+      [v.a, v.b].forEach((name, col) => {
+        const f = v.fit[name];
+        const x = col * (colW + 12);
+        let fy = y;
+        const word = f.fit === null ? 'too few attempts' : f.fit ? 'fit' : 'not fit';
+        parts.push(svg('rect', { x, y: fy, width: 5, height: 30, rx: 2.5, class: `sp-bar ${col ? 'b' : 'a'}` }));
+        parts.push(svg('text', { x: x + 12, y: fy + 12, class: 'sp-name' }, trim(shortName(name), 24)));
+        parts.push(svg('text', { x: x + 12, y: fy + 27, class: `sp-sub${f.fit === false ? ' bad' : ''}` }, `${f.passed} of ${f.attempts} passed · ${word} (${v.profile})`));
+        fy += 38;
+        const made = f.faults.filter((q) => q.attempts_with && q.kind_of === null);
+        for (const q of made.slice(0, 5)) {
+          const bad = q.breaks;
+          parts.push(
+            svg(
+              'g',
+              { class: `sp-fault${bad ? ' bad' : ''}` },
+              svg('rect', { x, y: fy, width: colW, height: 26, rx: 7 }),
+              svg('text', { x: x + 9, y: fy + 17, class: 'sp-name' }, `${bad ? '✕ ' : ''}${trim(q.fault, 27)}`),
+              svg('text', { x: x + colW - 9, y: fy + 17, 'text-anchor': 'end', class: 'sp-sub' }, `${q.attempts_with} of ${f.attempts}`),
+              svg('title', null, `${q.fault} (${q.level}): in ${q.attempts_with} of ${f.attempts} attempts${bad ? ', which makes it not fit under this tolerance' : ''}`),
+            ),
+          );
+          fy += 31;
+        }
+        if (!made.length) {
+          parts.push(svg('text', { x: x + 2, y: fy + 14, class: 'sp-sub' }, 'no faults recorded'));
+          fy += 24;
+        } else if (made.length > 5) {
+          parts.push(svg('text', { x: x + 2, y: fy + 12, class: 'sp-sub' }, `+ ${made.length - 5} more`));
+          fy += 20;
+        }
+        tallest = Math.max(tallest, fy - y);
+      });
+      y += tallest;
+    }
+  }
+
+  // --- what this step read from the graph, as the Cypher Relate ran
+  let read;
+  if (step === 0) read = { title: 'Step 1 reads the tested workflows', query: questionsText.flows, params: {} };
+  else {
+    const version = v && v.version !== 'all versions' ? v.version : await ledger.currentVersion(state.task);
+    if (step === 1) read = { title: 'Step 2 reads the models tested on this workflow', query: ledger.text.modelsOnFlow, params: { test_id: state.task, version_key: version } };
+    else if (step === 2) read = { title: `Step 2 reads who has met ${shortName(state.a)} here`, query: ledger.text.partnersOnFlow, params: { test_id: state.task, version_key: version, model: state.a } };
+    else read = { title: 'Step 3 reads the scenarios both models played', query: questionsText.pair_on_task, params: { test_id: state.task, a: v.a, b: v.b, suite: null, version_key: version } };
+  }
+  const ran = await timed(read.query, read.params);
+  if (mine !== spineTurn) return;
+
+  box.replaceChildren(
+    svg('svg', { viewBox: `0 0 ${SPINE_W} ${Math.max(y + 6, 70)}`, role: 'img', 'aria-label': 'The Relate graph behind this page: workflows, the models tested on them, the scenarios two models both played and the faults each made' }, parts),
+    el(
+      'div',
+      { class: 'sp-read' },
+      el('p', { class: 'sp-read-title' }, read.title),
+      el('pre', null, read.query.trim()),
+      el('p', { class: 'sp-read-stats', id: 'spine-stats' }, `${plural(ran.rows, 'row')} · ${ran.ms < 1 ? 'under 1' : Math.round(ran.ms)} ms · run by Relate in this browser tab`),
+    ),
+  );
 }
 
 // ---- the graph behind a verdict, as a picture -------------------------------------------------------------------
@@ -1197,6 +1420,7 @@ async function drawLive(v) {
     // they join the graph as live results, so the picture shows them too
     for (const x of between) await ask(ADD_LIVE, { run: x.run_id, winner: x.winner, seal: x.seal, at: Number(x.run_id.replace(/\D/g, '').slice(0, 14)), version: r.version, a: x.a, b: x.b });
     if (r.rounds) grown.replaceChildren(await evidenceGraph(r));
+    drawSpine(); // the live races are in the graph now: show them in the picture beside the steps
   };
   await loadRaces();
 
@@ -1751,7 +1975,7 @@ async function showExample() {
 async function start() {
   const status = $('status');
   try {
-    ({ ledger, rules } = await ledgerReady);
+    ({ ledger, rules, questions: questionsText } = await ledgerReady);
     state.profile = rules.policy.default_profile;
     const stats = await graphReady;
     status.textContent =
@@ -1761,6 +1985,8 @@ async function start() {
     status.classList.add('error');
     return;
   }
+  // the graph panel is open beside the steps on a wide screen, and folded away above them on a narrow one
+  $('spine-details').open = window.matchMedia('(min-width: 1240px)').matches;
   announceLive();
   setUpSignIn();
   $('flow-text').disabled = false;

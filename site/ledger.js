@@ -751,6 +751,8 @@ export function createLedger(ask, questions, rules) {
   const scoresOf = (models) => ask(SCORES_OF, { benchmark: rules.benchmark, models });
 
   return {
+    // the page's own two questions, as text, so the graph panel can show what was asked
+    text: { modelsOnFlow: MODELS_ON_FLOW, partnersOnFlow: PARTNERS_ON_FLOW },
     searchWords,
     findFlows,
     currentVersion,
