@@ -34,17 +34,6 @@
   </dialog>
 </header>
 
-<div class="frame">
-<aside id="spine" aria-labelledby="spine-title">
-  <details id="spine-details">
-    <summary><span class="relate-badge">Relate graph</span> <span id="spine-title">The graph behind your answer</span></summary>
-    <p class="note spine-intro">Everything on this page is read from one graph, stored and queried with
-      <a href="https://relatedb.ai" rel="noopener">Relate</a> (Cypher), running in this browser tab. Each step lights up the part it
-      reads. Click a workflow, a model or a scenario here to go to it.</p>
-    <p id="spine-steps" class="spine-steps"><span data-step="0">1 · workflow</span><span data-step="1">2 · models</span><span data-step="2">2 · opponent</span><span data-step="3">3 · verdict</span></p>
-    <div id="spine-body"></div>
-  </details>
-</aside>
 <main>
   <section id="step-flow" class="step" aria-labelledby="h-flow">
     <h2 id="h-flow"><span class="num">1</span> Pick the workflow closest to yours</h2>
@@ -88,11 +77,12 @@
     <div id="verdict-body"></div>
   </section>
 </main>
-</div>
 
 <footer class="foot">
-  <p>The data is a fixed set of finished matches: this page cannot run new ones. Everything runs locally in this
-    browser tab; nothing you type is sent anywhere.</p>
+  <p>Every verdict on this page rests on recorded matches: finished, sealed, and replayable here. The page reads
+    them locally in this browser tab and needs no key. Live races run on a separate Gladiator runner and are open
+    to the hackathon judges for now (Judge sign-in, at the top); a live result is shown beside the record and is
+    never counted in a verdict.</p>
   <p>Published scores are used only to suggest a fair opponent, never to rank or recommend. They come from Epoch AI,
     “Capabilities &amp; benchmarking” (the Epoch Capabilities Index), epoch.ai/benchmarks, licensed CC BY 4.0.</p>
   <p><a href="https://github.com/Loothore907/gladiator-ledger">Gladiator Ledger on GitHub</a></p>
