@@ -60,8 +60,8 @@ really ran.
 ask a [Gladiator race runner](https://github.com/Loothore907/gladiator-core/blob/main/docs/DEPLOYMENT.md) for one
 fresh scenario between any two models on the runner's list (the two on screen to begin with). It first states
 what the record expects, or that the two have never met on this task, then streams the race as it happens, then
-says whether the result was in line with the record or against it. Judges sign in by following an invitation
-link once; nobody else is shown a button. The panel shows what is left of each provider's live budget, and a
+says whether the result was in line with the record or against it. Judges sign in once, with the "Judge sign-in"
+button and their access code (or an invitation link that carries it); nobody else is shown a race button. The panel shows what is left of each provider's live budget, and a
 model leaves the list when its provider's budget is used up. To run one on your own
 machine with your own keys: start `gladiator serve` in a gladiator-core checkout with
 `--origin http://localhost:8000`, then open the page with `?runner=http://127.0.0.1:8787`. No server, no keys, nothing leaves

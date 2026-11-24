@@ -385,8 +385,12 @@ async function main() {
       const live = await context.newPage();
       live.on('pageerror', (e) => problems.push(`live page error: ${e.message}`));
       await live.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}&invite=judge-invite`);
+      // the visitor is told at the top, before picking anything, that the link worked
+      await live.waitForFunction(() => document.getElementById('live-banner').innerText.includes('signed in for live races'), null, { timeout: 15000 }).catch(() => problems.push('an accepted invitation is not announced at the top of the page'));
+      if (!(await live.locator('#live-banner').innerText()).includes('3 live races left')) problems.push('the sign-in banner does not say how many races are left');
       await pickPair(live);
       await live.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('an invitation link did not open live races'));
+      if (!(await live.locator('#live-jump').count())) problems.push('a signed-in visitor has no way straight to the live race from the top of the result');
       if (live.url().includes('judge-invite')) problems.push('the invite is still in the address bar after signing in');
       if (await live.locator('#live input').count()) problems.push('a signed-in visitor is still asked to type something');
       if (!(await live.locator('#live-prior').innerText()).includes('the record')) problems.push('the live panel does not state what the record expects');
@@ -436,6 +440,40 @@ async function main() {
       await live.locator('#live-a').selectOption(NEWCOMER);
       if (!(await live.locator('#live-go').isDisabled())) problems.push('the same model can be raced against itself');
       await live.close();
+
+      // An invitation the runner does not accept is said so at the top: never a silent fall back to the public page.
+      const wrong = await browser.newPage();
+      await wrong.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}&invite=not-the-invite`);
+      await wrong.waitForFunction(() => document.getElementById('live-banner').innerText.includes('was not accepted'), null, { timeout: 15000 }).catch(() => problems.push('a refused invitation is not announced at the top of the page'));
+      await pickPair(wrong);
+      if (await wrong.locator('#live-go, #live-jump').count()) problems.push('a refused invitation still offers a live race');
+      await wrong.close();
+
+      // Signing in from the page itself: a button opens a box, the code typed there signs the browser in, and a
+      // result already on screen gets its live panel. No address has to be put together by hand.
+      const typed = await (await browser.newContext()).newPage();
+      typed.on('pageerror', (e) => problems.push(`sign-in page error: ${e.message}`));
+      await typed.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+      await pickPair(typed);
+      await typed.waitForSelector('#live-soon', { timeout: 5000 });
+      if (!(await typed.locator('#judge-open').isVisible())) problems.push('the public page offers no sign-in button');
+      await typed.locator('#judge-open').click();
+      await typed.fill('#judge-code', 'not-the-code');
+      await typed.locator('#judge-go').click();
+      await typed.waitForFunction(() => document.getElementById('judge-note').innerText.includes('not accepted'), null, { timeout: 8000 }).catch(() => problems.push('a wrong code typed into the sign-in box is not refused in plain words'));
+      if (await typed.locator('#live-go').count()) problems.push('a wrong code opened live races');
+      await typed.fill('#judge-code', 'judge-invite');
+      await typed.locator('#judge-go').click();
+      await typed.waitForFunction(() => document.getElementById('live-banner').innerText.includes('signed in for live races'), null, { timeout: 8000 }).catch(() => problems.push('the right code typed into the sign-in box did not sign the visitor in'));
+      await typed.waitForSelector('#live-go', { timeout: 8000 }).catch(() => problems.push('after signing in from the box, the result on screen did not get its live panel'));
+      if (await typed.locator('#judge-dialog[open]').count()) problems.push('the sign-in box stayed open after signing in');
+      if (await typed.locator('#judge-open').isVisible()) problems.push('the sign-in button is still shown to a signed-in visitor');
+      if (typed.url().includes('judge-invite')) problems.push('the typed code ended up in the address bar');
+      // and out again: back to the public page
+      await typed.locator('#judge-out').click();
+      await typed.waitForSelector('#live-soon', { timeout: 8000 }).catch(() => problems.push('signing out did not return to the public page'));
+      if (await typed.locator('#live-go').count()) problems.push('a signed-out visitor is still offered a live race');
+      await typed.context().close();
 
       // The sign-in is kept: the same browser comes back with no invite in the link and can still race.
       const back = await context.newPage();
