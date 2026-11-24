@@ -17,7 +17,21 @@
     ranking, and it names no winner when the evidence is thin or level. There is no leaderboard: for your own
     flow, the record of the closest tested workflow is a starting point, and a match on your task is the evidence.</p>
   <p id="status" class="status" role="status" aria-live="polite">Building the graph in your browser…</p>
+  <p class="judge-row"><button type="button" id="judge-open" class="quiet small" hidden>Judge sign-in</button></p>
   <p id="live-banner" class="live-banner" role="status" aria-live="polite" hidden></p>
+  <dialog id="judge-dialog" aria-labelledby="judge-title">
+    <form id="judge-form" method="dialog" autocomplete="off">
+      <h2 id="judge-title">Sign in for live races</h2>
+      <p class="note">Live races are open to the hackathon judges for now. Enter the access code you were given.</p>
+      <label for="judge-code">Access code</label>
+      <input id="judge-code" type="password" autocomplete="off" spellcheck="false" required>
+      <p id="judge-note" class="note" role="status" aria-live="polite"></p>
+      <div class="actions">
+        <button type="submit" id="judge-go">Sign in</button>
+        <button type="button" id="judge-cancel" class="quiet">Cancel</button>
+      </div>
+    </form>
+  </dialog>
 </header>
 
 <main>

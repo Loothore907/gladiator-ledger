@@ -30,7 +30,7 @@ and walks it:
 4. **Watch the race.** Any recorded scenario replays step by step: both models on the same world, at the pace
    they really ran, with the faults where they happened.
 5. **Race them live.** The graph states what the record expects, a runner plays one brand-new scenario, and the
-   page says whether the result was in line with the record or against it. (Open to judges by invitation link.)
+   page says whether the result was in line with the record or against it. (Open to judges: "Judge sign-in" on the page, with the access code.)
 6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every hazard,
    and the sealed records behind it.
 
@@ -94,5 +94,5 @@ and copies one small scoring file, marked in the source. The full statement is `
 ## Links to fill in
 - Repository: https://github.com/Loothore907/gladiator-ledger
 - Working demo: https://loothore907.github.io/gladiator-ledger/
-- Live races for judges: (the invitation link, once the runner is up; it goes in the private testing instructions)
+- Live races for judges: (the page's address and the access code for its "Judge sign-in" button; they go in the private testing instructions)
 - Video: (if recorded)

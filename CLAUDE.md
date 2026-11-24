@@ -20,7 +20,8 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
 - **Ledger reads Gladiator's output and never runs a match itself.** It may *request* one from a Gladiator runner
   (owner, 2026-11-23, for the live demo): the runner is Gladiator's, holds the keys and enforces the caps; Ledger
   shows the race and files the sealed record it gets back. Live runs are open to the hackathon judges only for now
-  (by invitation link, which signs a browser in once; owner, 2026-11-23: no code to type and no run button for
+  (signed in once: the page's "Judge sign-in" button and an access code, or an invitation link that carries it;
+  owner, 2026-11-24: nobody should have to build an address by hand. No code per run, and no run button for
   anyone else) and the public page says so ("coming soon" for everyone else). A live result is labelled live
   and kept apart from the recorded evidence that public verdicts rest on. Budgets live in the operations repo
   (`CLAUDE.md` there). The public page still costs nothing to use and needs no API keys.

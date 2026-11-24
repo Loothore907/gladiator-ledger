@@ -672,18 +672,30 @@ async function evidenceGraph(v, ring = null) {
 // Where a runner is, if there is one: ?runner=<address> for a runner on your own machine, else the address the
 // page was published with (site/data/live.json). No runner means no live races, and the page says so.
 let runnerPromise;
+let wantsRunner = false; // set when the visitor asks to sign in from the page
+const askedRunner = new URLSearchParams(location.search).get('runner');
+let basePromise;
+function runnerAddress() {
+  basePromise ||= (async () => {
+    if (askedRunner) return askedRunner;
+    try {
+      const response = await fetch(new URL('./data/live.json', import.meta.url));
+      return response.ok ? (await response.json()).runner : null;
+    } catch {
+      return null;
+    }
+  })();
+  return basePromise;
+}
 function findRunner() {
   runnerPromise ||= (async () => {
-    const asked = new URLSearchParams(location.search).get('runner');
-    let base = asked;
-    if (!base) {
-      const response = await fetch(new URL('./data/live.json', import.meta.url));
-      base = response.ok ? (await response.json()).runner : null;
-    }
+    const asked = askedRunner;
+    let base = await runnerAddress();
     if (!base) return null;
-    // The published runner is only contacted for a visitor who holds an invitation or is already signed in.
-    // Everyone else's page stays inside its own folder: nothing is sent anywhere, and the runner is not woken.
-    if (!asked && !new URLSearchParams(location.search).get('invite') && !stored.get()) return null;
+    // The published runner is only contacted for a visitor who asks to sign in, holds an invitation or is
+    // already signed in. Everyone else's page stays inside its own folder: nothing is sent anywhere, and
+    // the runner is not woken.
+    if (!asked && !wantsRunner && !new URLSearchParams(location.search).get('invite') && !stored.get()) return null;
     base = base.replace(/\/$/, '');
     try {
       const options = await (await fetch(`${base}/options`)).json();
@@ -812,7 +824,7 @@ const stored = {
 };
 let sessionPromise;
 let signInOutcome = 'none'; // 'signed' | 'refused' (the runner said no) | 'unreachable' | 'none' (nothing to sign in with)
-function signIn(runner, again = false) {
+function signIn(runner, again = false, typed = null) {
   if (again) sessionPromise = null;
   sessionPromise ||= (async () => {
     if (!runner.options.needs_code) {
@@ -824,14 +836,16 @@ function signIn(runner, again = false) {
       return response.ok ? response.json() : null;
     };
     const url = new URL(location.href);
-    const invite = url.searchParams.get('invite');
+    const invite = typed || url.searchParams.get('invite');
     let session = null;
     const tried = Boolean(invite || stored.get());
     try {
       if (invite) {
         session = await post({ invite });
-        url.searchParams.delete('invite');
-        history.replaceState(null, '', url); // the invite is spent: do not leave it in the address bar or history
+        if (url.searchParams.has('invite')) {
+          url.searchParams.delete('invite');
+          history.replaceState(null, '', url); // the invite is spent: do not leave it in the address bar or history
+        }
       }
       if (!session && stored.get()) session = await post({ token: stored.get() });
     } catch {
@@ -852,10 +866,12 @@ async function announceLive() {
   const banner = $('live-banner');
   const runner = await findRunner();
   if (!runner) return; // an ordinary visit: nothing to announce, nothing contacted
-  const show = (text, refused = false) => {
-    banner.textContent = text;
+  const show = (text, refused = false, signedIn = false) => {
+    banner.replaceChildren(text);
+    if (signedIn && runner.options.needs_code) banner.append(el('button', { type: 'button', id: 'judge-out', class: 'quiet small', onclick: signOut }, 'Sign out'));
     banner.classList.toggle('refused', refused);
     banner.hidden = false;
+    $('judge-open').hidden = signedIn;
   };
   if (!runner.options) {
     show(`Live races: the race runner at ${runner.base} is not answering right now. Recorded races still play. Reload the page to try again.`, true);
@@ -864,12 +880,67 @@ async function announceLive() {
   const session = await signIn(runner);
   if (session) {
     const left = session.races_left === null || session.races_left === undefined ? '' : ` ${plural(session.races_left, 'live race')} left on this sign-in.`;
-    show(`You are signed in for live races.${left} Pick a workflow and two models below, then press "Race them live".`);
+    show(`You are signed in for live races.${left} Pick a workflow and two models below, then press "Race them live".`, false, true);
   } else if (signInOutcome === 'refused') {
     show('This invitation link was not accepted by the race runner, so you are seeing the public page. Check that the link is complete and exactly as it was given to you. Recorded races still play.', true);
   } else if (signInOutcome === 'unreachable') {
     show('Live races: the race runner could not be reached to sign you in. Recorded races still play. Reload the page to try again.', true);
   }
+}
+
+// Back to the public page: forget the session and stop contacting the runner.
+function signOut() {
+  stored.set(null);
+  sessionPromise = null;
+  runnerPromise = null;
+  wantsRunner = false;
+  signInOutcome = 'none';
+  $('live-banner').hidden = true;
+  $('judge-open').hidden = false;
+  if (!$('step-verdict').hidden) showVerdict();
+}
+
+// The sign-in box: a button on the public page opens it, and the code typed there signs this browser in.
+// Nothing is sent to the runner until a code is submitted.
+async function setUpSignIn() {
+  const open = $('judge-open');
+  const dialog = $('judge-dialog');
+  const note = $('judge-note');
+  if (!(await runnerAddress())) return; // no runner is published: nothing to sign in to
+  open.hidden = Boolean(stored.get()) || new URLSearchParams(location.search).has('invite');
+  open.addEventListener('click', () => {
+    note.textContent = '';
+    $('judge-code').value = '';
+    dialog.showModal();
+    $('judge-code').focus();
+  });
+  $('judge-cancel').addEventListener('click', () => dialog.close());
+  $('judge-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const code = $('judge-code').value.trim();
+    if (!code) return;
+    $('judge-go').disabled = true;
+    note.textContent = 'Checking the code…';
+    try {
+      wantsRunner = true;
+      runnerPromise = null; // look the runner up again, this time contacting it
+      const runner = await findRunner();
+      if (!runner || !runner.options) {
+        note.textContent = 'The race runner is not answering right now. Try again in a moment.';
+        return;
+      }
+      const session = await signIn(runner, true, code);
+      if (!session) {
+        note.textContent = signInOutcome === 'unreachable' ? 'The race runner could not be reached. Try again in a moment.' : 'That code was not accepted. Check it and try again.';
+        return;
+      }
+      dialog.close();
+      await announceLive();
+      if (!$('step-verdict').hidden) showVerdict(); // a result is already on screen: give it its live panel
+    } finally {
+      $('judge-go').disabled = false;
+    }
+  });
 }
 
 const providerName = (id) => ({ openrouter: 'OpenRouter', anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google' })[id] || id;
@@ -881,7 +952,7 @@ async function drawLive(v) {
   const runner = await findRunner();
   if ($('live') !== box) return; // the verdict was redrawn while we looked
   const title = el('h4', null, 'Race them live on a fresh scenario');
-  const soon = 'Live races are open to the hackathon judges for now, by invitation link, and coming soon for everyone. Every scenario above is a real recorded race you can replay.';
+  const soon = 'Live races are open to the hackathon judges for now (Judge sign-in, at the top of the page), and coming soon for everyone. Every scenario above is a real recorded race you can replay.';
   if (!runner) {
     box.replaceChildren(title, el('p', { class: 'note', id: 'live-soon' }, soon));
     return;
@@ -1477,6 +1548,7 @@ async function start() {
     return;
   }
   announceLive();
+  setUpSignIn();
   $('flow-text').disabled = false;
   $('flow-go').disabled = false;
   $('example').disabled = false;
