@@ -900,6 +900,16 @@ function signOut() {
   if (!$('step-verdict').hidden) showVerdict();
 }
 
+// Five characters of a code's SHA-256: enough to tell two codes apart, far too little to find one.
+async function fingerprint(text) {
+  try {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 5);
+  } catch {
+    return 'not available';
+  }
+}
+
 // The sign-in box: a button on the public page opens it, and the code typed there signs this browser in.
 // Nothing is sent to the runner until a code is submitted.
 async function setUpSignIn() {
@@ -931,7 +941,12 @@ async function setUpSignIn() {
       }
       const session = await signIn(runner, true, code);
       if (!session) {
-        note.textContent = signInOutcome === 'unreachable' ? 'The race runner could not be reached. Try again in a moment.' : 'That code was not accepted. Check it and try again.';
+        if (signInOutcome === 'unreachable') note.textContent = 'The race runner could not be reached. Try again in a moment.';
+        else {
+          // say what was received, without repeating it: its length, and five characters of its hash, which the
+          // person who issued the codes can compare with the ones on file
+          note.textContent = `That code was not accepted. You entered ${plural(code.length, 'character')} (fingerprint ${await fingerprint(code)}). A code is one unbroken run of letters, digits, - and _, with nothing before or after it.`;
+        }
         return;
       }
       dialog.close();

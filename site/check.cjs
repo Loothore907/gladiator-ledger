@@ -461,6 +461,10 @@ async function main() {
       await typed.fill('#judge-code', 'not-the-code');
       await typed.locator('#judge-go').click();
       await typed.waitForFunction(() => document.getElementById('judge-note').innerText.includes('not accepted'), null, { timeout: 8000 }).catch(() => problems.push('a wrong code typed into the sign-in box is not refused in plain words'));
+      // 'not-the-code' is 12 characters and its SHA-256 starts 8970b: the box says both, and never the code
+      const refusal = await typed.locator('#judge-note').innerText();
+      for (const part of ['12 characters', 'fingerprint 8970b']) if (!refusal.includes(part)) problems.push(`a refused code is not described (${part}): ${JSON.stringify(refusal)}`);
+      if (refusal.includes('not-the-code')) problems.push('the sign-in box repeated the refused code');
       if (await typed.locator('#live-go').count()) problems.push('a wrong code opened live races');
       await typed.fill('#judge-code', 'judge-invite');
       await typed.locator('#judge-go').click();
