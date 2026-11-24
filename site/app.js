@@ -240,12 +240,15 @@ async function chooseFlow(flow) {
   if (!mayLeave()) return;
   $('start-over').hidden = false;
   const mine = ++turn;
-  Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [], overrides: {} });
+  Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [], costs: new Map(), overrides: {} });
   shown.v = null;
   drawFlows();
-  const models = await ledger.modelsOnFlow(flow.test);
+  $('first-list').replaceChildren(); // the last workflow's models must not be clickable while this one loads
+  $('second-model').hidden = true;
+  const [models, costs] = await Promise.all([ledger.modelsOnFlow(flow.test), costsFor(flow.test)]);
   if (mine !== turn) return;
   state.models = models;
+  state.costs = costs;
   for (const m of models) if (m.display_name) names.set(m.model, m.display_name);
   $('step-models').hidden = false;
   $('step-verdict').hidden = true;
@@ -304,10 +307,12 @@ async function chooseFirst(model) {
   }
   const mine = ++turn;
   Object.assign(state, { a: model, b: null });
+  $('second-all').replaceChildren(); // the last model's pairings must not be choosable while this one's load
+  $('second-list').replaceChildren();
   shown.v = null;
   $('step-verdict').hidden = true;
   const partners = await ledger.partnersOnFlow(state.task, model);
-  const scores = await ledger.scoresOf([model, ...partners.map((p) => p.model)]);
+  const scores = await ledger.scoresOf([...new Set([model, ...partners.map((p) => p.model), ...availableModels().map((m) => m.model)])]);
   if (mine !== turn) return;
   state.partners = new Map(partners.map((p) => [p.model, p.pairs]));
   state.scores = new Map(scores.map((s) => [s.model, s]));
@@ -325,39 +330,137 @@ function onPaper(model) {
   return { gap, text: `${fixed(gap, 1)} points apart on paper, ranges ${overlap ? 'overlap' : 'do not overlap'}` };
 }
 
-// Second model: the opponents this page can answer for (they have played the first model on this flow), the ones
-// with the most head-to-head evidence first. Published scores only break ties and say how fair the match is.
+// ---- where a model sits: capability against cost, the two things that make a pairing a fair one ----------------
+//
+// Capability is the published Epoch Capabilities Index. Cost is what an attempt cost in Gladiator's own matches: on
+// this task where the model has played it, otherwise on the other tasks it has played (and said so). Two models
+// close on both are a first-choice pairing: a match between them is the one worth running, because neither the
+// price nor the capability decides it before it starts. This only suggests who to pair. It never says who is better.
+
+const COST_ON_TASK = `MATCH (tv:TestVersion {key: $version})<-[:USED]-(mt:Match)<-[:IN]-(x:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded
+RETURN m.name AS model, count(x) AS attempts, avg(x.cost_usd) AS cost`;
+const COST_ANYWHERE = `MATCH (mt:Match)<-[:IN]-(x:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded
+RETURN m.name AS model, count(x) AS attempts, avg(x.cost_usd) AS cost`;
+const CLOSE_COST = 3; // within three times the cost per attempt, either way
+
+async function costsFor(task) {
+  const version = await ledger.currentVersion(task);
+  const [here, anywhere] = await Promise.all([ask(COST_ON_TASK, { version }), ask(COST_ANYWHERE, {})]);
+  const out = new Map(anywhere.filter((x) => x.cost > 0).map((x) => [x.model, { cost: x.cost, attempts: x.attempts, basis: 'other tasks' }]));
+  for (const x of here) if (x.cost > 0) out.set(x.model, { cost: x.cost, attempts: x.attempts, basis: 'this task' });
+  return out;
+}
+
+// How one model sits against the first: 'first' (close on both), 'capability', 'cost', 'far', or 'unplaced'.
+function placeOf(model) {
+  const paper = onPaper(model);
+  const [mine, theirs] = [state.costs.get(state.a), state.costs.get(model)];
+  const [s1, s2] = [state.scores.get(state.a), state.scores.get(model)];
+  const ratio = mine && theirs ? Math.max(mine.cost, theirs.cost) / Math.min(mine.cost, theirs.cost) : null;
+  const capClose = Boolean(s1 && s2 && s2.low <= s1.high && s1.low <= s2.high);
+  const costClose = ratio !== null && ratio <= CLOSE_COST;
+  const group = paper.gap === null || ratio === null ? 'unplaced' : capClose && costClose ? 'first' : capClose ? 'capability' : costClose ? 'cost' : 'far';
+  const costText =
+    ratio === null
+      ? 'no cost measured yet'
+      : (ratio < 1.25 ? 'about the same cost per attempt' : theirs.cost > mine.cost ? `${fixed(ratio, 1)}× the cost per attempt` : `${fixed(ratio, 1)}× cheaper per attempt`) +
+        ` ($${fixed(theirs.cost, 4)}${theirs.basis === 'this task' ? '' : ', measured on other tasks'})`;
+  return { group, gap: paper.gap, ratio, text: `${paper.text} · ${costText}` };
+}
+
+const GROUPS = [
+  ['first', 'First-choice pairings: close in capability and in cost'],
+  ['capability', 'Close in capability, not in cost'],
+  ['cost', 'Close in cost, not in capability'],
+  ['far', 'Further apart on both'],
+  ['unplaced', 'Not placed: no published score or no cost measured yet'],
+];
+
+// The picture: every placed model by cost per attempt (across, log scale) and Epoch score (up). The first model is
+// marked, the band around it is "close on both", and a dot can be clicked to choose that model.
+function pairingChart(others) {
+  if (!state.costs.get(state.a) || !state.scores.get(state.a)) return ''; // the first model cannot be placed
+  const placed = [{ model: state.a, me: true }, ...others.filter((m) => m.place.group !== 'unplaced')].map((m) => ({ ...m, cost: state.costs.get(m.model).cost, score: state.scores.get(m.model) }));
+  if (placed.length < 2) return '';
+  const [W, H, L, R, T, B] = [720, 300, 54, 150, 16, 40];
+  const lx = (c) => Math.log10(c);
+  // wide enough for every model and for the whole band around the first one
+  const xs = [...placed.map((m) => lx(m.cost)), lx(placed[0].cost / CLOSE_COST), lx(placed[0].cost * CLOSE_COST)];
+  const [x0, x1] = [Math.min(...xs) - 0.15, Math.max(...xs) + 0.15];
+  const [y0, y1] = [Math.min(...placed.map((m) => m.score.low)) - 2, Math.max(...placed.map((m) => m.score.high)) + 2];
+  const X = (c) => L + ((lx(c) - x0) / (x1 - x0)) * (W - L - R);
+  const Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const me = placed[0];
+  const ticks = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5].filter((c) => lx(c) > x0 && lx(c) < x1);
+  // labels sit to the right of their dot; ones that would overlap are nudged down
+  const labels = placed.map((m) => ({ m, x: X(m.cost) + 10, y: Y(m.score.score) + 4 })).sort((p, q) => p.y - q.y);
+  for (let i = 1; i < labels.length; i += 1) for (let j = 0; j < i; j += 1) if (Math.abs(labels[i].x - labels[j].x) < 120 && labels[i].y - labels[j].y < 13) labels[i].y = labels[j].y + 13;
+  const cls = (m) => (m.me ? 'me' : m.place.group === 'first' ? 'first' : 'other');
+  return el(
+    'figure',
+    { class: 'pairing-chart', id: 'second-chart' },
+    svg(
+      'svg',
+      { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Models by cost per attempt and published capability score. ${shortName(state.a)} is marked; models inside the band are close to it on both.` },
+      svg('rect', { x: Math.max(L, X(me.cost / CLOSE_COST)), y: Y(me.score.high), width: Math.min(W - R, X(me.cost * CLOSE_COST)) - Math.max(L, X(me.cost / CLOSE_COST)), height: Y(me.score.low) - Y(me.score.high), class: 'pc-band' }),
+      svg('line', { x1: L, y1: H - B, x2: W - R, y2: H - B, class: 'pc-axis' }),
+      svg('line', { x1: L, y1: T, x2: L, y2: H - B, class: 'pc-axis' }),
+      ticks.map((c) => [svg('line', { x1: X(c), y1: H - B, x2: X(c), y2: H - B + 4, class: 'pc-axis' }), svg('text', { x: X(c), y: H - B + 16, 'text-anchor': 'middle', class: 'pc-tick' }, `$${c}`)]),
+      svg('text', { x: (L + W - R) / 2, y: H - 6, 'text-anchor': 'middle', class: 'pc-title' }, 'Cost per attempt in our own matches (cheaper ← → dearer)'),
+      svg('text', { x: 14, y: (T + H - B) / 2, 'text-anchor': 'middle', transform: `rotate(-90 14 ${(T + H - B) / 2})`, class: 'pc-title' }, 'Epoch Capabilities Index'),
+      [y0 + 2, (y0 + y1) / 2, y1 - 2].map((v) => svg('text', { x: L - 6, y: Y(v) + 4, 'text-anchor': 'end', class: 'pc-tick' }, fixed(v, 0))),
+      placed.map((m) => svg('line', { x1: X(m.cost), y1: Y(m.score.low), x2: X(m.cost), y2: Y(m.score.high), class: `pc-range ${cls(m)}` })),
+      placed.map((m) =>
+        svg(
+          'circle',
+          { cx: X(m.cost), cy: Y(m.score.score), r: m.me ? 8 : 6, class: `pc-dot ${cls(m)}${m.model === state.b ? ' chosen' : ''}`, ...(m.me ? {} : { tabindex: 0, role: 'button', onclick: () => chooseSecond(m.model) }) },
+          svg('title', null, m.me ? `${shortName(m.model)}: your first model` : `${shortName(m.model)}: ${m.place.text}. Click to choose.`),
+        ),
+      ),
+      labels.map(({ m, x, y }) => svg('text', { x, y, class: `pc-label ${cls(m)}` }, shortName(m.model) + (m.me ? ' (first model)' : ''))),
+    ),
+    el('figcaption', null, `The shaded band is "close to ${shortName(state.a)} on both": published score ranges that overlap, and a cost per attempt within ${CLOSE_COST}×. Filled dots inside it are the first-choice pairings. The picture suggests who to pair; it does not say who does the task better. That is what the match is for.`),
+  );
+}
+
+// Second model: the first-choice pairings as cards (close to the first model in capability and in cost), a picture
+// of where every model sits, and one list of every other model that can be chosen, grouped by how close it is.
 function drawSecond() {
   $('second-model').hidden = false;
-  const mine = state.scores.get(state.a);
-  // every other model tested on this flow, in one list: the ones that have played the first model come first
-  // (most head-to-head evidence first), then the ones that never met it
   const others = availableModels()
     .filter((m) => m.model !== state.a)
-    .map((m) => ({ ...m, paper: onPaper(m.model), met: state.partners.get(m.model) || 0 }))
-    .sort((x, y) => y.met - x.met || (x.paper.gap ?? Infinity) - (y.paper.gap ?? Infinity) || (x.model < y.model ? -1 : 1));
-  const met = others.filter((m) => m.met);
-  const enough = met.filter((m) => m.met >= rules.min_pairs).length;
+    .map((m) => ({ ...m, place: placeOf(m.model), met: state.partners.get(m.model) || 0 }))
+    .sort((x, y) => y.met - x.met || (x.place.gap ?? Infinity) - (y.place.gap ?? Infinity) || (x.model < y.model ? -1 : 1));
+  const firsts = others.filter((m) => m.place.group === 'first');
+  const mine = state.scores.get(state.a);
+  const cost = state.costs.get(state.a);
   $('second-intro').textContent =
-    `All ${plural(others.length, 'other model')} you can choose. ${met.length} ${met.length === 1 ? 'has' : 'have'} played ${shortName(state.a)} on it` +
-    (met.length ? ` (${enough} with the ${rules.min_pairs} judged pairs a verdict needs)` : '') +
-    `; the rest have not, so those pairs have no verdict yet. ` +
-    (mine ? `${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index; a close score only makes the match fair.` : '');
+    (mine && cost
+      ? `${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index and costs about $${fixed(cost.cost, 4)} an attempt in our matches${cost.basis === 'this task' ? ' on this task' : ' (on other tasks; it has not played this one)'}. `
+      : `${shortName(state.a)} cannot be placed yet (no published score, or no cost measured), so no pairing can be called close. `) +
+    (firsts.length
+      ? `${plural(firsts.length, 'model')} ${firsts.length === 1 ? 'is' : 'are'} close to it on both: the first-choice pairings below. Any other model can still be chosen from the list under them.`
+      : `No model is close to it on both, so there is no first-choice pairing. Choose any model from the list below.`);
+  const head = (m) =>
+    (m.met
+      ? `${plural(m.met, 'judged pair')} against ${shortName(state.a)}: ${m.met >= rules.min_pairs ? 'enough for a verdict' : 'too few for a verdict yet'}`
+      : `no head-to-head with ${shortName(state.a)} yet: no verdict, each model's own record only`);
+  // the cards: the first-choice pairings, and the chosen model if it was picked from the list
+  const cards = [...firsts, ...others.filter((m) => m.model === state.b && m.place.group !== 'first')];
   $('second-list').className = 'options';
-  $('second-list').replaceChildren(
-    ...others.map((m) =>
-      option(
-        'second',
-        m.model,
-        m.model === state.b,
-        false,
-        (m.met
-          ? `${plural(m.met, 'judged pair')} against ${shortName(state.a)}: ${m.met >= rules.min_pairs ? 'enough for a verdict' : 'too few for a verdict yet'} · ${m.paper.text}`
-          : `no head-to-head with ${shortName(state.a)} yet: no verdict, each model's own record only`) + liveTag(m.model),
-        () => chooseSecond(m.model),
-      ),
-    ),
+  $('second-list').replaceChildren(...cards.map((m) => option('second', m.model, m.model === state.b, false, `${head(m)} · ${m.place.text}${liveTag(m.model)}`, () => chooseSecond(m.model))));
+  $('second-chart-box').replaceChildren(pairingChart(others));
+  const all = $('second-all');
+  all.replaceChildren(
+    el('option', { value: '', selected: !state.b }, `All ${plural(others.length, 'other model')} you can choose…`),
+    ...GROUPS.map(([group, label]) => {
+      const inGroup = others.filter((m) => m.place.group === group);
+      return inGroup.length ? el('optgroup', { label }, inGroup.map((m) => el('option', { value: m.model, selected: m.model === state.b }, `${shortName(m.model)}: ${head(m).split(':')[0]}${m.place.ratio && m.place.ratio >= 1.25 ? `, ${fixed(m.place.ratio, 1)}× ${cost && state.costs.get(m.model).cost > cost.cost ? 'dearer' : 'cheaper'}` : ''}${liveTag(m.model)}`))) : '';
+    }),
   );
+  all.onchange = () => all.value && chooseSecond(all.value);
 }
 
 // Worth testing next: models close on paper that have NOT played the first one on this flow. The page cannot run
