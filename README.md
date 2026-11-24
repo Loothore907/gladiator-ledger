@@ -50,7 +50,7 @@ All three walk the same loop over the same graph and give the same answers (the 
 command line in CI).
 
 ### 1. In your browser
-**Live: https://loothore907.github.io/gladiator-ledger/** (published from this repository after every change that
+**Live: https://ledger.gladiatorbench.com/** (published from this repository after every change that
 passes the checks). The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
 the loop: describe a flow, pick two models, choose whose tolerance applies, read the verdict, download the spec. Every
 scenario behind a verdict can be replayed as a race: both models on the same world, step by step, at the pace they
