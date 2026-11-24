@@ -587,7 +587,7 @@ async function main() {
         await first.waitForFunction(() => document.getElementById('live-result').innerText.includes('the first these two have played'), null, { timeout: 10000 }).catch(() => problems.push('a first race between two models is not described as the first evidence'));
         await first.waitForFunction(() => /met once/.test(document.getElementById('band-live')?.innerText || ''), null, { timeout: 6000 }).catch(() => problems.push('after a first live race the no-verdict band does not say the two have now met live'));
         if (!(await first.locator('#live-history').innerText()).includes('all that is known')) problems.push('the live history of a pair with no record does not say it is all that is known');
-        if ((await first.locator('#pair-graph circle.live').count()) !== 1) problems.push('a first live race is not drawn in the graph picture of a pair with no record');
+        await first.waitForFunction(() => document.querySelectorAll('#pair-graph circle.live').length === 1, null, { timeout: 6000 }).catch(() => problems.push('a first live race is not drawn in the graph picture of a pair with no record'));
         if (runner.asked.a !== neverMet.a || runner.asked.b !== neverMet.b) problems.push(`the page raced ${runner.asked.a} vs ${runner.asked.b}, not the pair chosen in step 2`);
         if (!(await first.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
         await first.close();
