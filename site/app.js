@@ -681,6 +681,9 @@ function findRunner() {
       base = response.ok ? (await response.json()).runner : null;
     }
     if (!base) return null;
+    // The published runner is only contacted for a visitor who holds an invitation or is already signed in.
+    // Everyone else's page stays inside its own folder: nothing is sent anywhere, and the runner is not woken.
+    if (!asked && !new URLSearchParams(location.search).get('invite') && !stored.get()) return null;
     base = base.replace(/\/$/, '');
     try {
       const options = await (await fetch(`${base}/options`)).json();
