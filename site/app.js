@@ -811,10 +811,14 @@ const stored = {
   },
 };
 let sessionPromise;
+let signInOutcome = 'none'; // 'signed' | 'refused' (the runner said no) | 'unreachable' | 'none' (nothing to sign in with)
 function signIn(runner, again = false) {
   if (again) sessionPromise = null;
   sessionPromise ||= (async () => {
-    if (!runner.options.needs_code) return { token: null, races_left: null };
+    if (!runner.options.needs_code) {
+      signInOutcome = 'signed';
+      return { token: null, races_left: null };
+    }
     const post = async (ask) => {
       const response = await fetch(`${runner.base}/signin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ask) });
       return response.ok ? response.json() : null;
@@ -822,6 +826,7 @@ function signIn(runner, again = false) {
     const url = new URL(location.href);
     const invite = url.searchParams.get('invite');
     let session = null;
+    const tried = Boolean(invite || stored.get());
     try {
       if (invite) {
         session = await post({ invite });
@@ -830,12 +835,41 @@ function signIn(runner, again = false) {
       }
       if (!session && stored.get()) session = await post({ token: stored.get() });
     } catch {
+      signInOutcome = 'unreachable';
       return null; // the runner did not answer
     }
     stored.set(session ? session.token : null);
+    signInOutcome = session ? 'signed' : tried ? 'refused' : 'none';
     return session;
   })();
   return sessionPromise;
+}
+
+// A visitor who arrives by an invitation link (or comes back signed in) is told at once, at the top of the
+// page, whether live races are open to them. A link that was not accepted says so: it never quietly turns
+// into the public page.
+async function announceLive() {
+  const banner = $('live-banner');
+  const runner = await findRunner();
+  if (!runner) return; // an ordinary visit: nothing to announce, nothing contacted
+  const show = (text, refused = false) => {
+    banner.textContent = text;
+    banner.classList.toggle('refused', refused);
+    banner.hidden = false;
+  };
+  if (!runner.options) {
+    show(`Live races: the race runner at ${runner.base} is not answering right now. Recorded races still play. Reload the page to try again.`, true);
+    return;
+  }
+  const session = await signIn(runner);
+  if (session) {
+    const left = session.races_left === null || session.races_left === undefined ? '' : ` ${plural(session.races_left, 'live race')} left on this sign-in.`;
+    show(`You are signed in for live races.${left} Pick a workflow and two models below, then press "Race them live".`);
+  } else if (signInOutcome === 'refused') {
+    show('This invitation link was not accepted by the race runner, so you are seeing the public page. Check that the link is complete and exactly as it was given to you. Recorded races still play.', true);
+  } else if (signInOutcome === 'unreachable') {
+    show('Live races: the race runner could not be reached to sign you in. Recorded races still play. Reload the page to try again.', true);
+  }
 }
 
 const providerName = (id) => ({ openrouter: 'OpenRouter', anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google' })[id] || id;
@@ -1253,6 +1287,14 @@ function drawVerdict(spec, v) {
 
   const copyNote = el('span', { class: 'note', role: 'status', 'aria-live': 'polite' });
   const body = [
+    signInOutcome === 'signed'
+      ? el(
+          'p',
+          { class: 'live-jump' },
+          el('button', { type: 'button', id: 'live-jump', onclick: () => $('live').scrollIntoView({ behavior: 'smooth', block: 'center' }) }, 'Race these two live ↓'),
+          el('span', { class: 'note' }, ' The record comes first; the live race is just below it.'),
+        )
+      : null,
     fightCard(spec, v),
     d.notes.length ? el('ul', { class: 'notes' }, d.notes.map((n) => el('li', null, plainNames(n, [d.a, d.b])))) : null,
 
@@ -1434,6 +1476,7 @@ async function start() {
     status.classList.add('error');
     return;
   }
+  announceLive();
   $('flow-text').disabled = false;
   $('flow-go').disabled = false;
   $('example').disabled = false;
