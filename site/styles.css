@@ -381,3 +381,14 @@ figure.graph figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted
 @keyframes gdraw { to { stroke-dashoffset: 0; } }
 @keyframes gdraw-live { to { stroke-dashoffset: 0; stroke-dasharray: 4 4; } }
 #live .band { margin: 14px 0 10px; }
+.batch-lane { margin: 10px 0; }
+.batch-lane-name { margin: 0 0 4px; }
+.batch-lane.a .batch-lane-name strong { color: var(--side-a); } .batch-lane.b .batch-lane-name strong { color: var(--side-b); }
+.bsqs { display: flex; flex-wrap: wrap; gap: 4px; }
+.bsq { width: 24px; height: 24px; border-radius: 5px; border: 1.5px dashed var(--line); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.bsq.pass { border: 1.5px solid var(--win); background: var(--win); color: var(--win-ink); }
+.bsq.fail { border: 1.5px solid var(--stop); background: var(--stop-soft); color: var(--stop); }
+.bsq.skip { border-style: solid; color: var(--muted); }
+.batch-table { margin-top: 6px; }
+.batch-list { margin: 0; padding-left: 20px; font-size: 14.5px; }
+.race-controls select { max-width: 100%; }
