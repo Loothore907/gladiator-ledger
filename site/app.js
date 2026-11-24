@@ -208,7 +208,33 @@ function firstSentence(text) {
   return cut > 0 ? text.slice(0, cut + 1) : text;
 }
 
+// A live race result that has not been downloaded is the one thing on this page that cannot be got back: a
+// recorded verdict can always be drawn again. Anything that would replace it asks first.
+let unsavedLive = false;
+function mayLeave() {
+  if (!unsavedLive) return true;
+  const leave = window.confirm('You have a live race result on screen that you have not downloaded. Leave it? (Cancel, then use "Download the live race report" to keep it.)');
+  if (leave) unsavedLive = false;
+  return leave;
+}
+
+// Back to the start: nothing chosen, nothing on screen. The sign-in is kept.
+function startOver() {
+  if (!mayLeave()) return;
+  turn += 1;
+  Object.assign(state, { task: null, flow: null, a: null, b: null, partners: new Map(), models: [], overrides: {} });
+  $('step-models').hidden = true;
+  $('step-verdict').hidden = true;
+  $('verdict-body').replaceChildren();
+  $('start-over').hidden = true;
+  $('flow-text').value = '';
+  searchFlows();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 async function chooseFlow(flow) {
+  if (!mayLeave()) return;
+  $('start-over').hidden = false;
   const mine = ++turn;
   Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [], overrides: {} });
   drawFlows();
@@ -253,6 +279,10 @@ function drawFirst() {
 }
 
 async function chooseFirst(model) {
+  if (!mayLeave()) {
+    drawFirst(); // put the choice back as it was
+    return;
+  }
   const mine = ++turn;
   Object.assign(state, { a: model, b: null });
   $('step-verdict').hidden = true;
@@ -306,6 +336,19 @@ function drawSecond() {
         () => chooseSecond(m.model),
       ),
     ),
+  );
+  // Models tested on this flow that have never met the first one. There is no verdict for such a pair, and the
+  // page says so; they can still be picked, to see each one's own record and (signed in) to race them live.
+  const unmet = state.models
+    .filter((m) => m.model !== state.a && !state.partners.has(m.model))
+    .sort((x, y) => y.pairs - x.pairs || (x.model < y.model ? -1 : 1));
+  $('unmet-intro').hidden = !unmet.length;
+  $('unmet-intro').textContent = unmet.length
+    ? `${plural(unmet.length, 'more model')} tested on this flow ${unmet.length === 1 ? 'has' : 'have'} never met ${shortName(state.a)} on it. ` +
+      'No verdict exists for these pairs. Pick one to see each model\'s own record on this task, and to race them live if you are signed in.'
+    : '';
+  $('unmet-list').replaceChildren(
+    ...unmet.map((m) => option('second', m.model, m.model === state.b, false, `no head-to-head with ${shortName(state.a)} yet`, () => chooseSecond(m.model), true)),
   );
 }
 
@@ -362,7 +405,10 @@ async function drawSuggestions(mine = turn) {
 }
 
 async function chooseSecond(model) {
-  if (!state.partners.has(model)) return;
+  if (!mayLeave()) {
+    drawSecond(); // put the choice back as it was
+    return;
+  }
   state.b = model;
   drawSecond();
   await showVerdict(true);
@@ -373,12 +419,60 @@ async function showVerdict(scroll = false) {
   const mine = ++turn;
   const overrides = Object.keys(state.overrides).length ? state.overrides : null;
   const judged = await ledger.verdict(state.task, state.a, state.b, null, rules.good_enough, rules.min_pairs, state.profile, overrides);
+  if (judged.verdict === 'no data') {
+    // the two have never met on this task: no verdict, and no pretending there is one
+    const own = await ask(OWN_RECORD, { version: judged.version, a: state.a, b: state.b });
+    if (mine !== turn) return;
+    drawNoRecord(judged, own);
+    drawLive(judged);
+    $('step-verdict').hidden = false;
+    if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const spec = await ledger.build({ ...judged, suite: null });
   if (mine !== turn) return;
   drawVerdict(spec, judged);
   drawLive(judged);
   $('step-verdict').hidden = false;
   if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// What each of two models did on a task on its own account, whoever it played: for a pair that never met.
+const OWN_RECORD = `MATCH (tv:TestVersion {key: $version})<-[:USED]-(mt:Match)<-[:IN]-(x:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded AND m.name IN [$a, $b]
+RETURN m.name AS model, count(x) AS attempts, sum(CASE WHEN x.passed THEN 1 ELSE 0 END) AS passed,
+       avg(x.cost_usd) AS cost_per_attempt`;
+
+// Two models that have never met on this task: say so, show what each did against others, and leave the
+// head-to-head to a match (a live race, for a signed-in visitor).
+function drawNoRecord(v, own) {
+  const row = (name) => {
+    const r = own.find((x) => x.model === name);
+    return el(
+      'tr',
+      null,
+      el('th', { scope: 'row' }, modelLabel(name)),
+      el('td', null, r ? `${r.passed} of ${r.attempts} (${percent(r.passed / r.attempts)})` : 'never played this task'),
+      el('td', null, r ? `$${fixed(r.cost_per_attempt, 4)}` : '-'),
+    );
+  };
+  $('verdict-body').replaceChildren(
+    el(
+      'div',
+      { class: 'band even', id: 'verdict-band' },
+      el('p', { class: 'band-kind' }, 'No head-to-head yet'),
+      el('p', { class: 'headline', id: 'verdict-headline' }, `${shortName(v.a)} and ${shortName(v.b)} have never met on this task, so there is no verdict.`),
+      el('p', { class: 'small' }, 'A verdict needs the two models to play the same generated worlds. What each did against other opponents is below; it does not say which of these two does the task better.'),
+    ),
+    el(
+      'table',
+      { class: 'own' },
+      el('caption', null, 'Each model\'s own record on this task, against other opponents'),
+      el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Model'), el('th', { scope: 'col' }, 'Attempts passed'), el('th', { scope: 'col' }, 'Cost per attempt'))),
+      el('tbody', null, row(v.a), row(v.b)),
+    ),
+    el('div', { id: 'live', class: 'race live' }),
+  );
 }
 
 // ---- step 3: verdict and spec ---------------------------------------------------------------------------------
@@ -991,12 +1085,25 @@ async function drawLive(v) {
     return;
   }
   // Any two models on the runner's list can be raced. The pair being looked at is the starting choice where it is on it.
-  const start = [models.includes(v.a) ? v.a : models[0]];
-  start.push(models.includes(v.b) && v.b !== start[0] ? v.b : models.find((m) => m !== start[0]));
+  // A model on screen that is not on the live list is never swapped for another one: its place is left empty,
+  // with a line saying why, until the visitor chooses.
+  const missing = [v.a, v.b].filter((m) => !models.includes(m));
   const pick = (id, label, chosen) =>
-    el('select', { id, 'aria-label': label }, models.map((m) => el('option', { value: m, selected: m === chosen }, shortName(m))));
-  const pickA = pick('live-a', 'First model', start[0]);
-  const pickB = pick('live-b', 'Second model', start[1]);
+    el(
+      'select',
+      { id, 'aria-label': label },
+      models.includes(chosen) ? null : el('option', { value: '', selected: true }, 'choose a model…'),
+      models.map((m) => el('option', { value: m, selected: m === chosen }, shortName(m))),
+    );
+  const pickA = pick('live-a', 'First model', v.a);
+  const pickB = pick('live-b', 'Second model', v.b);
+  const absent = el(
+    'p',
+    { class: 'note', id: 'live-absent', hidden: !missing.length },
+    missing.length
+      ? `${missing.map(shortName).join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on the live list (small models only for now), so ${missing.length === 1 ? 'it' : 'they'} cannot be raced live. Choose from the list to race a different pair.`
+      : '',
+  );
   const level = el('select', { id: 'live-level', 'aria-label': 'Difficulty' }, offered.levels.map((x) => el('option', { value: x, selected: x === 'standard' }, `${x} difficulty`)));
   const profile = el('select', { id: 'live-profile', 'aria-label': 'What matters most' }, runner.options.profiles.map((x) => el('option', { value: x, selected: x === 'budget' }, `${x} scoring`)));
   const go = el('button', { type: 'button', id: 'live-go' }, 'Race them live');
@@ -1022,9 +1129,9 @@ async function drawLive(v) {
   let recordFor = v;
   const readRecord = async () => {
     const [a, b] = [pickA.value, pickB.value];
-    go.disabled = a === b;
-    if (a === b) {
-      prior.textContent = 'Choose two different models.';
+    go.disabled = !a || !b || a === b;
+    if (go.disabled) {
+      prior.textContent = !a || !b ? 'Choose the two models to race.' : 'Choose two different models.';
       return;
     }
     recordFor = a === v.a && b === v.b ? v : await ledger.verdict(v.task, a, b, null, rules.good_enough, rules.min_pairs, state.profile, null);
@@ -1079,9 +1186,22 @@ async function drawLive(v) {
       say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. A live result is kept apart from the recorded evidence the verdict rests on.'));
       const liveText = liveReport(record, a, b, task, r);
       window.ledgerDemo.lastLiveReport = liveText;
+      unsavedLive = true;
       say.append(
         ' ',
-        el('button', { type: 'button', id: 'download-live', class: 'quiet small', onclick: () => download(liveText, 'live-race-report.md') }, 'Download the live race report'),
+        el(
+          'button',
+          {
+            type: 'button',
+            id: 'download-live',
+            class: 'quiet small',
+            onclick: () => {
+              download(liveText, 'live-race-report.md');
+              unsavedLive = false;
+            },
+          },
+          'Download the live race report',
+        ),
       );
       // the result joins the graph, as its own kind of node, and the picture is drawn from the graph again
       await ask(ADD_LIVE, { run: record.body.run_id, winner, seal: record.sha256, at: Date.now(), version: r.version, a, b });
@@ -1099,7 +1219,7 @@ async function drawLive(v) {
       }
     }
   });
-  box.replaceChildren(title, prior, el('div', { class: 'race-controls' }, pickA, el('span', { class: 'note' }, 'vs'), pickB, level, profile, go), money, stage, say, grown);
+  box.replaceChildren(title, absent, prior, el('div', { class: 'race-controls' }, pickA, el('span', { class: 'note' }, 'vs'), pickB, level, profile, go), money, stage, say, grown);
 }
 const spec_task = (test) => test.split('/').pop();
 
@@ -1568,6 +1688,7 @@ async function start() {
   $('flow-go').disabled = false;
   $('example').disabled = false;
   $('example').addEventListener('click', showExample);
+  $('start-over').addEventListener('click', startOver);
   let timer = 0;
   $('flow-text').addEventListener('input', () => {
     clearTimeout(timer);

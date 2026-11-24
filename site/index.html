@@ -47,6 +47,7 @@
     </form>
     <p class="note example-row">New here? <button type="button" id="example" class="quiet small" disabled>Show me an example</button> walks all three steps for the pair of models with the most evidence.</p>
     <p id="flow-note" class="note" role="status" aria-live="polite"></p>
+    <p class="start-over"><button type="button" id="start-over" class="quiet small" hidden>Start over</button></p>
     <div id="flow-cards" class="cards"></div>
   </section>
 
@@ -61,6 +62,8 @@
       <legend>Second model</legend>
       <p id="second-intro" class="note"></p>
       <div id="second-list" class="options"></div>
+      <p id="unmet-intro" class="note" hidden></p>
+      <div id="unmet-list" class="options compact"></div>
       <details id="suggest" class="suggest">
         <summary id="suggest-summary">Close on paper, not matched on this flow yet</summary>
         <p id="suggest-intro" class="note"></p>

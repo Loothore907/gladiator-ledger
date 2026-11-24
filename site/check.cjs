@@ -305,6 +305,28 @@ async function main() {
       }
     }
 
+    // A pair that has never met on a task can still be picked: the result says there is no verdict, shows each
+    // model's own record, and names no winner. (Looked for on every workflow: the data has such pairs.)
+    let unmetSeen = 0;
+    for (const card of await page.locator('#flow-cards button').all()) {
+      await card.click();
+      await page.waitForSelector('#first-list input');
+      for (const first of await page.locator('#first-list input').all()) {
+        await first.check();
+        await page.waitForSelector('#second-list input, #unmet-list input');
+        const unmet = page.locator('#unmet-list input');
+        if (!(await unmet.count())) continue;
+        await unmet.first().check();
+        await page.waitForFunction(() => !document.getElementById('step-verdict').hidden && /never met/.test(document.getElementById('verdict-headline')?.innerText || ''), null, { timeout: 8000 }).catch(() => problems.push('a pair that never met did not get a plain "no verdict" result'));
+        if ((await page.locator('table.own tbody tr').count()) !== 2) problems.push('the no-verdict result does not show each model\'s own record');
+        if (await page.locator('#verdict-band.win').count()) problems.push('a pair that never met was given a winner');
+        unmetSeen += 1;
+        break;
+      }
+      if (unmetSeen) break;
+    }
+    if (!unmetSeen) problems.push('no pair that never met was found to check (the data should have some)');
+
     // The example button must walk all three steps on its own and end on a drawn verdict with enough evidence.
     await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
     await page.locator('#example').click();
@@ -439,7 +461,47 @@ async function main() {
       if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
       await live.locator('#live-a').selectOption(NEWCOMER);
       if (!(await live.locator('#live-go').isDisabled())) problems.push('the same model can be raced against itself');
+      // A live result that has not been downloaded is not thrown away by a stray click: the page asks first.
+      let asked = 0;
+      let answer = 'dismiss';
+      live.on('dialog', (dialog) => {
+        asked += 1;
+        return answer === 'accept' ? dialog.accept() : dialog.dismiss();
+      });
+      await live.locator('#flow-cards button').first().click();
+      if (asked !== 1) problems.push('picking another workflow over an undownloaded live result did not ask first');
+      if (!(await live.locator('#live-result').innerText()).startsWith('Live,')) problems.push('saying no to leaving still threw the live result away');
+      await live.locator('#start-over').click();
+      if (asked !== 2 || (await live.locator('#step-verdict').isHidden())) problems.push('Start over did not ask before dropping a live result, or dropped it anyway');
+      answer = 'accept';
+      await live.locator('#start-over').click();
+      await live.waitForFunction(() => document.getElementById('step-verdict').hidden && document.getElementById('step-models').hidden, null, { timeout: 5000 }).catch(() => problems.push('Start over did not clear the page'));
+      if (!(await live.locator('#live-banner').innerText()).includes('signed in')) problems.push('Start over signed the visitor out');
+      await live.locator('#flow-cards button').first().click();
+      if (asked !== 3) problems.push('the page asked again about a live result that was already let go');
       await live.close();
+
+      // A model on screen that is not on the live list is never swapped for another one: its place stays empty,
+      // the page says why, and nothing can be raced until the visitor chooses.
+      const other = await context.newPage();
+      await other.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+      await other.evaluate(() => window.ledgerDemo.ready());
+      await other.locator('#flow-cards button', { hasText: pair.task.includes('refund') ? 'Refund' : pair.task.includes('incident') ? 'Incident' : pair.task.includes('access') ? 'Access' : 'Inventory' }).first().click();
+      await other.locator(`#first-list input[value="${pair.a}"]`).check();
+      await other.waitForSelector('#second-list input');
+      const offList = await other.locator('#second-list input').evaluateAll((inputs, b) => inputs.map((i) => i.value).find((value) => value !== b), pair.b);
+      if (!offList) problems.push('no second model off the live list was found to check');
+      else {
+        await other.locator(`#second-list input[value="${offList}"]`).check();
+        await other.waitForSelector('#live-go', { timeout: 8000 });
+        if ((await other.locator('#live-b').inputValue()) !== '') problems.push('a model that is not on the live list was swapped for another one');
+        if ((await other.locator('#live-a').inputValue()) !== pair.a) problems.push('the model that is on the live list was not kept');
+        if (!(await other.locator('#live-absent').isVisible())) problems.push('the page does not say that a model on screen cannot be raced live');
+        if (!(await other.locator('#live-go').isDisabled())) problems.push('a race can be started before the missing model is replaced');
+        await other.locator('#live-b').selectOption(pair.b);
+        if (await other.locator('#live-go').isDisabled()) problems.push('choosing a model from the live list did not make the race available');
+      }
+      await other.close();
 
       // An invitation the runner does not accept is said so at the top: never a silent fall back to the public page.
       const wrong = await browser.newPage();
