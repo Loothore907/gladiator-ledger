@@ -74,14 +74,15 @@ function fakeRunner(models, extra) {
   const json = (res, status, value) => res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }).end(JSON.stringify(value));
   let races = 3;
   const run = []; // the live races this stand-in has 'run', as the real runner lists them
+  const batches = []; // and its batches
   const server = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
     if (req.url === '/options') {
       const tasks = ['refund-queue', 'access-review', 'incident-triage', 'inventory-transfer'].map((id) => ({ id, name: id, levels: ['easy', 'standard'] }));
       const budgets = [{ provider: 'openrouter', limit_usd: 30, left_usd: 30 - (3 - races) * 0.0055 }, { provider: 'google', limit_usd: 20, left_usd: 0.1 }];
-      return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true });
+      return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }] }) });
     }
-    if (req.url === '/races') return json(res, 200, { races: run });
+    if (req.url === '/races') return json(res, 200, { races: run, batches });
     if (!['/race', '/signin'].includes(req.url) || req.method !== 'POST') return res.writeHead(404, cors).end();
     let body = '';
     req.on('data', (chunk) => (body += chunk));
@@ -95,6 +96,26 @@ function fakeRunner(models, extra) {
       }
       server.asked = ask;
       if (ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
+      if (ask.runs > 1) {
+        // a batch: each attempt as it ends, then the facts of the whole batch. Side A fails its third attempt.
+        if (ask.runs !== 10) return json(res, 400, { error: 'A batch must be one of these sizes: 10.' });
+        res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
+        const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
+        const same = ask.a === ask.b;
+        for (let n = 1; n <= 10; n += 1) {
+          send('step', { side: 'A', attempt: n, tool_name: 'never_sent_by_a_real_runner' });
+          send('attempt_end', { side: 'A', attempt: n, passed: n !== 3, termination: 'session_ended' });
+          send('attempt_end', { side: 'B', attempt: n, passed: true, termination: 'session_ended' });
+        }
+        const scenarios = Array.from({ length: 10 }, (_, i) => ({ a_passed: i !== 2, b_passed: true, winner: i === 2 ? 'B' : i < 6 ? 'A' : i < 8 ? 'B' : 'tie' }));
+        const batch = { run_id: `live-batch-${batches.length + 1}`, seal: 'fedcba9876543210', task: ask.task, a: ask.a, b: ask.b, same_model: same, runs: 10, difficulty: ask.difficulty, profile: ask.profile, spent_usd: 0.0412,
+          a_attempts: 10, a_passed: 9, a_not_run: 0, a_cost_usd: 0.021, a_seconds: 31, a_faults: { wrong: 1 }, a_endings: {},
+          b_attempts: 10, b_passed: 10, b_not_run: 0, b_cost_usd: 0.0202, b_seconds: 28, b_faults: {}, b_endings: {},
+          scenarios, pairs: 10, a_wins: 5, b_wins: 3, ties: 2, same_result: 9, p_value: 0.7266 };
+        batches.push(batch);
+        send('batch', { batch });
+        return res.end();
+      }
       races -= 1;
       run.push({ run_id: `live-check-${run.length + 1}`, seal: 'abcdef0123456789', task: ask.task, a: ask.a, b: ask.b, winner: ask.a, a_passed: true, b_passed: false, a_cost_usd: 0.0021, b_cost_usd: 0.0034, ...(server.old ? {} : { a_details: { items: 1, correct: 1, wrong: 0, mistakes: {}, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } }, b_details: { items: 1, correct: 0, wrong: 1, mistakes: { 'ALR-1': 'close->escalate' }, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } }, a_termination: 'session_ended', b_termination: 'no_action', a_seconds: 6, b_seconds: 5 }) });
       res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
@@ -468,7 +489,7 @@ async function main() {
       if (live.url().includes('judge-invite')) problems.push('the invite is still in the address bar after signing in');
       if (await live.locator('#live input').count()) problems.push('a signed-in visitor is still asked to type something');
       // one place to choose the pair: the live panel names the two models from step 2 and offers no others
-      if ((await live.locator('#live select').count()) !== 2) problems.push('the live panel has a model chooser of its own (only difficulty and scoring may be chosen there)');
+      if ((await live.locator('#live select').count()) !== 4 || (await live.locator('#live-who option').count()) !== 3) problems.push('the live panel may choose difficulty, scoring, how many scenarios, and which of the two chosen models play: nothing else');
       const named = await live.locator('#live-pair').innerText();
       const chosen = await live.evaluate(() => [...document.querySelectorAll('#first-list input:checked, #second-list input:checked')].map((i) => i.closest('label').querySelector('.name').innerText));
       if (chosen.length !== 2 || !chosen.every((name) => named.includes(name))) problems.push(`the live panel names ${JSON.stringify(named)}, step 2 has ${JSON.stringify(chosen)}`);
@@ -527,6 +548,30 @@ async function main() {
         if (!written.includes(part)) problems.push(`the live write-up lacks ${JSON.stringify(part)}: ${JSON.stringify(written.slice(0, 600))}`);
       }
       if ((await live.locator('#live-history .race-card').count()) !== 1) problems.push('one live race should be written up once');
+      // A batch: the same test ten times in one go. First one model on both lanes (a steadiness check), then the pair.
+      if ((await live.locator('#live-runs option:not([disabled])').count()) !== 2) problems.push('the live panel does not offer exactly the batch sizes the runner has');
+      if ((await live.locator('#live-runs option[disabled]').count()) !== 2) problems.push('the bigger batch sizes are not shown as coming');
+      await live.locator('#live-who').selectOption('a');
+      if ((await live.locator('#live-runs').inputValue()) !== '10' || !(await live.locator('#live-go').innerText()).includes('batch of 10')) problems.push('choosing one model on both lanes did not switch to a batch');
+      await live.locator('#live-go').click();
+      await live.waitForSelector('#batch-band', { timeout: 10000 }).catch(() => problems.push('the batch never reported a result'));
+      if (runner.asked.a !== pair.a || runner.asked.b !== pair.a || runner.asked.runs !== 10) problems.push(`a steadiness batch asked the runner for ${JSON.stringify(runner.asked)}`);
+      const steady = await live.locator('#live-batch').innerText();
+      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'wrong decision in 1', '$0.0412', 'live-batch-1', 'kept apart from']) {
+        if (!steady.toUpperCase().includes(part.toUpperCase())) problems.push(`the steadiness result lacks ${JSON.stringify(part)}: ${JSON.stringify(steady.slice(0, 500))}`);
+      }
+      const squares = await live.locator('#live-stage .bsq').evaluateAll((all) => [all.length, all.filter((x) => x.classList.contains('pass')).length, all.filter((x) => x.classList.contains('fail')).length]);
+      if (squares.join() !== '20,19,1') problems.push(`the batch squares show ${squares} (all, passed, failed), not 20,19,1`);
+      if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('# Live batch report')) problems.push('the batch offers no report');
+      await live.locator('#live-who').selectOption('pair');
+      await live.locator('#live-go').click();
+      await live.waitForFunction(() => /won 5 of 10 scenarios/.test(document.getElementById('batch-band')?.innerText || ''), null, { timeout: 10000 }).catch(() => problems.push('a batch between the pair did not name who won more scenarios'));
+      if (runner.asked.a !== pair.a || runner.asked.b !== pair.b) problems.push('a pair batch did not race the pair chosen in step 2');
+      if (!(await live.locator('#batch-band.win').count())) problems.push('the winner of a batch does not get the green box');
+      await live.waitForFunction(() => document.querySelectorAll('#live-batches li').length === 2, null, { timeout: 6000 }).catch(() => problems.push('the batches on file are not listed'));
+      const afterBatch = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
+      if (afterBatch.pairs !== pair.pairs) problems.push('a live batch changed the recorded verdict');
+      await live.locator('#live-runs').selectOption('1');
       // the money and the races left are read again after a race
       await live.waitForFunction(() => document.getElementById('live-budget').innerText.includes('2 live races left'), null, { timeout: 5000 }).catch(() => problems.push('the budget line was not refreshed after the race'));
       if (!(await live.locator('#live-budget').innerText()).includes('OpenRouter $29.99 of $30.00')) problems.push('the provider budget was not refreshed after the race');
@@ -540,7 +585,7 @@ async function main() {
       });
       await live.locator('#flow-cards button').first().click();
       if (asked !== 1) problems.push('picking another workflow over an undownloaded live result did not ask first');
-      if (!(await live.locator('#live-result').innerText()).startsWith('Live,')) problems.push('saying no to leaving still threw the live result away');
+      if (!(await live.locator('#batch-band').count())) problems.push('saying no to leaving still threw the live result away');
       await live.locator('#start-over').click();
       if (asked !== 2 || (await live.locator('#step-verdict').isHidden())) problems.push('Start over did not ask before dropping a live result, or dropped it anyway');
       answer = 'accept';

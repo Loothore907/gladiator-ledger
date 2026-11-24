@@ -1207,6 +1207,36 @@ async function drawLive(v) {
   const level = el('select', { id: 'live-level', 'aria-label': 'Difficulty' }, offered.levels.map((x) => el('option', { value: x, selected: x === 'standard' }, `${x} difficulty`)));
   const profile = el('select', { id: 'live-profile', 'aria-label': 'What matters most' }, runner.options.profiles.map((x) => el('option', { value: x, selected: x === 'budget' }, `${x} scoring`)));
   const go = el('button', { type: 'button', id: 'live-go' }, 'Race them live');
+  // Batches, where the runner offers them: the same test many times in one go, by the pair or by one of the two
+  // on both lanes. The bigger sizes are shown as what is coming, never as something to press.
+  const sizes = runner.options.batches || [];
+  const runsPick = el(
+    'select',
+    { id: 'live-runs', 'aria-label': 'How many scenarios' },
+    el('option', { value: 1, selected: true }, '1 scenario: watch every step'),
+    sizes.map((x) => el('option', { value: x.runs }, `${x.runs} scenarios in one batch (cap $${fixed(x.cap_usd, 2)})`)),
+    el('option', { disabled: true }, '100 scenarios: coming soon'),
+    el('option', { disabled: true }, '10,000 scenarios: enterprise, with your own keys'),
+  );
+  const whoPick = el(
+    'select',
+    { id: 'live-who', 'aria-label': 'Who plays' },
+    el('option', { value: 'pair', selected: true }, `${shortName(v.a)} vs ${shortName(v.b)}`),
+    el('option', { value: 'a' }, `${shortName(v.a)} on both lanes: how steady is it?`),
+    el('option', { value: 'b' }, `${shortName(v.b)} on both lanes: how steady is it?`),
+  );
+  const batchBox = el('div', { id: 'live-batch' });
+  const filed = el('div', { id: 'live-batches', class: 'live-history', hidden: true });
+  const relabel = () => {
+    // one model against itself needs a batch: one run cannot show steadiness
+    if (whoPick.value !== 'pair' && Number(runsPick.value) === 1 && sizes.length) runsPick.value = String(sizes[0].runs);
+    go.textContent = Number(runsPick.value) > 1 ? `Run the batch of ${runsPick.value}` : 'Race them live';
+  };
+  runsPick.addEventListener('change', () => {
+    if (Number(runsPick.value) === 1) whoPick.value = 'pair';
+    relabel();
+  });
+  whoPick.addEventListener('change', relabel);
   const prior = el('p', { class: 'note', id: 'live-prior' });
   const money = el('p', { class: 'note small', id: 'live-budget' });
   const stage = el('div', { id: 'live-stage' });
@@ -1230,14 +1260,25 @@ async function drawLive(v) {
   // write-up does not wait on the list.
   const history = el('div', { id: 'live-history', class: 'live-history', hidden: true });
   let liveRaces = [];
+  let liveBatches = [];
   const mine = new Map(); // run_id -> the facts of a race run in this visit
   const loadRaces = async () => {
     try {
       const response = await fetch(`${runner.base}/races`);
-      liveRaces = response.ok ? (await response.json()).races || [] : [];
+      const listed = response.ok ? await response.json() : {};
+      liveRaces = listed.races || [];
+      liveBatches = listed.batches || [];
     } catch {
       liveRaces = [];
+      liveBatches = [];
     }
+  };
+  // the batches on file for this task that are about these two models: the pair, or either against itself
+  const showBatches = () => {
+    const [a, b] = [v.a, v.b];
+    const about = liveBatches.filter((x) => x.task === task && [x.a, x.b].every((m) => m === a || m === b));
+    filed.hidden = !about.length;
+    if (about.length) filed.replaceChildren(el('h5', null, 'Live batches on file for these models on this task'), el('ul', { class: 'batch-list' }, [...about].reverse().map(batchLine)));
   };
   const showTally = async (a, b, r) => {
     const listed = liveRaces.filter((x) => x.task === task && ((x.a === a && x.b === b) || (x.a === b && x.b === a)));
@@ -1255,7 +1296,7 @@ async function drawLive(v) {
     await drawPairGraph(r);
   };
   await loadRaces();
-  await loadRaces();
+  showBatches();
 
   // what the record says about this pair: it may favour one, lean, name no favourite, or not exist at all
   const r = v;
@@ -1270,7 +1311,72 @@ async function drawLive(v) {
     ' Now put that to the test: one new scenario, generated this minute, never seen by either model.';
   await showTally(a, b, r);
 
+  // A batch: every attempt is shown as it ends, then the result of the whole batch.
+  const runBatch = async (runs) => {
+    const [ma, mb] = whoPick.value === 'a' ? [a, a] : whoPick.value === 'b' ? [b, b] : [a, b];
+    go.disabled = true;
+    say.textContent = '';
+    box.querySelector('#live-winner')?.remove();
+    const lanes = batchLanes(ma, mb, runs);
+    stage.replaceChildren(el('p', { class: 'note' }, `${runs} new worlds are being generated. Each one is handed to both lanes, several at a time. A square fills in as each attempt ends; this takes a few minutes.`), lanes.A.node, lanes.B.node);
+    batchBox.replaceChildren();
+    try {
+      const response = await fetch(`${runner.base}/race`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, a: ma, b: mb, runs, difficulty: level.value, profile: profile.value, token: session.token || '' }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+      let batch = null;
+      let failed = null;
+      await readEvents(response, (kind, e) => {
+        if (kind === 'attempt_end') lanes[e.side].end(e);
+        else if (kind === 'batch') batch = e.batch;
+        else if (kind === 'failed') failed = e.error;
+      });
+      if (failed || !batch) throw new Error(failed || 'the batch ended without a result');
+      const text = batchReport(batch, offered.name || task);
+      window.ledgerDemo.lastLiveReport = text;
+      unsavedLive = true;
+      batchBox.replaceChildren(
+        batchBand(batch),
+        ...batchTable(batch),
+        el(
+          'p',
+          null,
+          el(
+            'button',
+            {
+              type: 'button',
+              id: 'download-batch',
+              class: 'quiet small',
+              onclick: () => {
+                download(text, 'live-batch-report.md');
+                unsavedLive = false;
+              },
+            },
+            'Download the batch report',
+          ),
+        ),
+      );
+    } catch (error) {
+      say.textContent = `The batch did not run: ${error.message}`;
+    } finally {
+      go.disabled = false;
+      try {
+        const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
+        showBudget(options, renewed ? renewed.races_left : null);
+        await loadRaces();
+        showBatches();
+      } catch {
+        /* the next run will say what is wrong */
+      }
+    }
+  };
+
   go.addEventListener('click', async () => {
+    if (Number(runsPick.value) > 1) return runBatch(Number(runsPick.value));
+    batchBox.replaceChildren();
     go.disabled = true;
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
@@ -1362,14 +1468,185 @@ async function drawLive(v) {
     title,
     el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
     prior,
-    el('div', { class: 'race-controls' }, level, profile, go),
+    el('div', { class: 'race-controls' }, sizes.length ? [whoPick, runsPick] : null, level, profile, go),
     money,
     stage,
     say,
+    batchBox,
     history,
+    filed,
   );
 }
 const spec_task = (test) => test.split('/').pop();
+
+// ---- a live batch: one test played many times in one go ----------------------------------------------------------
+//
+// A single race says which model did the job better this time. A batch says how steadily: the same test, a fresh
+// world each time, played 10 or 25 times by the two models, or by one model on both lanes (a steadiness check of
+// that model, and of the test: a model that cannot agree with itself is telling you the test is noisy).
+
+// With f failures in n attempts, the highest failure rate that is still plausible (Wilson, 95%).
+function failureCeiling(f, n) {
+  if (!n) return 1;
+  const z = 1.96;
+  const p = f / n;
+  return Math.min(1, (p + (z * z) / (2 * n) + z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / (1 + (z * z) / n));
+}
+
+// The faults of one side of a batch, by how many attempts each showed in.
+function batchFaults(x, s) {
+  const named = Object.entries(x[`${s}_faults`] || {})
+    .filter(([counter]) => rules.fault_counters[counter])
+    .map(([counter, k]) => [rules.fault_counters[counter], k]);
+  for (const [ending, k] of Object.entries(x[`${s}_endings`] || {})) if (rules.ending_faults[ending]) named.push([rules.ending_faults[ending], k]);
+  return named.sort((p, q) => q[1] - p[1]);
+}
+
+function batchSettings(x) {
+  return `${plural(x.runs, 'fresh scenario')}, ${x.difficulty} difficulty, ${x.profile} scoring`;
+}
+
+// The headline of a batch: a winner for two models, a pass rate for one model against itself.
+function batchBand(x) {
+  if (x.same_model) {
+    const attempts = x.a_attempts + x.b_attempts;
+    const passed = x.a_passed + x.b_passed;
+    const ceiling = failureCeiling(attempts - passed, attempts);
+    return el(
+      'div',
+      { class: `band ${attempts && passed === attempts ? 'win' : 'even'}`, id: 'batch-band' },
+      el('p', { class: 'band-kind' }, 'Steadiness check'),
+      el('p', { class: 'headline' }, attempts ? `${shortName(x.a)} passed ${passed} of ${attempts} attempts (${percent(passed / attempts)})` : `${shortName(x.a)} completed no attempts`),
+      el('p', null, `One model on both lanes, in this test, with these settings: ${batchSettings(x)}. Given the same scenario twice, it ended the same way in ${x.same_result} of ${x.pairs}.`),
+      attempts ? el('p', { class: 'small' }, `What ${plural(attempts, 'attempt')} can show: its real failure rate on this test is unlikely to be above ${percent(ceiling)}. More runs narrow that.`) : null,
+    );
+  }
+  const [wa, wb] = [x.a_wins, x.b_wins];
+  if (wa === wb) {
+    return el(
+      'div',
+      { class: 'band even', id: 'batch-band' },
+      el('p', { class: 'band-kind' }, 'Result of this live batch'),
+      el('p', { class: 'headline' }, `Level: ${wa} scenarios each`),
+      el('p', { class: 'small' }, `${shortName(x.a)} and ${shortName(x.b)}, in this test, with these settings: ${batchSettings(x)}.${x.ties ? ` ${plural(x.ties, 'scenario')} had no winner.` : ''}`),
+    );
+  }
+  const [winner, loser, won, lost] = wa > wb ? [x.a, x.b, wa, wb] : [x.b, x.a, wb, wa];
+  return el(
+    'div',
+    { class: 'band win', id: 'batch-band' },
+    el('p', { class: 'band-kind' }, 'Winner of this live batch'),
+    el('p', { class: 'headline' }, `${shortName(winner)} won ${won} of ${x.pairs} scenarios`),
+    el('p', null, `It did this task better than ${shortName(loser)} (${lost} won${x.ties ? `, ${x.ties} level` : ''}) in this test, with these settings: ${batchSettings(x)}, the same scenario for both each time.`),
+    el('p', { class: 'small' }, `Between two equally good models, a split this lopsided would happen about ${percent(x.p_value, x.p_value < 0.1 ? 1 : 0)} of the time.`),
+  );
+}
+
+// Both sides of a batch as a small table: attempts passed, the faults that showed, money and time.
+function batchTable(x) {
+  const row = (s, label) => {
+    const faults = batchFaults(x, s);
+    const n = x[`${s}_attempts`];
+    return el(
+      'tr',
+      null,
+      el('th', { scope: 'row' }, label),
+      el('td', null, n ? `${x[`${s}_passed`]} of ${n} (${percent(x[`${s}_passed`] / n)})` : 'none completed'),
+      el('td', null, faults.length ? faults.map(([name, k]) => `${name} in ${k}`).join('; ') : 'none'),
+      el('td', null, `$${fixed(x[`${s}_cost_usd`], 4)}`),
+      el('td', null, `${fixed(x[`${s}_seconds`], 0)} s`),
+    );
+  };
+  const stopped = x.a_not_run + x.b_not_run;
+  return [
+    el(
+      'table',
+      { class: 'own batch-table' },
+      el('thead', null, el('tr', null, ['', 'Attempts passed', 'Faults (attempts they showed in)', 'Cost', 'Time per attempt'].map((h) => el('th', { scope: 'col' }, h)))),
+      el('tbody', null, row('a', x.same_model ? `${shortName(x.a)}, lane 1` : shortName(x.a)), row('b', x.same_model ? `${shortName(x.b)}, lane 2` : shortName(x.b))),
+    ),
+    el(
+      'p',
+      { class: 'note' },
+      `This batch cost $${fixed(x.spent_usd, 4)}.`,
+      stopped ? ` ${plural(stopped, 'attempt')} did not run (the batch's spending cap or a provider error stopped them) and are left out.` : '',
+      ' Sealed record ',
+      el('code', null, x.run_id),
+      ', seal ',
+      el('code', null, String(x.seal).slice(0, 12)),
+      '. A live batch is kept apart from the recorded evidence the verdict rests on.',
+    ),
+  ];
+}
+
+// The squares of a batch in progress: one per attempt on each lane, filled in as the attempts end.
+function batchLanes(a, b, runs) {
+  const same = a === b;
+  const lane = (model, cls, label) => {
+    const squares = Array.from({ length: runs }, (_, i) => el('span', { class: 'bsq', title: `Scenario ${i + 1}: running` }));
+    const count = el('span', { class: 'note' }, `0 of ${runs} done`);
+    let done = 0;
+    let passed = 0;
+    return {
+      node: el('div', { class: `batch-lane ${cls}` }, el('p', { class: 'batch-lane-name' }, el('strong', null, label), ' ', count), el('div', { class: 'bsqs' }, squares)),
+      end(e) {
+        const sq = squares[(e.attempt || 1) - 1];
+        if (!sq) return;
+        const what = e.termination === 'not_run' ? 'skip' : e.passed ? 'pass' : 'fail';
+        sq.className = `bsq ${what}`;
+        sq.textContent = { pass: '✓', fail: '✕', skip: '–' }[what];
+        sq.title = `Scenario ${e.attempt}: ${{ pass: 'passed', fail: 'did not pass', skip: 'did not run' }[what]}`;
+        done += 1;
+        passed += what === 'pass' ? 1 : 0;
+        count.textContent = `${done} of ${runs} done · ${passed} passed`;
+      },
+    };
+  };
+  return { A: lane(a, 'a', same ? `${shortName(a)}, lane 1` : shortName(a)), B: lane(b, 'b', same ? `${shortName(b)}, lane 2` : shortName(b)) };
+}
+
+// One line for a batch already on file.
+function batchLine(x) {
+  const text = x.same_model
+    ? `${shortName(x.a)} against itself: passed ${x.a_passed + x.b_passed} of ${x.a_attempts + x.b_attempts} attempts, same ending in ${x.same_result} of ${x.pairs} scenarios`
+    : `${shortName(x.a)} ${x.a_wins}, ${shortName(x.b)} ${x.b_wins}${x.ties ? `, ${x.ties} level` : ''} over ${plural(x.pairs, 'scenario')} (passed ${x.a_passed} of ${x.a_attempts} and ${x.b_passed} of ${x.b_attempts})`;
+  return el('li', null, text, el('span', { class: 'note' }, ` · ${x.difficulty}, ${x.profile} · $${fixed(x.spent_usd, 4)} · `, el('code', null, x.run_id)));
+}
+
+// The report of one live batch, to download.
+function batchReport(x, title) {
+  const side = (s, label) => {
+    const n = x[`${s}_attempts`];
+    const faults = batchFaults(x, s);
+    return `| ${label} | ${x[`${s}_passed`]} of ${n} | ${faults.length ? faults.map(([name, k]) => `${name} in ${k}`).join('; ') : 'none'} | $${fixed(x[`${s}_cost_usd`], 4)} | ${fixed(x[`${s}_seconds`], 0)} s |`;
+  };
+  const attempts = x.a_attempts + x.b_attempts;
+  const passed = x.a_passed + x.b_passed;
+  const headline = x.same_model
+    ? `\`${x.a}\` on both lanes passed ${passed} of ${attempts} attempts and ended the same way in ${x.same_result} of ${x.pairs} scenarios. With ${attempts} attempts, its real failure rate on this test is unlikely to be above ${percent(failureCeiling(attempts - passed, attempts))}.`
+    : x.a_wins === x.b_wins
+      ? `Level: \`${x.a}\` and \`${x.b}\` won ${x.a_wins} scenarios each${x.ties ? `, ${x.ties} had no winner` : ''}.`
+      : `\`${x.a_wins > x.b_wins ? x.a : x.b}\` won ${Math.max(x.a_wins, x.b_wins)} of ${x.pairs} scenarios against \`${x.a_wins > x.b_wins ? x.b : x.a}\` (${Math.min(x.a_wins, x.b_wins)} won${x.ties ? `, ${x.ties} level` : ''}). Between two equally good models a split this lopsided would happen about ${percent(x.p_value, 1)} of the time.`;
+  return [
+    `# Live batch report: ${title}`,
+    '',
+    `Task \`${x.task}\`. ${batchSettings(x)}. ${x.same_model ? 'One model on both lanes.' : 'The same scenario for both models each time.'}`,
+    '',
+    `**${headline}**`,
+    '',
+    'This is a live batch. It is kept apart from the recorded matches a verdict rests on, and it holds for this test with these settings.',
+    '',
+    '| Side | Attempts passed | Faults (attempts they showed in) | Cost | Time per attempt |',
+    '|---|---|---|---|---|',
+    side('a', x.same_model ? `${x.a}, lane 1` : x.a),
+    side('b', x.same_model ? `${x.b}, lane 2` : x.b),
+    '',
+    `Scenario by scenario: ${x.scenarios.map((sc, i) => `${i + 1} ${sc.winner === 'A' ? 'A' : sc.winner === 'B' ? 'B' : sc.winner === 'tie' ? 'level' : 'not run'}`).join(', ')}.`,
+    '',
+    `This batch cost $${fixed(x.spent_usd, 4)}. Sealed record \`${x.run_id}\`, seal \`${x.seal}\`.`,
+    '',
+  ].join('\n');
+}
 
 // ---- a live race written up: what each model did, what it got wrong, and the history of the pair ----------------
 //
