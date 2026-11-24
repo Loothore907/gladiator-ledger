@@ -287,25 +287,50 @@ select.level.serious { border-color: var(--warn); background: var(--warn-soft); 
 .lane .name { font-weight: 700; }
 .gauges { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; color: var(--muted); }
 .gauge b { color: var(--ink); font-variant-numeric: tabular-nums; }
-.track { position: relative; height: 34px; margin: 6px 0 4px; background: var(--sunken); border-radius: 6px; overflow: hidden; }
-.tick { position: absolute; bottom: 0; width: 3px; height: 12px; background: var(--muted); border-radius: 2px 2px 0 0; }
+.track { position: relative; height: 46px; margin: 8px 8px 2px; }
+.track::before { content: ""; position: absolute; left: -8px; right: -8px; top: 50%; height: 2px; background: var(--line); }
+/* Every step is a mark on the line. Its SHAPE says what the model did; colour is only for trouble. */
+.tick { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 2px solid var(--muted); }
 .tick[hidden] { display: none; }
-.lane.a .tick.act { background: var(--side-a); } .lane.b .tick.act { background: var(--side-b); }
-.tick.act { height: 24px; width: 4px; }
-.tick.check { height: 24px; background: transparent; border-left: 3px dotted var(--ink); border-radius: 0; }
-.tick.timeout { height: 34px; width: 5px; background: var(--warn); }
-.tick.refused { height: 24px; background: var(--warn); }
-.tick.again { height: 24px; width: 4px; background: var(--ink); }
-.tick.wrong { height: 34px; width: 6px; background: var(--stop); }
-.tick.end { height: 34px; width: 3px; background: var(--ink); }
-.tick.talk { height: 8px; }
+.lane.a .tick { border-color: var(--side-a); } .lane.b .tick { border-color: var(--side-b); }
+/* acted: a filled square */
+.tick.act, .tick.again, .tick.wrong { width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 3px; background: var(--muted); }
+.lane.a .tick.act, .lane.a .tick.again { background: var(--side-a); } .lane.b .tick.act, .lane.b .tick.again { background: var(--side-b); }
+/* checked its own action: a diamond */
+.tick.check { border-radius: 2px; transform: rotate(45deg); width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; }
+/* finished: a flag */
+.tick.end { width: 3px; height: 24px; margin: -18px 0 0 -1.5px; border: 0; border-radius: 1px; background: var(--ink); }
+.tick.end::after { content: ""; position: absolute; left: 3px; top: 0; border-left: 11px solid var(--ink); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+.lane.a .tick.end { background: var(--side-a); } .lane.a .tick.end::after { border-left-color: var(--side-a); }
+.lane.b .tick.end { background: var(--side-b); } .lane.b .tick.end::after { border-left-color: var(--side-b); }
+/* answered without acting: a small dot */
+.tick.talk { width: 6px; height: 6px; margin: -3px 0 0 -3px; border-width: 0; background: var(--muted); }
+/* trouble: a warning triangle above the line for a timeout */
+.tick.timeout { width: 0; height: 0; margin: -22px 0 0 -9px; border: 0; border-radius: 0; background: transparent; border-left: 9px solid transparent; border-right: 9px solid transparent; border-bottom: 16px solid var(--warn); }
+.lane.a .tick.timeout, .lane.b .tick.timeout { border-left-color: transparent; border-right-color: transparent; border-bottom-color: var(--warn); }
+.tick.timeout::after { content: "!"; position: absolute; left: -3px; top: 3px; font: 700 10px/12px var(--sans); color: #fff; }
+/* worth a look: the same action again, ringed (a retry after a check is fine; a blind one is a fault) */
+.tick.again { outline: 2.5px solid var(--warn); outline-offset: 2px; }
+/* trouble: a wrong decision, or a tool that refused */
+.tick.wrong, .lane.a .tick.wrong, .lane.b .tick.wrong { background: var(--stop); border-color: var(--stop); outline: 2.5px solid var(--stop); outline-offset: 2px; }
+.tick.refused, .lane.a .tick.refused, .lane.b .tick.refused { border-color: var(--stop); background: var(--stop-soft); }
+.tick.refused::after { content: "×"; position: absolute; left: 0; right: 0; top: -4px; text-align: center; font: 700 12px/14px var(--sans); color: var(--stop); }
 .now { margin: 0; font-size: 13.5px; color: var(--muted); min-height: 1.4em; font-family: var(--mono); }
 .outcome { margin: 4px 0 0; font-size: 14.5px; }
 .outcome .pass { color: var(--win); } .outcome .fail { color: var(--stop); }
 .legend.left { text-align: left; margin: 0 0 10px; }
-.legend .tick { position: static; display: inline-block; vertical-align: -3px; margin: 0 6px 0 14px; }
-.legend .tick.act { background: var(--side-a); }
-.legend .tick.timeout, .legend .tick.wrong { height: 20px; }
+.legend.marks { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; text-align: left; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; margin: 0 0 12px; color: var(--ink); }
+.legend.marks > span { display: inline-flex; align-items: center; gap: 8px; }
+.legend .tick { position: relative; top: auto; margin: 0; flex: none; border-color: var(--muted); }
+.legend .tick.act, .legend .tick.again { background: var(--muted); }
+.legend .tick.check { margin: 0 1px; }
+.legend .tick.end { margin: 0 12px 0 2px; }
+.legend .tick.timeout { margin: 0; }
+.legend .tick.again, .legend .tick.wrong { margin: 0 3px; }
+.chip { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; background: var(--surface); white-space: nowrap; }
+.chip[hidden] { display: none; }
+.chip.warn { border-color: var(--warn); background: var(--warn-soft); color: var(--ink); font-weight: 600; }
+.chip.bad { border-color: var(--stop); background: var(--stop-soft); color: var(--stop); font-weight: 600; }
 .finish { margin: 0; font-weight: 650; }
 .race.live { border-style: dashed; }
 .race.live h4 { margin: 0 0 4px; }

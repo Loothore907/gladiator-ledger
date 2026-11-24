@@ -551,12 +551,63 @@ async function replayOf(run) {
   return replays.get(run);
 }
 
+// What each mark on a lane means. Shape says what the model did; colour is only for trouble.
+function laneLegend() {
+  const item = (cls, text) => el('span', null, el('span', { class: `tick ${cls}` }), text);
+  return el(
+    'p',
+    { class: 'legend marks' },
+    item('read', 'looked something up'),
+    item('act', 'acted (changed something)'),
+    item('check', 'checked its own action'),
+    item('end', 'finished'),
+    item('timeout', 'timed out'),
+    item('again', 'did the same action again'),
+    item('wrong', 'a wrong decision'),
+    item('refused', 'the tool refused'),
+  );
+}
+
+// The running counts of a lane: what the model has done so far, and any trouble, as it happens.
+function laneCounts() {
+  const part = (label, cls = '') => {
+    const value = el('b', null, '0');
+    const node = el('span', { class: `chip ${cls}`, hidden: Boolean(cls) }, value, ` ${label}`);
+    return { node, value };
+  };
+  const parts = {
+    steps: part('steps'),
+    read: part('lookups'),
+    act: part('actions'),
+    check: part('checks'),
+    timeout: part('timed out', 'warn'),
+    again: part('acted again', 'warn'),
+    wrong: part('wrong', 'bad'),
+    refused: part('refused', 'bad'),
+  };
+  const node = el('span', { class: 'gauges counts' }, Object.values(parts).map((x) => x.node));
+  // kinds: the kind of every step so far, in order
+  const show = (kinds) => {
+    parts.steps.value.textContent = String(kinds.length);
+    for (const kind of ['read', 'act', 'check', 'timeout', 'again', 'wrong', 'refused']) {
+      // a repeated or wrong action is still an action; a timed-out or refused step was an attempt to act
+      const n = kinds.filter((k) => k === kind || (kind === 'act' && ['again', 'wrong'].includes(k))).length;
+      parts[kind].value.textContent = String(n);
+      if (parts[kind].node.classList.length > 1) parts[kind].node.hidden = n === 0;
+    }
+  };
+  return { node, show };
+}
+
 // One lane of the race: the track with a mark per step, what the model is doing now, and four running gauges
 // (the parts of the efficiency score). Returns how to draw it at a given second.
 function raceLane(id, cls, line, tools, span) {
   const track = el('div', { class: 'track' });
+  const kinds = [];
+  const counts = laneCounts();
   const marks = line.steps.map(([at, tool, item, kind, state, mark]) => {
     const what = mark === 'wrong' ? 'wrong' : state === 1 ? 'timeout' : state === 2 ? 'refused' : mark === 'repeat' ? 'again' : kind;
+    kinds.push(what);
     const said = `${fixed(at, 1)}s: ${stepWords(tools[tool], item)}${STATE_WORDS[state]}${mark === 'wrong' ? ': the wrong decision' : mark === 'repeat' ? ' (again)' : ''}`;
     return track.appendChild(el('span', { class: `tick ${what}`, style: `left:${(100 * at) / span}%`, title: said, hidden: true }));
   });
@@ -565,21 +616,20 @@ function raceLane(id, cls, line, tools, span) {
     const value = el('b', null, '0');
     return [el('span', { class: 'gauge' }, value, ` ${label}`), value];
   };
-  const [gSteps, vSteps] = gauge('steps');
   const [gTime, vTime] = gauge('seconds');
   const [gCost, vCost] = gauge('spent');
   const [gTokens, vTokens] = gauge('tokens');
   const result = el('p', { class: 'outcome', hidden: true });
   const faults = Object.entries(line.faults);
   result.append(
-    el('strong', { class: line.passed ? 'pass' : 'fail' }, line.passed ? 'Passed' : 'Did not pass'),
+    el('strong', { class: line.passed ? 'pass' : 'fail' }, line.passed ? '✓ Passed' : '✕ Did not pass'),
     line.items ? ` · ${line.correct} of ${line.items} items right` : '',
     faults.length ? ` · ${faults.map(([name, n]) => `${name}${n > 1 ? ` ×${n}` : ''}`).join(', ')}` : ' · no faults',
   );
   const node = el(
     'div',
     { class: `lane ${cls}` },
-    el('div', { class: 'lane-head' }, el('span', { class: 'name' }, shortName(id)), el('span', { class: 'gauges' }, gSteps, gTime, gCost, gTokens)),
+    el('div', { class: 'lane-head' }, el('span', { class: 'name' }, shortName(id)), counts.node, el('span', { class: 'gauges' }, gTime, gCost, gTokens)),
     track,
     now,
     result,
@@ -593,7 +643,7 @@ function raceLane(id, cls, line, tools, span) {
     if (clock < (line.steps[0] || [0])[0]) for (let i = 0; i < shown; i += 1) marks[i].hidden = true;
     const done = clock >= line.seconds;
     const seen = line.steps.slice(0, shown);
-    vSteps.textContent = String(shown);
+    counts.show(kinds.slice(0, shown));
     vTime.textContent = fixed(Math.min(clock, line.seconds), 0);
     vCost.textContent = `$${fixed(done ? line.cost_usd : seen.reduce((sum, x) => sum + x[6], 0), 4)}`;
     vTokens.textContent = seen.reduce((sum, x) => sum + x[7], 0).toLocaleString('en-US');
@@ -682,17 +732,8 @@ async function openRace(v, index) {
       'Nothing here is re-run: it is the sealed record ', el('code', null, round.run), ', played back.',
     ),
     el('div', { class: 'race-controls' }, play, end, pace),
+    laneLegend(),
     ...lanes.map((lane) => lane.node),
-    el(
-      'p',
-      { class: 'legend left' },
-      el('span', { class: 'tick read' }), 'looks something up',
-      el('span', { class: 'tick act' }), 'acts',
-      el('span', { class: 'tick check' }), 'checks an outcome',
-      el('span', { class: 'tick timeout' }), 'the world timed out',
-      el('span', { class: 'tick again' }), 'acts on the same item again',
-      el('span', { class: 'tick wrong' }), 'a wrong decision',
-    ),
     finish,
     await evidenceGraph(v, index),
   );
@@ -812,7 +853,9 @@ function liveItem(args) {
 function liveLane(id, cls) {
   const track = el('div', { class: 'track' });
   const now = el('p', { class: 'now' }, 'Waiting for its first step…');
-  const count = { steps: el('b', null, '0'), time: el('b', null, '0'), cost: el('b', null, '$0.0000'), tokens: el('b', null, '0') };
+  const count = { time: el('b', null, '0'), cost: el('b', null, '$0.0000'), tokens: el('b', null, '0') };
+  const counts = laneCounts();
+  const kinds = [];
   const result = el('p', { class: 'outcome', hidden: true });
   const node = el(
     'div',
@@ -821,7 +864,8 @@ function liveLane(id, cls) {
       'div',
       { class: 'lane-head' },
       el('span', { class: 'name' }, shortName(id)),
-      el('span', { class: 'gauges' }, el('span', { class: 'gauge' }, count.steps, ' steps'), el('span', { class: 'gauge' }, count.time, ' seconds'), el('span', { class: 'gauge' }, count.cost, ' spent'), el('span', { class: 'gauge' }, count.tokens, ' tokens')),
+      counts.node,
+      el('span', { class: 'gauges' }, el('span', { class: 'gauge' }, count.time, ' seconds'), el('span', { class: 'gauge' }, count.cost, ' spent'), el('span', { class: 'gauge' }, count.tokens, ' tokens')),
     ),
     track,
     now,
@@ -845,12 +889,13 @@ function liveLane(id, cls) {
       const what = e.error === 'timeout' ? 'timeout' : e.error ? 'refused' : again ? 'again' : kind;
       const said = `${stepWords(e.tool_name, item)}${e.error === 'timeout' ? STATE_WORDS[1] : e.error ? STATE_WORDS[2] : ''}`;
       const mark = track.appendChild(el('span', { class: `tick ${what}`, title: `${fixed(e.elapsed_s, 1)}s: ${said}` }));
+      kinds.push(what);
+      counts.show(kinds);
       marks.push([mark, e.elapsed_s]);
       while (e.elapsed_s > span * 0.92) span *= 1.5;
       place();
       cost += e.cost_usd;
       tokens += e.tokens;
-      count.steps.textContent = String(marks.length);
       count.time.textContent = fixed(e.elapsed_s, 0);
       count.cost.textContent = `$${fixed(cost, 4)}`;
       count.tokens.textContent = tokens.toLocaleString('en-US');
@@ -863,7 +908,7 @@ function liveLane(id, cls) {
       now.textContent = e.error ? `Stopped: ${e.error}` : 'Finished.';
       result.hidden = false;
       result.replaceChildren(
-        el('strong', { class: e.passed ? 'pass' : 'fail' }, e.passed ? 'Passed' : 'Did not pass'),
+        el('strong', { class: e.passed ? 'pass' : 'fail' }, e.passed ? '✓ Passed' : '✕ Did not pass'),
         details.items ? ` · ${details.correct} of ${details.items} items right` : '',
         faults.length ? ` · ${faults.join(', ')}` : e.error ? '' : ' · no faults',
       );
@@ -1188,7 +1233,7 @@ async function drawLive(v) {
     go.disabled = true;
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
-    stage.replaceChildren(el('p', { class: 'note' }, 'A new world is being generated and handed to both models. Nothing below is a replay.'), lanes.A.node, lanes.B.node);
+    stage.replaceChildren(el('p', { class: 'note' }, 'A new world is being generated and handed to both models. Nothing below is a replay.'), laneLegend(), lanes.A.node, lanes.B.node);
     try {
       const response = await fetch(`${runner.base}/race`, {
         method: 'POST',
