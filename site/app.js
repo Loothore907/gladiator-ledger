@@ -252,7 +252,7 @@ async function chooseFlow(flow) {
   $('step-verdict').hidden = true;
   $('models-intro').textContent =
     `${plural(models.length, 'model')} have judged pairs on ${flow.title} (version ${flow.version}). ` +
-    'Pick the two you are choosing between.';
+    'Pick the two you are choosing between. A record is shown where there is one; it never limits what you can pick.';
   drawFirst();
   $('second-model').hidden = true;
   drawSpine();
@@ -280,12 +280,21 @@ let liveModels = null;
 const liveTag = (model) => (liveModels && liveModels.has(model) ? ' · can race live' : '');
 
 // First model: every model with judged pairs on this flow, most evidence first, as compact cards.
+// Every model that can be chosen: the ones with a record on this flow, and any model the platform can run that has
+// none yet. A record is information about a model, never a condition for choosing it.
+function availableModels() {
+  const known = new Set(state.models.map((m) => m.model));
+  const fresh = liveModels ? [...liveModels].filter((m) => !known.has(m)).map((model) => ({ model, pairs: 0 })) : [];
+  return [...state.models, ...fresh];
+}
+const recordWords = (pairs) => (pairs ? plural(pairs, 'judged pair') : 'not tested on this workflow yet');
+
 function drawFirst() {
-  const models = [...state.models].sort((x, y) => y.pairs - x.pairs || (x.model < y.model ? -1 : 1));
+  const models = availableModels().sort((x, y) => y.pairs - x.pairs || (x.model < y.model ? -1 : 1));
   $('first-list').className = 'options compact';
   $('first-list').replaceChildren(
     ...models.map((m) =>
-      option('first', m.model, m.model === state.a, false, plural(m.pairs, 'judged pair') + liveTag(m.model), () => chooseFirst(m.model), true),
+      option('first', m.model, m.model === state.a, false, recordWords(m.pairs) + liveTag(m.model), () => chooseFirst(m.model), true),
     ),
   );
 }
@@ -326,14 +335,14 @@ function drawSecond() {
   const mine = state.scores.get(state.a);
   // every other model tested on this flow, in one list: the ones that have played the first model come first
   // (most head-to-head evidence first), then the ones that never met it
-  const others = state.models
+  const others = availableModels()
     .filter((m) => m.model !== state.a)
     .map((m) => ({ ...m, paper: onPaper(m.model), met: state.partners.get(m.model) || 0 }))
     .sort((x, y) => y.met - x.met || (x.paper.gap ?? Infinity) - (y.paper.gap ?? Infinity) || (x.model < y.model ? -1 : 1));
   const met = others.filter((m) => m.met);
   const enough = met.filter((m) => m.met >= rules.min_pairs).length;
   $('second-intro').textContent =
-    `All ${plural(others.length, 'other model')} tested on this flow. ${met.length} ${met.length === 1 ? 'has' : 'have'} played ${shortName(state.a)} on it` +
+    `All ${plural(others.length, 'other model')} you can choose. ${met.length} ${met.length === 1 ? 'has' : 'have'} played ${shortName(state.a)} on it` +
     (met.length ? ` (${enough} with the ${rules.min_pairs} judged pairs a verdict needs)` : '') +
     `; the rest have not, so those pairs have no verdict yet. ` +
     (mine ? `${shortName(state.a)} scores ${fixed(mine.score, 1)} on the Epoch Capabilities Index; a close score only makes the match fair.` : '');
@@ -813,7 +822,7 @@ async function drawSpine() {
     y += 22;
     heading('MODELS TESTED ON IT');
     modelsTop = y;
-    const list = [...state.models].sort((p, q) => q.pairs - p.pairs || (p.model < q.model ? -1 : 1));
+    const list = availableModels().sort((p, q) => q.pairs - p.pairs || (p.model < q.model ? -1 : 1));
     const half = Math.ceil(list.length / 2);
     list.forEach((m, i) => {
       const col = i < half ? 0 : 1;

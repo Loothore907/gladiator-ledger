@@ -332,7 +332,7 @@ async function main() {
         // every other model tested on the flow is offered as the second, in one list
         const offered = await page.locator('#second-list input').count();
         const tested = await page.locator('#first-list input').count();
-        if (offered !== tested - 1) problems.push(`the second-model list offers ${offered} models, but ${tested - 1} others were tested on this flow`);
+        if (offered !== tested - 1) problems.push(`the second-model list offers ${offered} models, but ${tested - 1} others can be chosen first`);
         const unmet = page.locator('#second-list label', { hasText: 'no head-to-head' }).locator('input');
         if (!(await unmet.count())) continue;
         neverMet = { card: index, a: await first.inputValue(), b: await unmet.first().inputValue() };
@@ -553,6 +553,16 @@ async function main() {
         await other.locator(`#second-list input[value="${offList}"]`).check();
         await other.waitForSelector('#live-absent', { timeout: 8000 }).catch(() => problems.push('the page does not say that a model on screen cannot be raced live'));
         if (await other.locator('#live-go').count()) problems.push('a race is offered for a pair with a model that is not on the live list');
+      }
+      // A model the platform can run but that has no record at all is still offered, and says so: a record is
+      // information, never a condition. (The stand-in runner offers one such model.)
+      const fresh = other.locator(`#second-list input[value="${NEWCOMER}"]`);
+      if (!(await fresh.count())) problems.push('a model the runner offers, with no record, is not offered in step 2');
+      else {
+        if (!(await other.locator('#first-list label', { hasText: 'not tested on this workflow yet' }).count())) problems.push('a model with no record is not described as one on its card');
+        await fresh.check();
+        await other.waitForFunction(() => /never met/.test(document.getElementById('verdict-headline')?.innerText || ''), null, { timeout: 8000 }).catch(() => problems.push('choosing a model with no record did not give a plain "no verdict" result'));
+        await other.waitForSelector('#live-go', { timeout: 8000 }).catch(() => problems.push('a model with no record, on the live list, cannot be raced'));
       }
       await other.close();
 
