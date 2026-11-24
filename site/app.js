@@ -1295,13 +1295,32 @@ async function drawLive(v) {
       const versus = !winner
         ? 'Live, this scenario had no winner.'
         : r.verdict === 'no data'
-          ? `Live, ${shortName(winner)} took this scenario: the first these two have played on this task. One scenario is not a verdict.`
+          ? `Live, ${shortName(winner)} took this scenario: the first these two have played on this task.`
           : !r.better
-            ? `Live, ${shortName(winner)} took this scenario. The record had no favourite, and one scenario does not make one.`
+            ? `Live, ${shortName(winner)} took this scenario. The record had no favourite between them.`
             : winner === r.better
               ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
               : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${r.wins[r.better]} of ${r.pairs}, but it is now on file.`;
       say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. A live result is kept apart from the recorded evidence the verdict rests on.'));
+      // The winner of this race, said plainly: it did this task better than the other, in this test, with these
+      // settings. That is the claim one race can carry; how consistently it would win is a different question.
+      const loser = winner === a ? b : a;
+      const res = (side) => ((record.body.contestants[side] || {}).results || [])[0] || {};
+      const [pa, pb] = [Boolean(res('A').passed), Boolean(res('B').passed)];
+      const how = pa && pb ? 'Both passed; it did the job for less money and time.' : pa || pb ? 'It passed the test and the other did not.' : 'Neither passed; it got further through the job.';
+      box.querySelector('#live-winner')?.remove();
+      say.before(
+        winner
+          ? el(
+              'div',
+              { class: 'band win', id: 'live-winner' },
+              el('p', { class: 'band-kind' }, 'Winner of this live race'),
+              el('p', { class: 'headline' }, `${shortName(winner)} won`),
+              el('p', null, `It did this task better than ${shortName(loser)} in this test, with these settings: ${offered.name || task}, ${level.value} difficulty, ${profile.value} scoring, the same fresh scenario for both. ${how}`),
+              el('p', { class: 'small' }, 'That is what one race shows. How consistently it would win takes more races.'),
+            )
+          : el('div', { class: 'band even', id: 'live-winner' }, el('p', { class: 'band-kind' }, 'This live race'), el('p', { class: 'headline' }, 'No winner'), el('p', { class: 'small' }, 'Neither model did this scenario better than the other.')),
+      );
       const liveText = liveReport(record, a, b, task, r);
       window.ledgerDemo.lastLiveReport = liveText;
       unsavedLive = true;

@@ -380,3 +380,4 @@ figure.graph figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted
 }
 @keyframes gdraw { to { stroke-dashoffset: 0; } }
 @keyframes gdraw-live { to { stroke-dashoffset: 0; stroke-dasharray: 4 4; } }
+#live .band { margin: 14px 0 10px; }
