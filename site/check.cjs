@@ -589,7 +589,7 @@ async function main() {
       await live.waitForSelector('#batch-band', { timeout: 10000 }).catch(() => problems.push('the batch never reported a result'));
       if (runner.asked.a !== pair.a || runner.asked.b !== pair.a || runner.asked.runs !== 10) problems.push(`a steadiness batch asked the runner for ${JSON.stringify(runner.asked)}`);
       const steady = await live.locator('#live-batch').innerText();
-      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'wrong decision in 1', '$0.0412', 'live-batch-1', 'join the record']) {
+      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'wrong decision in 1', '$0.0412', 'live-batch-1', 'never head-to-head']) {
         if (!steady.toUpperCase().includes(part.toUpperCase())) problems.push(`the steadiness result lacks ${JSON.stringify(part)}: ${JSON.stringify(steady.slice(0, 500))}`);
       }
       if (!(await live.locator('#live-stage .batch-lane').first().innerText()).includes('10 steps so far')) problems.push('a batch lane does not count steps as they happen');

@@ -39,6 +39,8 @@ SCHEMA = [
     "CREATE CONSTRAINT run_id IF NOT EXISTS FOR (n:Run) REQUIRE n.run_id IS UNIQUE",
     "CREATE CONSTRAINT match_key IF NOT EXISTS FOR (n:Match) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT attempt_key IF NOT EXISTS FOR (n:Attempt) REQUIRE n.key IS UNIQUE",
+    "CREATE CONSTRAINT self_check_key IF NOT EXISTS FOR (n:SelfCheck) REQUIRE n.key IS UNIQUE",
+    "CREATE CONSTRAINT self_attempt_key IF NOT EXISTS FOR (n:SelfAttempt) REQUIRE n.key IS UNIQUE",
     "CREATE CONSTRAINT model_name IF NOT EXISTS FOR (n:Model) REQUIRE n.name IS UNIQUE",
     "CREATE CONSTRAINT test_id IF NOT EXISTS FOR (n:Test) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT version_key IF NOT EXISTS FOR (n:TestVersion) REQUIRE n.key IS UNIQUE",
@@ -137,6 +139,40 @@ MERGE (att)-[made:MADE]->(ft)
 SET made.count = x.count
 """
 
+# A run of one model on both sides: each scenario is a SelfCheck with two SelfAttempts. Different labels from
+# Match and Attempt on purpose, so no question about pairs, wins or opponents can count them by accident.
+WRITE_SELF = """
+UNWIND $runs AS r
+MATCH (run:Run {run_id: r.run_id})
+UNWIND r.self_checks AS m
+MERGE (tst:Test {id: m.test_id})
+MERGE (tv:TestVersion {key: m.version_key})
+SET tv += m.version
+MERGE (tv)-[:VERSION_OF]->(tst)
+MERGE (sc:SelfCheck {key: m.key})
+SET sc += m.props
+MERGE (sc)-[:PART_OF]->(run)
+MERGE (sc)-[:USED]->(tv)
+WITH sc, m
+UNWIND m.attempts AS a
+MERGE (model:Model {name: a.model})
+SET model.provider = a.provider
+MERGE (sc)-[:BY]->(model)
+MERGE (att:SelfAttempt {key: a.key})
+SET att += a.props
+MERGE (att)-[:IN]->(sc)
+MERGE (att)-[:BY]->(model)
+"""
+
+WRITE_SELF_MADE = """
+UNWIND $runs AS r
+UNWIND r.self_made AS x
+MATCH (att:SelfAttempt {key: x.attempt})
+MATCH (ft:Fault {key: x.fault})
+MERGE (att)-[made:MADE]->(ft)
+SET made.count = x.count
+"""
+
 WRITE_SCORES = """
 UNWIND $scores AS s
 MERGE (b:Benchmark {name: s.benchmark})
@@ -166,6 +202,9 @@ def write(evidence: Evidence, store: str) -> dict:
                 faults = conn.execute(WRITE_FAULTS, {"runs": evidence.runs}).stats
                 made = conn.execute(WRITE_MADE, {"runs": evidence.runs}).stats
                 stats["faults"] = {k: faults[k] + made[k] for k in ("nodes_created", "relationships_created")}
+            if any(r.get("self_checks") for r in evidence.runs):
+                conn.execute(WRITE_SELF, {"runs": evidence.runs})
+                conn.execute(WRITE_SELF_MADE, {"runs": evidence.runs})
         if evidence.checks:
             stats["checks"] = conn.execute(WRITE_VALIDATIONS, {"checks": evidence.checks, "source": source}).stats
         if evidence.scores:

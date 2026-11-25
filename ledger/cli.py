@@ -321,9 +321,24 @@ def fitness(store: str, test: str, version: str, suites: list[str], profile: str
     faults: dict[str, list[dict]] = {}
     for f in rows(store, questions.TASK_FAULTS, scope):
         faults.setdefault(f.pop("model"), []).append(f)
+    attempts = {r["model"]: r for r in rows(store, questions.TASK_ATTEMPTS, scope)}
+    # self runs (one model on both sides) are attempts at the task too: added to that model's own count
+    own = {**scope, "live": any(str(x).startswith("live-") for x in suites)}
+    for extra in rows(store, questions.SELF_ATTEMPTS, own):
+        r = attempts.get(extra["model"])
+        if r is None:
+            continue  # a model with no match on this task has no row to add to
+        spent = (r["cost_per_attempt"] or 0) * r["attempts"] + (extra["spent"] or 0)
+        r["attempts"] += extra["attempts"]
+        r["passed"] += extra["passed"]
+        r["cost_per_attempt"] = spent / r["attempts"]
+    for f in rows(store, questions.SELF_FAULTS, own):
+        mine = {x["fault"]: x for x in faults.get(f["model"], [])}
+        if f["fault"] in mine:
+            mine[f["fault"]]["attempts_with"] += f["attempts_with"]
+            mine[f["fault"]]["times"] += f["times"]
     return {
-        r["model"]: policy.assess(test, r, faults.get(r["model"], []), profile, overrides, bar)
-        for r in rows(store, questions.TASK_ATTEMPTS, scope)
+        model: policy.assess(test, r, faults.get(model, []), profile, overrides, bar) for model, r in attempts.items()
     }
 
 
@@ -466,6 +481,8 @@ def verdict(
             }
             for p in pairs
         ]
+        # consistency: what each of the two did when given the same scenario twice (self runs), if it was
+        out["consistency"] = rows(store, questions.SELF_CONSISTENCY, {"version_key": version_key, "models": [a, b]})
         # who else is fit on this task, cheapest first: where to look when neither of these two is
         out["fit_on_task"] = [
             {
@@ -521,6 +538,11 @@ def print_verdict(v: dict) -> None:
             for x in f["faults"]:
                 if x["attempts_with"] and not x["breaks"] and x.get("kind_of") is None:
                     print(f"      tolerated: {x['fault']} ({x['level']}) in {x['attempts_with']} of {f['attempts']}")
+        for x in v.get("consistency") or []:
+            print(
+                f"  Consistency, {x['model']} against itself: the same ending in {x['same']} of {x['scenarios']} "
+                f"scenarios played twice (passed {x['passed']} of {x['attempts']}; counted in its fit above, never head to head)."
+            )
         if v["outcome"] == "neither fit":
             others = [o for o in v["fit_on_task"] if o["model"] not in (a, b)]
             print("  Fit on this task among the models tested, cheapest first:")

@@ -352,10 +352,26 @@ export function createLedger(ask, questions, rules) {
     const scope = { version_key: version, suites };
     const faults = {};
     for (const { model, ...f } of await ask(questions.task_faults, scope)) (faults[model] ||= []).push(f);
-    const out = {};
-    for (const r of await ask(questions.task_attempts, scope)) {
-      out[r.model] = assess(test, r, faults[r.model] || [], profile, overrides, bar);
+    const attempts = new Map((await ask(questions.task_attempts, scope)).map((r) => [r.model, { ...r }]));
+    // self runs (one model on both sides) are attempts at the task too: added to that model's own count
+    const own = { ...scope, live: suites.some((x) => String(x).startsWith('live-')) };
+    for (const extra of await ask(questions.self_attempts, own)) {
+      const r = attempts.get(extra.model);
+      if (!r) continue;
+      const spent = (r.cost_per_attempt || 0) * r.attempts + (extra.spent || 0);
+      r.attempts += extra.attempts;
+      r.passed += extra.passed;
+      r.cost_per_attempt = spent / r.attempts;
     }
+    for (const f of await ask(questions.self_faults, own)) {
+      const mine = (faults[f.model] || []).find((x) => x.fault === f.fault);
+      if (mine) {
+        mine.attempts_with += f.attempts_with;
+        mine.times += f.times;
+      }
+    }
+    const out = {};
+    for (const [model, r] of attempts) out[model] = assess(test, r, faults[model] || [], profile, overrides, bar);
     return out;
   }
 
@@ -476,6 +492,7 @@ export function createLedger(ask, questions, rules) {
         run: p.run,
         match: p.match,
       }));
+      out.consistency = await ask(questions.self_consistency, { version_key: versionKey, models: [a, b] });
       out.fit_on_task = Object.entries(everyone)
         .filter(([, f]) => f.fit)
         .map(([model, f]) => ({ model, pass_rate: f.pass_rate, attempts: f.attempts, cost_per_attempt: f.cost_per_attempt }));
