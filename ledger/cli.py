@@ -630,6 +630,10 @@ def main(argv=None):
         help="copy Gladiator's sealed records into data/ (both halves of a finished match on fresh-world tests)",
     )
     i.add_argument("--records", type=Path, help="folder holding runs/<run_id>/record.json")
+    i.add_argument(
+        "--runner",
+        help="address of a Gladiator race runner: import the sealed public records of its live races and batches",
+    )
     i.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
     i.add_argument("--data", type=Path, default=Path("data"), help="destination (default data/)")
     i.add_argument("--public-only", action="store_true", help="copy record.json only, never the private half")
@@ -727,6 +731,12 @@ def main(argv=None):
         print(json.dumps({k: {x: v[x] for x in v if x != "stats"} for k, v in out.items()}, indent=1))
     elif args.cmd == "import":
         out = {}
+        if args.runner:  # live races: public halves only, each checked against its seal like any other record
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as folder:
+                out["live"] = publish.fetch_live(args.runner, Path(folder))
+                out["live_records"] = publish.import_records(Path(folder), args.data / "records", private=False)
         if args.records:
             out["records"] = publish.import_records(args.records, args.data / "records", not args.public_only)
         if args.validations:

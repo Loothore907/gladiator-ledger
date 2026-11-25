@@ -1171,7 +1171,7 @@ function smallPrint() {
   if (!foot) return;
   foot.textContent =
     signInOutcome === 'signed'
-      ? 'You are signed in for live runs. The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money from the live budgets shown beside the button. What goes to the runner is the task, the two models, the settings and your sign-in; nothing else. Each live result is sealed, shown beside the record, and never counted in a verdict.'
+      ? 'You are signed in for live runs. The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money from the live budgets shown beside the button. What goes to the runner is the task, the two models, the settings and your sign-in; nothing else. Each live result is sealed and shown beside the record at once; it is counted in the verdict once it has been imported into the record, which happens in batches, not instantly.'
       : 'Every verdict on this page rests on recorded matches: finished, sealed and replayable here. The page reads them locally in this browser tab, needs no key and sends nothing you type anywhere. This view cannot start a match. Live races run on a separate Gladiator runner and are open to the hackathon judges for now (Judge sign-in, at the top).';
 }
 
@@ -1428,6 +1428,9 @@ async function drawLive(v) {
   const history = el('div', { id: 'live-history', class: 'live-history', hidden: true });
   let liveRaces = [];
   let liveBatches = [];
+  // the runs the record already holds: a live race that has been imported is recorded evidence now
+  const inRecord = new Set((await ask('MATCH (r:Run) RETURN r.run_id AS run', {})).map((x) => x.run));
+  const joined = el('p', { class: 'note', id: 'live-joined', hidden: true });
   const mine = new Map(); // run_id -> the facts of a race run in this visit
   const loadRaces = async () => {
     try {
@@ -1443,12 +1446,16 @@ async function drawLive(v) {
   // the batches on file for this task that are about these two models: the pair, or either against itself
   const showBatches = () => {
     const [a, b] = [v.a, v.b];
-    const about = liveBatches.filter((x) => x.task === task && [x.a, x.b].every((m) => m === a || m === b));
+    const about = liveBatches.filter((x) => x.task === task && [x.a, x.b].every((m) => m === a || m === b) && !inRecord.has(x.run_id));
     filed.hidden = !about.length;
     if (about.length) filed.replaceChildren(el('h5', null, 'Live batches on file for these models on this task'), el('ul', { class: 'batch-list' }, [...about].reverse().map(batchLine)));
   };
   const showTally = async (a, b, r) => {
-    const listed = liveRaces.filter((x) => x.task === task && ((x.a === a && x.b === b) || (x.a === b && x.b === a)));
+    const filedHere = liveRaces.filter((x) => x.task === task && ((x.a === a && x.b === b) || (x.a === b && x.b === a)));
+    const listed = filedHere.filter((x) => !inRecord.has(x.run_id));
+    const absorbed = filedHere.length - listed.length;
+    joined.hidden = !absorbed;
+    joined.textContent = absorbed ? `${plural(absorbed, 'earlier live race')} between these two ${absorbed === 1 ? 'is' : 'are'} now part of the record: counted in the verdict above, and replayable there.` : '';
     const between = [...listed.map((x) => (x.a_details ? x : mine.get(x.run_id) || x)), ...[...mine.values()].filter((x) => !listed.some((y) => y.run_id === x.run_id))];
     history.hidden = !between.length;
     if (!between.length) return;
@@ -1585,7 +1592,7 @@ async function drawLive(v) {
             : winner === r.better
               ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
               : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${r.wins[r.better]} of ${r.pairs}, but it is now on file.`;
-      say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. A live result is kept apart from the recorded evidence the verdict rests on.'));
+      say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. It is not in the verdict yet: live races join the record at the next import.'));
       // The winner of this race, said plainly: it did this task better than the other, in this test, with these
       // settings. That is the claim one race can carry; how consistently it would win is a different question.
       const loser = winner === a ? b : a;
@@ -1653,6 +1660,7 @@ async function drawLive(v) {
     stage,
     say,
     batchBox,
+    joined,
     history,
     filed,
   );
@@ -1771,7 +1779,7 @@ function batchTable(x) {
       el('code', null, x.run_id),
       ', seal ',
       el('code', null, String(x.seal).slice(0, 12)),
-      '. A live batch is kept apart from the recorded evidence the verdict rests on.',
+      '. A live batch is not in the verdict yet: batches between two models join the record at the next import.',
     ),
   ];
 }
@@ -1852,7 +1860,7 @@ function batchReport(x, title) {
     `**${headline}**`,
     '',
     ...(batchUnplayed(x) ? [batchUnplayed(x), ''] : []),
-    'This is a live batch. It is kept apart from the recorded matches a verdict rests on, and it holds for this test with these settings.',
+    'This is a live batch. It joins the record (and the verdict) at the next import of live races, and it holds for this test with these settings.',
     '',
     '| Side | Attempts passed | Faults (attempts they showed in) | Cost | Time per attempt |',
     '|---|---|---|---|---|',
@@ -1964,7 +1972,7 @@ function liveHistory(races, a, b, r) {
     const list = [...counts].sort((p, q) => q[1] - p[1]).map(([name, k]) => `${name} in ${k} of ${graded}`);
     return list.length ? list.join(', ') : graded ? 'no faults' : 'grades not listed';
   };
-  const recorded = r.verdict === 'no data' ? 'There are no recorded scenarios between them yet, so this is all that is known.' : `It is kept apart from the ${plural(r.pairs, 'recorded scenario')} the verdict rests on.`;
+  const recorded = r.verdict === 'no data' ? 'There are no recorded scenarios between them yet, so this is all that is known.' : `They are not in the verdict above yet: live races join the record, and its ${plural(r.pairs, 'recorded scenario')}, at the next import.`;
   return [
     el('h5', null, `Live history: ${shortName(a)} vs ${shortName(b)} on this task`),
     el(
@@ -1993,8 +2001,7 @@ function liveReport(record, a, b, title, v) {
     '',
     `Task \`${v.task}\`, version \`${v.version}\`. Raced live: \`${a}\` and \`${b}\`.`,
     '',
-    '**This is one live scenario, generated for this race. It is kept apart from the recorded matches, and one ' +
-      'scenario does not make a verdict.**',
+    '**This is one live scenario, generated for this race. It joins the record, and the verdict, at the next import of live races.**',
     '',
     `- Result: ${winner ? `\`${winner}\` took this scenario` : 'no winner'}.`,
     v.verdict === 'no data'

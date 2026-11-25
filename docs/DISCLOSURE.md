@@ -33,8 +33,10 @@ In the Gladiator repositories, during the contest:
 - the public release of the engine as gladiator-core.
 
 ## The data
-`data/` holds 37 sealed public match records (12 models: Anthropic, OpenAI and Google models through their APIs,
-and open-weights models through OpenRouter) and 20 validation records. The matches were played on Nov 22, 2026 and
+`data/` holds 37 sealed public match records from the Nov 22 suite matches, plus the live races and batches run
+since on the hosted race runner (8 as of Nov 25, $0.42 in API usage; imported with `ledger import --runner`, public
+halves only, and counted in verdicts like any other match; more join as they are run). The 37 cover 12 models ( Anthropic, OpenAI and Google models through their APIs,
+and open-weights models through OpenRouter) and come with 20 validation records. Those suite matches were played on Nov 22, 2026 and
 cost $24.90 in API usage in total (corrected figures, see below), paid from the author's provider
 accounts and plan credits. Each record includes its exact model ids, prices and costs, and the commit of the public Gladiator engine
 that played it. Each match's private half (`operator.json`, the answer key of its generated worlds) is published

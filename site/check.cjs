@@ -543,7 +543,7 @@ async function main() {
       // the live race offers its own report: this scenario, both costs, its sealed record, and that it is live
       const liveText = await live.evaluate(() => window.ledgerDemo.lastLiveReport || '');
       if (!(await live.locator('#download-live').count())) problems.push('the live result offers no report to download');
-      for (const part of ['# Live race report', 'live-check-1', '$0.0021', '$0.0034', 'This race cost $0.0055', 'kept apart from the recorded matches']) {
+      for (const part of ['# Live race report', 'live-check-1', '$0.0021', '$0.0034', 'This race cost $0.0055', 'joins the record']) {
         if (!liveText.includes(part)) problems.push(`the live race report lacks ${JSON.stringify(part)}`);
       }
       const ticks = await live.locator('#live-stage .track .tick').count();
@@ -572,7 +572,7 @@ async function main() {
       // was right), and the first draft of the pair's live history, kept apart from the record
       await live.waitForSelector('#live-history .race-card', { timeout: 5000 }).catch(() => problems.push('the live race was not written up on the page'));
       const written = await live.locator('#live-history').innerText();
-      for (const part of ['First draft from 1 live race', 'won 1', 'won 0', 'Live race 1', 'the only one to pass', '1 of 1 items right', 'wrong decision', 'stopped before finishing', 'ALR-1: it chose "escalate alert", the right decision was "close alert"', 'live-check-1', 'not a verdict', 'kept apart from']) {
+      for (const part of ['First draft from 1 live race', 'won 1', 'won 0', 'Live race 1', 'the only one to pass', '1 of 1 items right', 'wrong decision', 'stopped before finishing', 'ALR-1: it chose "escalate alert", the right decision was "close alert"', 'live-check-1', 'not a verdict', 'join the record']) {
         if (!written.includes(part)) problems.push(`the live write-up lacks ${JSON.stringify(part)}: ${JSON.stringify(written.slice(0, 600))}`);
       }
       if ((await live.locator('#live-history .race-card').count()) !== 1) problems.push('one live race should be written up once');
@@ -589,7 +589,7 @@ async function main() {
       await live.waitForSelector('#batch-band', { timeout: 10000 }).catch(() => problems.push('the batch never reported a result'));
       if (runner.asked.a !== pair.a || runner.asked.b !== pair.a || runner.asked.runs !== 10) problems.push(`a steadiness batch asked the runner for ${JSON.stringify(runner.asked)}`);
       const steady = await live.locator('#live-batch').innerText();
-      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'wrong decision in 1', '$0.0412', 'live-batch-1', 'kept apart from']) {
+      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'wrong decision in 1', '$0.0412', 'live-batch-1', 'join the record']) {
         if (!steady.toUpperCase().includes(part.toUpperCase())) problems.push(`the steadiness result lacks ${JSON.stringify(part)}: ${JSON.stringify(steady.slice(0, 500))}`);
       }
       if (!(await live.locator('#live-stage .batch-lane').first().innerText()).includes('10 steps so far')) problems.push('a batch lane does not count steps as they happen');

@@ -23,7 +23,11 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   (signed in once: the page's "Judge sign-in" button and an access code, or an invitation link that carries it;
   owner, 2026-11-24: nobody should have to build an address by hand. No code per run, and no run button for
   anyone else) and the public page says so ("coming soon" for everyone else). A live result is labelled live
-  and kept apart from the recorded evidence that public verdicts rest on. Budgets live in the operations repo
+  and shown beside the record at once. **Live races are real evidence (owner, 2026-11-25: a report that never
+  moves however many races are run is a static report):** they are sealed by the same engine on the same locked
+  tests, so they join the record through `ledger import --runner <address>` (public halves only), and from then
+  on verdicts, costs and reports count them like any other match. A batch of one model against itself is never
+  imported: it has no place in a head-to-head. Budgets live in the operations repo
   (`CLAUDE.md` there). The public page still costs nothing to use and needs no API keys.
 - **Private halves (owner, 2026-11-22):** a match's `operator.json` (the answer key of its generated worlds) is
   published beside its record once the match is over, so anyone can re-grade it. Only for tests that generate a

@@ -296,7 +296,7 @@ now that the match is over. Each public record carries a fingerprint of its priv
 the two belong together and re-grade a match themselves:
 
 ```bash
-uv run ledger verify     # 37 match records, every seal checked; 37 private halves checked against their fingerprint
+uv run ledger verify     # every match record's seal checked; every private half checked against its fingerprint
 ```
 A private half is published only for tests that generate a fresh world on every attempt, so the answers cannot help
 anyone on a later match. A test fails if the store and the records ever disagree. To rebuild the store yourself and
