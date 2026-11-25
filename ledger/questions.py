@@ -116,6 +116,40 @@ RETURN model, fault, kind, kind_of, attempts_with, times
 ORDER BY model, fault
 """
 
+# Self runs: one model on both sides of the same scenarios. They are attempts at the task like any other, so they
+# count toward that model's fitness (same suites rule; $live also takes the runner's live batches when the evidence
+# already includes live runs), and they are never part of a head-to-head.
+SELF_ATTEMPTS = """
+MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(sc:SelfCheck)-[:PART_OF]->(r:Run),
+      (sc)<-[:IN]-(a:SelfAttempt)-[:BY]->(m:Model)
+WHERE NOT sc.excluded AND (r.suite IN $suites OR ($live AND r.suite STARTS WITH 'live-'))
+RETURN m.name AS model, m.display_name AS display_name, count(a) AS attempts,
+       sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed, sum(a.cost_usd) AS spent
+ORDER BY model
+"""
+SELF_FAULTS = """
+MATCH (tv:TestVersion {key: $version_key})-[:CAN_SHOW]->(f:Fault),
+      (tv)<-[:USED]-(sc:SelfCheck)-[:PART_OF]->(r:Run), (sc)<-[:IN]-(a:SelfAttempt)-[:BY]->(m:Model)
+WHERE NOT sc.excluded AND (r.suite IN $suites OR ($live AND r.suite STARTS WITH 'live-'))
+OPTIONAL MATCH (a)-[x:MADE]->(f)
+OPTIONAL MATCH (f)-[:KIND_OF]->(parent:Fault)
+WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
+     count(x) AS attempts_with, sum(coalesce(x.count, 0)) AS times
+RETURN model, fault, kind, kind_of, attempts_with, times
+ORDER BY model, fault
+"""
+# Consistency: given the same scenario twice, how often did a model end the same way (both passed, or both did
+# not)? It says how much one race on this task can be trusted, for the model and for the test.
+SELF_CONSISTENCY = """
+MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(sc:SelfCheck)-[:BY]->(m:Model)
+WHERE NOT sc.excluded AND m.name IN $models
+OPTIONAL MATCH (sc)<-[:IN]-(a:SelfAttempt)
+WITH m.name AS model, sc, sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS ok
+RETURN model, count(sc) AS scenarios, sum(CASE WHEN sc.same THEN 1 ELSE 0 END) AS same,
+       2 * count(sc) AS attempts, sum(ok) AS passed
+ORDER BY model
+"""
+
 # Q3. Beat cycles: per test version, who beat whom by pair majority (ties dropped), then 3-cycles among them,
 # with each edge's pair score (a cycle of 2-1 wins is weak evidence; one of 6-0 wins is not). $suite limits it to
 # matches from one suite (suites can share test versions but play them under different settings).
@@ -309,5 +343,8 @@ ALL = {
     "pair_hazards": PAIR_HAZARDS,
     "fault_profile": FAULT_PROFILE,
     "task_attempts": TASK_ATTEMPTS,
+    "self_attempts": SELF_ATTEMPTS,
+    "self_faults": SELF_FAULTS,
+    "self_consistency": SELF_CONSISTENCY,
     "task_faults": TASK_FAULTS,
 }

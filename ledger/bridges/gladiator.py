@@ -191,14 +191,18 @@ def run_rows(body: dict, seal: str) -> dict:
     can_show: dict[tuple[str, str], dict] = {}  # (test version, fault) -> the fault, once per run
     made = []  # one row per attempt and fault it actually made
     includes: set[tuple[str, str]] = set()  # (test version, hazard its grader counts), once per run
+    # One model on both sides: a consistency check of that model on the task, not a match. Its scenarios are kept
+    # apart (self_checks) so that nothing that counts pairs, wins or opponents ever sees them.
+    same_model = sides["A"]["id"] == sides["B"]["id"]
+    self_checks = []
     for node, attempt in by_key["A"]:
         a, b = by_key["A"][(node, attempt)], by_key["B"].get((node, attempt))
         if b is None:
             continue
         challenge = a.get("challenge") or {"id": node, "version": "0", "content_sha256": ""}
         excluded = a.get("termination") in EXCLUDED or b.get("termination") in EXCLUDED
-        if excluded:
-            outcome = {"winner": None, "by": "excluded", "efficiency": (None, None)}
+        if excluded or same_model:  # a model does not beat itself: no winner is ever worked out
+            outcome = {"winner": None, "by": "excluded" if excluded else None, "efficiency": (None, None)}
         else:
             outcome = scoring.pair_outcome(a, b, profile)
         rule = outcome["by"] or "tie"
@@ -225,7 +229,7 @@ def run_rows(body: dict, seal: str) -> dict:
             )
         for res in (a, b):
             for counter, name in HAZARDS.items():
-                if counter in (res.get("grade_details") or {}):
+                if counter in (res.get("grade_details") or {}) and not same_model:
                     includes.add((version_key(challenge), name))
         for side, res in (("A", a), ("B", b)):
             for fault in fault_rows(res, challenge["id"]):
@@ -234,7 +238,7 @@ def run_rows(body: dict, seal: str) -> dict:
                 if count:
                     made.append({"attempt": f"{key}/{side}", "fault": fault["key"], "count": count})
         instance = a.get("instance") or {}
-        matches.append(
+        (self_checks if same_model else matches).append(
             {
                 "key": key,
                 "test_id": challenge["id"],
@@ -258,6 +262,12 @@ def run_rows(body: dict, seal: str) -> dict:
                     "rule": rule,
                     "excluded": excluded,
                     "started_unix": body.get("started_unix"),
+                    # for a consistency check: did the model end the same way both times it met this scenario
+                    **(
+                        {"same": bool(a.get("passed")) == bool(b.get("passed")), "model": sides["A"]["id"]}
+                        if same_model
+                        else {}
+                    ),
                 },
                 "attempts": attempts,
             }
@@ -286,9 +296,11 @@ def run_rows(body: dict, seal: str) -> dict:
             "seal_sha256": seal,
         },
         "matches": matches,
+        "self_checks": self_checks,
+        "self_made": made if same_model else [],
         "includes": [{"version_key": vkey, "name": name} for vkey, name in sorted(includes)],
         "can_show": [dict(fault, version_key=vkey) for (vkey, _), fault in sorted(can_show.items())],
-        "made": made,
+        "made": [] if same_model else made,
     }
 
 

@@ -1779,7 +1779,7 @@ function batchTable(x) {
       el('code', null, x.run_id),
       ', seal ',
       el('code', null, String(x.seal).slice(0, 12)),
-      '. A live batch is not in the verdict yet: batches between two models join the record at the next import.',
+      x.same_model ? '. It joins the record at the next import: counted in this model\'s own fitness for the task and shown under "Consistency", never head-to-head.' : '. A live batch is not in the verdict yet: it joins the record at the next import.',
     ),
   ];
 }
@@ -2038,6 +2038,28 @@ function liveReport(record, a, b, title, v) {
 
 // The result as a fight card: the two models, the arena, the comparison row by row, where each one slipped
 // (with the visitor's own say on how serious each fault is), then one verdict, then how to check it.
+// Consistency: what each model did when it was given the same scenario twice (a batch of one model on both lanes).
+// Not a comparison between the two: it says how steady each is on this task, and so how far one race can be
+// trusted. Those attempts are already counted in "Attempts passed" above. Nothing is shown until a self run exists.
+function consistencyRows(v, a, b) {
+  const rows = v.consistency || [];
+  if (!rows.length) return [];
+  const of = (m) => rows.find((x) => x.model === m);
+  const cell = (m) => {
+    const x = of(m);
+    return x ? el('span', { class: `fig${x.same < x.scenarios ? '' : ' none'}` }, `${x.same} of ${x.scenarios}`) : el('span', { class: 'fig none' }, 'not run');
+  };
+  const said = [a, b]
+    .map(of)
+    .filter(Boolean)
+    .map((x) => `${shortName(x.model)} passed ${x.passed} of ${x.attempts} of those attempts`)
+    .join('; ');
+  return [
+    el('div', { class: 'tape-head', id: 'consistency-head' }, 'Consistency: each model against itself, the same scenario twice (not a comparison)'),
+    tapeRow(cell(a), 'Same ending both times', `${said}. They are counted in "Attempts passed" above, never in the head-to-head.`, cell(b)),
+  ];
+}
+
 function fightCard(spec, v) {
   const { a, b } = v;
   const ids = [a, b];
@@ -2150,6 +2172,7 @@ function fightCard(spec, v) {
       `${percent(fa.pass_rate)} and ${percent(fb.pass_rate)}; ${percent(fa.bar)} needed`,
       num(`${fb.passed} of ${fb.attempts}`, fb.pass_rate < fb.bar ? 'bad' : ''),
     ),
+    ...consistencyRows(v, a, b),
   ];
 
   // Where each one slipped: every fault either model made (and every unforgivable one, made or not), with the

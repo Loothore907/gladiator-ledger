@@ -35,6 +35,8 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 |---|---|---|---|
 | `Run` | `run_id` | suite, started_unix, record_version, engine_commit, cap_usd, spent_usd, repeats, effort, max_output_tokens, attempt_budget_usd, timeout_s, model_a, model_b, recorded_winner, seal_sha256 | one run record |
 | `Match` | `run_id/node/attempt` | difficulty, seed, profile, **rule** (`success`, `progress`, `efficiency`, `tie`, `excluded`), excluded | one *pair*: both models on the same generated world |
+| `SelfCheck` | `run_id/node/attempt` | difficulty, seed, excluded, **same** (did the model end the same way both times), model | one scenario played twice by ONE model (a self run). Never a `Match`: nothing about pairs or wins sees it |
+| `SelfAttempt` | `run_id/node/attempt/side` | the same facts as `Attempt` | one of the two times. `(SelfAttempt)-[:IN]->(SelfCheck)`, `-[:BY]->(Model)`, `-[:MADE]->(Fault)`; `(SelfCheck)-[:USED]->(TestVersion)`, `-[:PART_OF]->(Run)`, `-[:BY]->(Model)`. Counted in the model's fitness for the task |
 | `Attempt` | `match/side` | side, effort, passed, first_pass, mistakes, model_errors, progress, cost_usd, tokens_in, tokens_cached (the part of the input the provider served from its cache), tokens_out, **cost_basis** (`billed`, `repriced`, `list`, `mixed`: where the cost came from, `ledger/costs.py`), tokens, wall_s, calls, termination, items, efficiency | one side of a match |
 | `Model` | `name` (exact model id, e.g. `anthropic:claude-haiku-5-5`) | provider | contestants |
 | `Test` | `id` (e.g. `gladiator/refund-queue`) | | challenge provenance |
