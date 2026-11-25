@@ -93,6 +93,31 @@ def import_records(src: Path, dest: Path, private: bool = True) -> dict:
     }
 
 
+def fetch_live(runner: str, into: Path) -> dict:
+    """Download the sealed public records of the live races and batches a Gladiator runner has on file, into
+    `into/<run_id>/record.json`, ready for import_records. A batch of one model against itself is left out: it
+    says how steady that model is, and has no place in a head-to-head. Nothing private is asked for."""
+    import urllib.request
+
+    def get(path: str):
+        request = urllib.request.Request(f"{runner.rstrip('/')}{path}", headers={"User-Agent": "gladiator-ledger"})
+        with urllib.request.urlopen(request, timeout=60) as reply:
+            return json.loads(reply.read().decode("utf-8"))
+
+    listed = get("/races")
+    wanted = [r["run_id"] for r in listed.get("races", [])]
+    skipped = []
+    for batch in listed.get("batches", []):
+        (skipped if batch.get("same_model") else wanted).append(batch["run_id"])
+    fetched = []
+    for run_id in wanted:
+        target = Path(into) / run_id / "record.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(get(f"/records/{run_id}"), indent=1, ensure_ascii=False), encoding="utf-8")
+        fetched.append(run_id)
+    return {"fetched": fetched, "same_model_batches_left_out": skipped}
+
+
 def verify(dest: Path) -> dict:
     """Check every shipped match: the public record's seal, and the private half against the record's fingerprint.
     Returns counts and a list of problems (empty when everything checks out)."""
