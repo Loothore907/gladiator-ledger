@@ -114,11 +114,17 @@ every kind and judges none.
 `uv run ledger ask fault_profile --param test_id=gladiator/incident-triage` lists, per model,
 each fault it could show and in how many attempts it showed it.
 
-## Live results (browser session only)
-When the page runs a live race, the result joins the in-browser graph as its own kind of node, so it can be drawn
-beside the recorded matches and never counted with them: `(LiveMatch {run_id, winner, seal})-[:RAN_ON]->(TestVersion)`
-and `-[:PLAYED_BY]->(Model)`. No question that answers a verdict matches `LiveMatch`. It is not in the shipped
-store; a live record becomes evidence only if it is imported like any other (`ledger import`).
+## Live results
+A live race is evidence once it is imported. The hosted runner's sealed public records are brought in with
+`ledger import --runner <address>` (the `Import live races` workflow does it after a race and on a schedule), and
+from then on a live race between two models is a `Run` with `Match` and `Attempt` nodes like any other, counted
+in verdicts, costs and reports. A batch of one model against itself is loaded as `SelfCheck` and `SelfAttempt`
+(above) and is never a `Match`.
+
+Until then, in the browser session that ran it: the result joins the in-browser graph as its own kind of node,
+so it can be drawn beside the recorded matches at once without being counted twice later:
+`(LiveMatch {run_id, winner, seal})-[:RAN_ON]->(TestVersion)` and `-[:PLAYED_BY]->(Model)`. No question that
+answers a verdict matches `LiveMatch`, and it is never in the shipped store.
 
 ## Fit for the task (`ledger/policy.py`)
 Whether a model is fit for a task is read from the graph by `task_attempts` and `task_faults` (every attempt the

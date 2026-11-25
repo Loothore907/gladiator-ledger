@@ -19,22 +19,19 @@ index finds the workflow you describe. Storage mode: the embedded Python library
 built from the same statements; and an MCP server gives AI assistants the same graph, read-only.
 
 > Entry for the Relate by Neo4j hackathon (Nov–Dec 2026). The repository ships a Relate store built from **37 real
-> matches between 12 models** (closed and open-weights), so everything below reproduces from a clean clone with
-> **no API keys and no cost**.
+> suite matches between 12 models** (closed and open-weights) and every live race run since, so everything below
+> reproduces from a clean clone with **no API keys and no cost**.
 
-> **Costs corrected (2026-11-23).** A check of recorded costs against the providers' real bills found the engine
-> had priced two kinds of call wrongly (Claude Haiku 5.5 about four times too high, models run through OpenRouter
-> about 40% too low). Every cost here is now the provider's billed figure where one exists, and every scenario
-> decided on efficiency was re-judged. What changed and how: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
-
-> **A weaker obstacle in two workflows (2026-11-24).** In refund queue and incident triage, as played here, a
-> record change announced mid-task often came too early or too late to matter, so a model that ignored the notice
-> was often not penalised. No match, cost or verdict changes. What it means for reading those results, and the
-> fixed test versions: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
+> **The record grows.** A live race on the hosted runner is sealed by the same engine on the same tests, imported
+> here and counted like any other match, so the page and the commands answer from more matches as races are run.
+> The figures printed in this README are from a fixed set, the 31 small-tier suite matches of Nov 22
+> (`--suite small-tier`), so what you run gives exactly what you read. Leave `--suite` off to count the live
+> races too. Two corrections to the data are described under [Corrections](#corrections).
 
 ## The idea in one table
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index: a tie on paper.
-Here are the same two models on four workflows, sixteen judged pairs each, played on the same generated worlds.
+Here are the same two models on four workflows, sixteen judged pairs each, played on the same generated worlds
+(the Nov 22 suite matches; any row: `uv run ledger verdict <task> --a "haiku 5.5" --b deepseek-v4.1 --suite small-tier`).
 
 | Task | Pairs won (Haiku / DeepSeek) | Attempts passed on the task (Haiku / DeepSeek) | For one person | For a business running it unattended |
 |---|---|---|---|---|
@@ -65,7 +62,10 @@ really ran.
 ask a [Gladiator race runner](https://github.com/Loothore907/gladiator-core/blob/main/docs/DEPLOYMENT.md) for one
 fresh scenario between the two models chosen in step 2 (each model's card says whether it can race live). It first states
 what the record expects, or that the two have never met on this task, then streams the race as it happens, then
-says whether the result was in line with the record or against it. Judges sign in once, with the "Judge sign-in"
+says whether the result was in line with the record or against it. The sealed result is then imported into the
+record (the runner starts the import when a race ends, and a scheduled job picks up anything missed), and from then
+on the verdict counts it. A batch plays 10 or 25 scenarios in one go, and one model on both lanes is a consistency
+check that is never counted as a head-to-head. Judges sign in once, with the "Judge sign-in"
 button and their access code (or an invitation link that carries it); nobody else is shown a race button. The panel shows what is left of each provider's live budget, and a
 model leaves the list when its provider's budget is used up. To run one on your own
 machine with your own keys: start `gladiator serve` in a gladiator-core checkout with
@@ -115,16 +115,17 @@ uv run ledger flows "an agent that handles refund requests for damaged orders"
 Closest tested workflows to: 'an agent that handles refund requests for damaged orders'  (searched for: refund
 requests damaged orders request order)      (output wrapped and shortened here)
 
-  gladiator/refund-queue  (Refund queue, version 2.2.0)  match 6.03
-    12 models, 205 judged pairs; modelled on tau-bench (style)
-    You run the refund queue for an online shop. Go through every open refund request, look up its order ...
+  gladiator/refund-queue  (Refund queue, version 2.2.0)  match 5.44
+    12 models, 207 judged pairs; modelled on tau-bench (style)
+    Refund queue duty for an online shop: every open refund request needs a decision. Check each request's ...
 
-  gladiator/inventory-transfer  (Inventory transfer, version 1.2.0)  match 2.54
+  gladiator/inventory-transfer  (Inventory transfer, version 1.2.0)  match 2.15
     ...
 ```
 A keyword search (a Relate **full-text index** over each workflow's title, brief and rules) that then walks the
 graph to what is known about each match: how many models and judged pairs stand behind it. When nothing matches it
-says so and lists what exists. It never invents a match.
+says so and lists what exists. It never invents a match. (Output of Nov 25, 2026. This command reads the whole
+record, so the pair counts grow as live races are imported.)
 
 ### Step 2. Pick a fair opponent
 ```bash
@@ -137,18 +138,19 @@ Epoch Capabilities Index: 160.3  (range 158.2 to 162.7)
 Closest on paper, open weights only:
   model                                         score     gap  ranges overlap  weights  in Ledger
   epoch:Kimi K3.1 Pro                           161.2   +0.87  yes             open     no matches yet
-  openrouter:deepseek/deepseek-v4.1-flash-1017  159.4   -0.92  yes             open     64 pairs already played against it
+  openrouter:deepseek/deepseek-v4.1-flash-1017  159.4   -0.92  yes             open     66 pairs already played against it
   ...
 ```
 Ledger never ranks models by a published score. It uses one, [Epoch AI's](https://epoch.ai/benchmarks)
 Capabilities Index, for a narrower question: which models are close enough on paper that a head-to-head is worth
 running? Haiku and DeepSeek are less than one point apart, with overlapping ranges. Over all four workflows they
-are close too (30 pairs to 34), but on the refund queue only one of them is fit for the job. **Close on paper,
-different on the task**: that gap is what Ledger is for.
+are close too (30 pairs to 34 in the suite matches), but on the refund queue only one of them is fit for the job.
+**Close on paper, different on the task**: that gap is what Ledger is for. (Output of Nov 25, 2026; the count of
+pairs already played grows with live races.)
 
 ### Step 3. Get the verdict
 ```bash
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1
+uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier
 ```
 ```text
 Use anthropic:claude-haiku-5-5: it is the only one of the two fit for this task, and it is ahead,
@@ -166,14 +168,16 @@ Head to head: Leaning anthropic:claude-haiku-5-5
   openrouter:minimax/minimax-m3.1-flash won 5, 3 tied (sign test p = 0.7744)
 ```
 **Fit comes first.** A model is fit for a task when it passes enough of its attempts and stays inside your
-tolerance for faults. Every attempt the model made on the task counts, whoever the opponent was. Each fault has a
+tolerance for faults. Every attempt the model made on the task counts, whoever the opponent was. (`--suite
+small-tier` keeps the answer to the fixed set of suite matches, so it reads exactly as printed here. Without it
+the live races between the two count as well.) Each fault has a
 level: **unforgivable** (one attempt with it makes the model unfit, shown with its count), **serious** (fine if
 rare) or **minor** (shown, never decides). The same fault is not equally serious everywhere: paying a refund twice
 breaks a business, paging the on-call twice is an annoyance. Two tolerances ship, and every level can be overruled:
 
 ```bash
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --profile enterprise
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --unforgivable "acted without reading"
+uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --profile enterprise
+uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --unforgivable "acted without reading"
 ```
 `personal` needs 80% of attempts passed and allows a serious fault in 10% of them; `enterprise` needs 90% and
 allows 2%. The defaults are in [`ledger/policy.py`](ledger/policy.py).
@@ -185,7 +189,7 @@ first, or says that none is.
 
 ### Step 4. Get the spec
 ```bash
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --out spec.md
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --out spec.md
 ```
 One document in four layers:
 
@@ -206,9 +210,9 @@ under these settings. A starting point for the real flow, to be tested again onc
 Two more reports are written from the same verdict, so the three cannot disagree:
 
 ```bash
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report cost       # the cost breakdown
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report evidence   # the evidence report
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report all --out spec.md
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --report cost       # the cost breakdown
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --report evidence   # the evidence report
+uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --report all --out spec.md
 ```
 The **cost breakdown** adds every scenario's cost for both models. The **evidence report** lists each model's
 fitness with every fault and its count, and every scenario with its winner, how it was decided and its sealed
@@ -264,10 +268,11 @@ Graph: 11 kinds of node and 17 relationships. See [docs/SCHEMA.md](docs/SCHEMA.m
 The matches come from [Gladiator](https://github.com/Loothore907/gladiator-core), an open head-to-head evaluation
 engine. Each pair of attempts is judged in order: success beats failure; if neither succeeds, getting further wins;
 if both succeed, the more efficient wins; and no real difference is a tie. Ledger re-judges every pair with that rule.
+These questions read the whole record, live races included, so the counts below (Nov 25, 2026) grow.
 
 **Where models slip** (`uv run ledger ask hazard_profile`). For each model and each hazard a test can generate:
 how many attempts met it, and how many fell for it. The commonest slip is acting without reading: deciding a
-request before looking up the records it depends on (DeepSeek in 12 of 72 attempts; only one model never did it).
+request before looking up the records it depends on (DeepSeek in 45 of 281 attempts; only one model never did it).
 After an ambiguous timeout, ten of the twelve models always checked before retrying.
 
 **Why there is no overall ranking** (`uv run ledger ask beat_cycles`). On the same test, A beat B, B beat C and C
@@ -277,7 +282,7 @@ these cycles and reports each edge's score, so a cycle of 2-1 wins reads as poss
 **Whether a test can be trusted** (`uv run ledger ask promotion`). For each test version: whether its validation
 record says it passed automatic validation (a reference player must pass and corner-cutting players must be caught),
 how many models played it, and how often a pair had a clear winner. The four current workflows each have 12 models,
-205 pairs and 98–100% decisive pairs. Validation records are read as sealed: two of the four (refund-queue 2.2.0 and
+more than 200 pairs and 98–100% decisive pairs. Validation records are read as sealed: two of the four (refund-queue 2.2.0 and
 incident-triage 1.2.0) pass by the rule they were made under and not by the stricter one Gladiator has used since
 2026-11-24 ([docs/DISCLOSURE.md](docs/DISCLOSURE.md)).
 
@@ -290,10 +295,12 @@ Every named question: `uv run ledger ask <name> --json` (`best_under_budget`, `h
 
 ## What's in the data
 `data/records/` holds the sealed public run records (`record.json`) of every match: two models, the same generated
-worlds, every action, grade and cost. `data/validations/` holds the sealed validation records of each test version.
-Beside each record sits its **private half** (`operator.json`): the answer key of every generated world, published
-now that the match is over. Each public record carries a fingerprint of its private half, so anyone can check that
-the two belong together and re-grade a match themselves:
+worlds, every action, grade and cost. That is the 37 suite matches of Nov 22 and every live race and batch run
+since on the hosted runner, imported as they are run (`ledger import --runner`). `data/validations/` holds the
+sealed validation records of each test version. Beside each suite match sits its **private half**
+(`operator.json`): the answer key of every generated world, published now that the match is over. Each public
+record carries a fingerprint of its private half, so anyone can check that the two belong together and re-grade a
+match themselves. Live races are imported as public records only:
 
 ```bash
 uv run ledger verify     # every match record's seal checked; every private half checked against its fingerprint
@@ -310,14 +317,26 @@ uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --store rebu
 **Known limits.** Evidence is uneven. Thirteen pairings of small models have 12 to 16 judged pairs on every workflow,
 enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read "not enough evidence", which is
 the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
-that only resembles one of these four needs its own test. Every verdict from the page and the assistant rests on this fixed set of
-finished matches. A live race (judges only for now) runs on a separate Gladiator runner; the page writes it up and
-keeps a live history of the pair beside the record, never counted in a verdict. In two of the four (refund queue
-and incident triage) one obstacle, a record that changes mid-task with a notice, was weaker than intended in the
-versions played here ([docs/DISCLOSURE.md](docs/DISCLOSURE.md)).
+that only resembles one of these four needs its own test. Every verdict from the page and the assistant rests on
+finished, sealed matches. A live race (judges only for now) runs on a separate Gladiator runner: the page shows
+it as it happens, and once its sealed record has been imported it counts in the verdict like any other match, so
+the page's numbers move as races are run. A batch of one model against itself is a consistency check: it counts
+in that model's own fitness and never as a head-to-head. In two of the four (refund queue and incident triage)
+one obstacle was weaker than intended in the versions played here (below).
 
 `data/epoch/` holds one file from Epoch AI's Benchmarking Hub (the Capabilities Index), used under the Creative
 Commons Attribution licence; see [data/epoch/README.md](data/epoch/README.md) for the credit.
+
+## Corrections
+**Costs corrected (2026-11-23).** A check of recorded costs against the providers' real bills found the engine
+had priced two kinds of call wrongly (Claude Haiku 5.5 about four times too high, models run through OpenRouter
+about 40% too low). Every cost here is now the provider's billed figure where one exists, and every scenario
+decided on efficiency was re-judged. What changed and how: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
+
+**A weaker obstacle in two workflows (2026-11-24).** In refund queue and incident triage, as played here, a
+record change announced mid-task often came too early or too late to matter, so a model that ignored the notice
+was often not penalised. No match, cost or verdict changes. What it means for reading those results, and the
+fixed test versions: [docs/DISCLOSURE.md](docs/DISCLOSURE.md).
 
 ## Before and during the contest
 The contest opened on Nov 11, 2026. Everything in this repository was written after that.

@@ -2415,8 +2415,11 @@ async function copy(text, note) {
 
 // ---- the example ------------------------------------------------------------------------------------------------
 
-// Walks the three steps for a flow and pair of models with the most head-to-head evidence in the graph (a settled
-// verdict if one of them has it), so a first-time visitor sees a full verdict and spec. Nothing is hard-coded: more matches can change the example.
+// Walks the three steps for the case the page exists to show: two models that are a tie on paper (their published
+// score ranges overlap), with enough head-to-head evidence for a verdict, where the task still names one to use and
+// the visitor's tolerance changes the answer. Among those, the pair with the most evidence, then the closest on
+// paper. If the record holds no such case: a settled verdict, and failing that simply the most evidence.
+// Nothing is hard-coded: more matches can change the example.
 async function showExample() {
   const button = $('example');
   button.disabled = true;
@@ -2432,17 +2435,34 @@ async function showExample() {
       }
     }
     found.sort((x, y) => y.pairs - x.pairs);
-    // among the pairs with the most evidence, prefer a settled one that names a model to use and where the
-    // visitor's tolerance changes the answer; failing that a settled one; otherwise the most evidence
     const judge = (c, profile) => ledger.verdict(c.flow.test, c.a, c.b, null, rules.good_enough, rules.min_pairs, profile, {});
+    const namesOne = (v) => ['use', 'only one fit'].includes(v.outcome);
+    const movedBy = async (c, personal) => (await judge(c, 'enterprise')).headline !== personal.headline;
+    // a tie on paper: both have a published score and the two ranges overlap
+    const scores = new Map((await ledger.scoresOf([...new Set(found.flatMap((c) => [c.a, c.b]))])).map((x) => [x.model, x]));
+    const gap = (c) => {
+      const [x, y] = [scores.get(c.a), scores.get(c.b)];
+      return x && y && x.low <= y.high && y.low <= x.high ? Math.abs(x.score - y.score) : null;
+    };
+    const ties = found
+      .filter((c) => c.pairs >= rules.min_pairs && gap(c) !== null)
+      .sort((x, y) => y.pairs - x.pairs || gap(x) - gap(y));
     let best = null;
+    for (const c of ties.slice(0, 12)) {
+      const personal = await judge(c, 'personal');
+      if (namesOne(personal) && (await movedBy(c, personal))) {
+        best = c;
+        break;
+      }
+    }
+    // no such case in the record: among the pairs with the most evidence, a settled verdict that names a model to
+    // use and that the visitor's tolerance changes; failing that a settled one; otherwise the most evidence
     let settled = null;
-    for (const c of found.slice(0, 12)) {
+    for (const c of best ? [] : found.slice(0, 12)) {
       const personal = await judge(c, 'personal');
       if (personal.verdict !== 'better') continue;
       settled = settled || c;
-      if (!['use', 'only one fit'].includes(personal.outcome)) continue;
-      if ((await judge(c, 'enterprise')).headline !== personal.headline) {
+      if (namesOne(personal) && (await movedBy(c, personal))) {
         best = c;
         break;
       }
