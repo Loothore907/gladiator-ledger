@@ -1,0 +1,78 @@
+# Brings the live races and batches run on the hosted race runner into the record, so every run counts.
+# (Owner, 2026-11-25: "all our runs should be building that dataset. No reason to be running these tests if the
+# results are just getting dropped.")
+#
+# Every hour, and by hand: download the runner's sealed public records, import them like any other record (each
+# seal is checked; nothing private is asked for), rebuild the store and the page data, run the tests, and commit the
+# result to main. Then CI is started on that commit; the page is published only after CI passes, as always.
+# Nothing is committed when the runner has nothing new. This is the one job that commits to main without a pull
+# request: it only ever adds sealed records and the files rebuilt from them.
+name: Import live races
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: import-live
+  cancel-in-progress: false
+
+env:
+  RUNNER: https://race.gladiatorbench.com
+
+jobs:
+  import:
+    name: Import the runner's new records
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # commits the imported records and the rebuilt data
+      actions: write # starts CI on the new commit
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: astral-sh/setup-uv@v10.4.0
+      - run: uv sync --frozen
+      - name: Download and import the runner's sealed records
+        run: uv run ledger import --runner "$RUNNER"
+      - name: Anything new?
+        id: new
+        run: |
+          if [ -z "$(git status --porcelain data/records)" ]; then
+            echo "Nothing new on the runner." >> "$GITHUB_STEP_SUMMARY"
+            echo "any=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=yes" >> "$GITHUB_OUTPUT"
+            echo "New records:" >> "$GITHUB_STEP_SUMMARY"
+            git status --porcelain data/records | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Rebuild the store and the page data from the records
+        if: steps.new.outputs.any == 'yes'
+        run: |
+          set -euo pipefail
+          rm -f data/ledger.rl
+          uv run ledger build --records data/records --validations data/validations --scores data/epoch
+          uv run ledger site
+          uv run ledger verify
+      - name: Tests
+        if: steps.new.outputs.any == 'yes'
+        run: uv run pytest -q
+      - name: Commit to main and start CI on it
+        if: steps.new.outputs.any == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data site/data
+          git commit -m "Import live races from the runner ($(git status --porcelain data/records | grep -c record.json || true) new records)"
+          git push origin HEAD:main
+          # a push made by a workflow does not start other workflows, so CI is started by hand; the page is
+          # published by the usual job once CI passes on this commit
+          gh workflow run ci.yml --ref main

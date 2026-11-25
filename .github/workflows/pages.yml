@@ -22,10 +22,12 @@ concurrency:
 jobs:
   deploy:
     name: Deploy site/ to GitHub Pages
-    # After CI: only when it passed, and only for a push to main (never for a pull request's run).
+    # After CI: only when it passed, and only for a run on main that a push started or that was started by hand
+    # (the live-race import starts CI by hand on the commit it makes). Never for a pull request's run.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
