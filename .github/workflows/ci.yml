@@ -64,16 +64,55 @@ jobs:
             uv run ledger ask "$q" --param test_id=gladiator/refund-queue --param budget=0.05 > /dev/null
           done
           uv run ledger ask hazard_profile --json > /dev/null
-          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --profile enterprise > /dev/null
-          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --unforgivable "acted without reading" > /dev/null
           uv run ledger verify
           uv run ledger opponents "haiku 5.5" --open-only > /dev/null
           uv run ledger flows "an agent that handles refund requests for damaged orders" | grep -q "gladiator/refund-queue"
-          uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 | grep -q "## 2. Blueprint"
+          # The whole record, live races included: these answers move as races are imported, so the commands only
+          # have to run. Nothing here may depend on what they say.
+          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 > /dev/null
           uv run ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash > /dev/null
-          uv run ledger verdict incident-triage --a "haiku 5.5" --b minimax-m3.1 | grep -q "does this task better"
-          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 | grep -q "the only one of the two fit for this task"
-          uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 | grep -q "Leaning"
+          uv run ledger verdict incident-triage --a "haiku 5.5" --b minimax-m3.1 > /dev/null
+          uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 > /dev/null
+      - name: The README's figures are what the fixed set of suite matches gives
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Every figure the README prints comes from the small-tier suite matches (--suite small-tier). Live races
+          # never join that set, so these hold however many are imported; a new suite match changes them in a
+          # reviewed pull request, together with the README.
+          fixed() { uv run ledger "$@" --suite small-tier; }
+          fixed verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --profile enterprise > /dev/null
+          fixed verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --unforgivable "acted without reading" > /dev/null
+          fixed spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report cost > /dev/null
+          fixed spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report evidence > /dev/null
+          spec=$(fixed spec refund-queue --a "haiku 5.5" --b minimax-m3.1)
+          grep -qF "## 2. Blueprint" <<< "$spec"
+          triage=$(fixed verdict incident-triage --a "haiku 5.5" --b minimax-m3.1)
+          grep -qF "does this task better" <<< "$triage"
+          # Step 3, as printed
+          shown=$(fixed verdict refund-queue --a "haiku 5.5" --b minimax-m3.1)
+          for want in \
+            "it is the only one of the two fit for this task, and it is ahead" \
+            "claude-haiku-5-5: fit. Passed 44 of 54 (81%; bar 80%)" \
+            "minimax-m3.1-flash: NOT fit. Passed 53 of 67 (79%; bar 80%)" \
+            "Head to head: Leaning anthropic:claude-haiku-5-5" \
+            "15 judged pairs" "claude-haiku-5-5 won 7," "minimax-m3.1-flash won 5, 3 tied (sign test p = 0.7744)"; do
+            grep -qF "$want" <<< "$shown" || { echo "README step 3 is no longer what the command prints: $want"; exit 1; }
+          done
+          # "The idea in one table": task, pairs won (Haiku, DeepSeek), share of attempts passed (Haiku, DeepSeek)
+          while read -r task won_a won_b pass_a pass_b; do
+            row=$(fixed verdict "$task" --a "haiku 5.5" --b deepseek-v4.1)
+            grep -qF "16 judged pairs" <<< "$row" &&
+              grep -qF "claude-haiku-5-5 won $won_a, openrouter:deepseek/deepseek-v4.1-flash-1017 won $won_b," <<< "$row" &&
+              grep -qE "claude-haiku-5-5: .*\($pass_a%; bar 80%\)" <<< "$row" &&
+              grep -qE "deepseek-v4.1-flash-1017: .*\($pass_b%; bar 80%\)" <<< "$row" ||
+              { echo "The README's table is no longer what the record gives for $task"; exit 1; }
+          done <<'ROWS'
+          refund-queue 11 5 81 37
+          access-review 5 11 96 96
+          inventory-transfer 5 11 85 93
+          incident-triage 9 7 87 96
+          ROWS
       - name: Rebuilding the store from the shipped records gives the same answers
         shell: bash
         run: |

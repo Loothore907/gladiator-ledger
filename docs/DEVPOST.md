@@ -29,8 +29,10 @@ and walks it:
    one for a single person. Then the head to head, scenario by scenario.
 4. **Watch the race.** Any recorded scenario replays step by step: both models on the same world, at the pace
    they really ran, with the faults where they happened.
-5. **Race them live.** The graph states what the record expects, a runner plays one brand-new scenario, and the
-   page says whether the result was in line with the record or against it. (Open to judges: "Judge sign-in" on the page, with the access code.)
+5. **Race them live.** The graph states what the record expects, a runner plays one brand-new scenario (or a
+   batch of 10 or 25), and the page says whether the result was in line with the record or against it. The sealed
+   result then joins the record, so the verdict moves as races are run. (Open to judges: "Judge sign-in" on the
+   page, with the access code.)
 6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every hazard,
    and the sealed records behind it.
 
@@ -40,7 +42,7 @@ server for your own AI assistant, and a command line.
 ## Why it is useful
 Choosing a model is usually done by reading rankings or by feel. Ledger replaces that with a claim about the task.
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index, a tie on paper.
-They cost about the same and split 64 head-to-head scenarios 30 to 34. Yet on four workflows the answer changes
+In the Nov 22 suite matches they cost about the same and split 64 head-to-head scenarios 30 to 34. Yet on four workflows the answer changes
 with the task and with who is asking: on a refund queue DeepSeek fails 43 of 68 attempts by acting before it has
 read the records, and on access reviews and inventory transfers it leads 11 scenarios to 5. For one person, a single wrong decision in 54 attempts is tolerable; for a
 business moving money it is disqualifying, and Ledger makes both calls and shows the count behind each. When the
@@ -69,7 +71,8 @@ uv sync
 uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1
 python3 -m http.server --directory site 8000     # the browser page
 ```
-No API keys and no cost. Linux, macOS and Windows.
+No API keys and no cost. Linux, macOS and Windows. The record grows as live races are run; add
+`--suite small-tier` to a command to get the fixed figures quoted here and in the README.
 
 ## Before and during the contest (the contest opened Nov 11, 2026)
 | When | What |

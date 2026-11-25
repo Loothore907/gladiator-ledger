@@ -11,10 +11,12 @@ the result as a fight card: the two models, one square per scenario, the compari
 they can change, one verdict, and the build spec (the same Markdown `ledger spec` writes). Any scenario replays
 as a race, step by step, from `data/replays/`.
 
-**Live races.** The data is a fixed set of finished matches. The page can also ask a Gladiator race runner for
-one fresh scenario and show it as it happens: open it with `?runner=<address>` for a runner on your own machine,
-or set the address in `data/live.json`. With no runner it says live races are open to the hackathon judges for
-now. A live result is shown with its sealed record and kept apart from the recorded evidence.
+**Live races.** The data is every finished, sealed match on file. The page can also ask a Gladiator race runner
+for one fresh scenario (or a batch of them) and show it as it happens: open it with `?runner=<address>` for a
+runner on your own machine, or set the address in `data/live.json`. With no runner it says live races are open to
+the hackathon judges for now. A live result is shown with its sealed record at once, beside the recorded
+evidence. It counts in the verdict once its record has been imported (`ledger import --runner`, which the
+`Import live races` workflow runs) and this folder's data has been rebuilt from it.
 
 ## Files
 

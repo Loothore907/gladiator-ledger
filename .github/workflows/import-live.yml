@@ -2,16 +2,19 @@
 # (Owner, 2026-11-25: "all our runs should be building that dataset. No reason to be running these tests if the
 # results are just getting dropped.")
 #
-# Every hour, and by hand: download the runner's sealed public records, import them like any other record (each
-# seal is checked; nothing private is asked for), rebuild the store and the page data, run the tests, and commit the
-# result to main. Then CI is started on that commit; the page is published only after CI passes, as always.
+# After a race (the runner starts this job itself), on a schedule, and by hand: download the runner's sealed public
+# records, import them like any other record (each seal is checked; nothing private is asked for), rebuild the store
+# and the page data, run the tests, and commit the result to main. Then CI is started on that commit; the page is published only after CI passes, as always.
 # Nothing is committed when the runner has nothing new. This is the one job that commits to main without a pull
 # request: it only ever adds sealed records and the files rebuilt from them.
 name: Import live races
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    # The backstop for a race the runner could not announce. Three slots an hour, because GitHub runs scheduled
+    # jobs when it has room and skips many of them: with one slot an hour this job ran once in its first 16 hours
+    # (2026-11-25). A run that finds nothing new takes about 20 seconds and commits nothing.
+    - cron: "7,27,47 * * * *"
   workflow_dispatch:
 
 permissions:
