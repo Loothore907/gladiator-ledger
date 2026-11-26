@@ -1,0 +1,13 @@
+.git
+.venv
+.env
+.env.*
+**/__pycache__
+.ruff_cache
+.pytest_cache
+site
+docs
+tests
+live-state
+data/ledger.rl
+data/ledger-steps.rl

@@ -204,3 +204,64 @@ jobs:
           npx playwright install --with-deps chromium
       - name: A race the live record takes in is in the page's graph and its verdict, as the command line has it
         run: node site/check-live.cjs
+
+  container:
+    name: Live record container
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build image
+        run: docker build -t ledger-live:ci .
+      - name: The service builds its store on a freshly mounted volume, answers, reopens it, and never runs as root
+        run: |
+          docker volume create ledger_state
+          docker run -d --name live --memory 1g -v ledger_state:/data -p 8080:8080 ledger-live:ci \
+            serve --host 0.0.0.0 --port 8080 --state /data --data /app/data --origin https://ledger.example
+          for i in $(seq 1 60); do curl -sf localhost:8080/health > /dev/null && break || sleep 3; done
+          curl -sf localhost:8080/health | python3 -c "import json,sys; h=json.load(sys.stdin); assert h['ok'] and h['steps'] > 0 and not h['refused'] and not h['problem'], h; print(h)"
+          # it holds exactly the sealed records it was built with
+          held=$(curl -sf localhost:8080/runs | python3 -c "import json,sys; print(len(json.load(sys.stdin)['runs']))")
+          test "$held" = "$(find data/records -name record.json | wc -l)"
+          # the service itself runs as the unprivileged user, whatever started the container, and owns its state
+          test "$(docker exec live stat -c %U /proc/1)" = "ledger"
+          test "$(docker exec live stat -c %U /data/store)" = "ledger"
+          # a page that is allowed may read it from a browser; any other gets no permission
+          curl -sf -D - -o /dev/null -H "Origin: https://ledger.example" localhost:8080/runs | grep -qi "access-control-allow-origin: https://ledger.example"
+          ! curl -sf -D - -o /dev/null -H "Origin: https://elsewhere.example" localhost:8080/runs | grep -qi "access-control-allow-origin"
+          # started again, it reopens the store it left instead of building it again
+          docker restart live
+          for i in $(seq 1 30); do curl -sf localhost:8080/health > /dev/null && break || sleep 2; done
+          docker logs live 2>&1 | grep -q "store reopened: $held records"
+          test "$(docker inspect live --format '{{.State.OOMKilled}}')" = "false"
+          docker rm -f live
+
+  publish:
+    name: Publish the container image
+    # Only what main's checks passed is published: the hosting rule (docs/DEPLOYMENT.md in gladiator-core).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, test, readme, demo-page, live-record, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/loothore907/gladiator-ledger
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image, labelled with the commit it came from
+        run: |
+          docker build -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:main" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.licenses=Apache-2.0" .
+      - name: The image about to be published checks every sealed record it carries
+        run: docker run --rm "$IMAGE:$GITHUB_SHA" verify --data /app/data
+      - name: Push to GitHub's container registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:main"

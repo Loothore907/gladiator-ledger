@@ -114,6 +114,10 @@ uv run ledger serve --runner http://127.0.0.1:8787 --state live-state --origin h
 # then open http://localhost:8000/?runner=http://127.0.0.1:8787&record=http://127.0.0.1:8790
 ```
 
+The service also builds as a container (`Dockerfile`: the code and the sealed records it starts from, nothing
+secret), which CI builds, runs and, for every green commit on `main`, publishes as
+`ghcr.io/loothore907/gladiator-ledger:<commit>`.
+
 A page published before some races, reading a live record that has taken them in, must be exactly the page
 published after them. CI holds it to that with the real service and a real browser (`site/check-live.cjs`): the
 last four records on file are played over again, and the page's graph is compared node by node and link by link,

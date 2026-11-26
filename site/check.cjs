@@ -33,6 +33,10 @@ function serve() {
       return res.end('not found');
     }
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
+    // This check is about the page's own copy of the record, and must reach nothing outside this folder: the
+    // page is served without the address of the hosted live record (site/check-live.cjs checks the page with
+    // one, on this machine). The runner's address stays: the page must not contact it unasked, and that is checked.
+    if (name === '/data/live.json') return res.end(JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), record: undefined }));
     res.end(fs.readFileSync(file));
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));

@@ -77,7 +77,10 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   records, reading a live record that holds them, must be exactly the page published after them
   (`site/check-live.cjs`, with the real service); with no live record the page is its shipped copy and says so.
   Host: a second small one, approved in principle by the owner; Claude still asks before anything is created
-  there, and the owner runs the deploy. Until it is deployed `live.json` names no record.
+  there, and the owner runs the deploy. Until it is deployed `live.json` names no record. The service ships as a
+  container (`Dockerfile`; it carries the sealed records it starts from and no secret): CI builds and runs it,
+  and publishes the image of every green commit on `main`, which is the only thing the deploy workflow in the
+  operations repo will deploy.
 - **A workflow has one account, whatever order its records came in.** Its text, tools and package facts are made
   from every record on file (`Flows` in `ledger/bridges/gladiator.py`), never from whichever was loaded last.
 - **Quoted figures carry their date.** A figure printed in the README or the submission is the record as it stood
