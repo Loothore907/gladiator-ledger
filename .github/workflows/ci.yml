@@ -138,7 +138,9 @@ jobs:
   demo-page:
     name: Demo page matches the command line
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The check clicks through every pair of models on every workflow, and each verdict reads more as the record
+    # grows: about 7 minutes on Nov 26 (49 matches), after up to 5 to install the browser. 15 was getting close.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
