@@ -14,3 +14,5 @@ operator.json
 node_modules/
 # The whole graph with every step: built locally from the records when a question needs it (ledger/routes.py)
 /data/ledger-steps.rl
+# Ledger live keeps its store and the records it takes in here (ledger/live.py)
+/live-state/

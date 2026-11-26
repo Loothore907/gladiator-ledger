@@ -64,6 +64,17 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   the reader's own, and it never touches the head to head or any verdict it was not asked for. Where the grader
   counts the same thing, the pattern must agree with it on every attempt (`tests/test_steps.py`). The steps are
   too big to ship: they live in `data/ledger-steps.rl`, built locally on first use and never committed.
+- **Ledger live: the record kept in one Relate store, written to as races end (owner, 2026-11-26).** A fifteen
+  minute import that could refuse itself in silence was the only way a race reached the record. `ledger serve`
+  (`ledger/live.py`) is a small service of Ledger's own that keeps the whole record, steps included, in one Relate
+  directory store: it takes in each sealed record the runner files (checked against its seal, kept as a file),
+  and hands a page the rows of what its own copy lacks. It runs no match, holds no key, and only ever reads the
+  one runner it was started with. A record added to the store must leave exactly the graph that building from
+  all records leaves, which is the graph the command line builds (`tests/test_live.py`). The sealed records stay
+  the master copy and the git import stays, as the archive. Host: a second small one, approved in principle by
+  the owner; Claude still asks before anything is created there, and the owner runs the deploy.
+- **A workflow has one account, whatever order its records came in.** Its text, tools and package facts are made
+  from every record on file (`Flows` in `ledger/bridges/gladiator.py`), never from whichever was loaded last.
 - **Quoted figures carry their date.** A figure printed in the README or the submission is the record as it stood
   at a stated moment, reproducible with `--until`; CI checks them that way. The page always reads the whole record.
 - The graph is a view: records stay the master copy, and the loader must stay safe to re-run.

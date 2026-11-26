@@ -73,6 +73,18 @@ words of a described flow and then follows the graph to the models and pairs beh
 | `(TestVersion)-[:VALIDATED_BY]->(ValidationRun)` | evidence that the test itself is sound |
 | `(ValidationRun)-[:GUARDS]->(Hazard)` | the corner-cutting player that stands for this hazard was caught (or not) |
 
+## The live record
+
+`ledger serve` (`ledger/live.py`) keeps this same graph, steps included, in one Relate store that stays open and
+is written to as races end: each sealed record a runner files is checked against its seal, kept as a file, and
+added with the statements above. Relate lets one process write a store, so the store is in Relate's directory
+format (a single `.rl` file can be opened by nobody else while it is held), and one thread owns the connection.
+It adds one node of its own, `LiveStore {key: 'store', loader}`, which names the code that built the store: a
+store built by other code is rebuilt from the records at start-up. Adding records one at a time, in any order,
+leaves exactly the graph that building from all of them leaves (`tests/test_live.py`). That rests on one rule:
+what a `TestVersion` says of its workflow (text, tools, package facts) is one account made from every record on
+file (`Flows` in `ledger/bridges/gladiator.py`), not what the last record happened to say.
+
 ## Steps: how an attempt got to its result
 
 A run record also keeps every step of every attempt (`turns`: the tool called, its arguments, what the simulated

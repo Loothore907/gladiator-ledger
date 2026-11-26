@@ -1061,6 +1061,23 @@ def main(argv=None):
     sub.add_parser(
         "mcp", parents=[common], help="serve the store to an AI assistant over MCP (stdio): flows, verdict, spec"
     )
+    sv = sub.add_parser(
+        "serve",
+        help="Ledger live: keep the record in one Relate store, take in each race as the runner files it, and "
+        "hand the page what its own copy does not hold yet",
+    )
+    sv.add_argument("--runner", help="address of the Gladiator race runner to take sealed records in from")
+    sv.add_argument(
+        "--state", type=Path, default=Path("live-state"), help="where the store and the records taken in are kept"
+    )
+    sv.add_argument(
+        "--data", type=Path, default=Path("data"), help="Ledger's data folder to start from (default data/)"
+    )
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8790)
+    sv.add_argument(
+        "--origin", action="append", default=[], help="a page address allowed to read it from a browser (repeatable)"
+    )
     fl = sub.add_parser("flows", parents=[common], help="describe your flow: find the closest tested workflows")
     fl.add_argument("described", nargs="?", help="what the flow does, in your own words")
     fl.add_argument("--json", action="store_true")
@@ -1171,6 +1188,10 @@ def main(argv=None):
         from ledger import assistant
 
         assistant.serve(args.store)
+    elif args.cmd == "serve":
+        from ledger import live
+
+        live.serve(args.state, args.data, args.runner, args.host, args.port, args.origin)
     elif args.cmd == "flows":
         result = find_flows(args.store, args.described)
         if args.json:
