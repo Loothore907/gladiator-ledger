@@ -105,9 +105,9 @@ sealed record the runner files (checked against its seal first), and hands a pag
 own copy lacks. A page that knows of one asks it on load and loads what is newer into the graph in the tab, and
 when a race started from the page ends, the race is in the graph a moment later: the verdict is read again and
 counts it, the race is one more dot in the evidence graph, and its world is drawn under the dots. The service runs
-no match and holds no key; the sealed records stay the master copy, and the import stays as the archive. It is
-not hosted yet, so on the hosted page a live race still joins through the import. To see it on your own machine,
-beside a runner as above:
+no match and holds no key; the sealed records stay the master copy, and the import stays as the archive. The
+hosted page reads a hosted one (`record` in `site/data/live.json`), which reads the hosted runner. To see it on
+your own machine, beside a runner as above:
 
 ```bash
 uv run ledger serve --runner http://127.0.0.1:8787 --state live-state --origin http://localhost:8000
