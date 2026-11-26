@@ -593,6 +593,7 @@ async function showVerdict(scroll = false) {
 const OWN_RECORD = `MATCH (tv:TestVersion {key: $version})<-[:USED]-(mt:Match)<-[:IN]-(x:Attempt)-[:BY]->(m:Model)
 WHERE NOT mt.excluded AND m.name IN [$a, $b]
 RETURN m.name AS model, count(x) AS attempts, sum(CASE WHEN x.passed THEN 1 ELSE 0 END) AS passed,
+       sum(CASE WHEN coalesce(x.task_correct, x.passed) THEN 1 ELSE 0 END) AS right,
        avg(x.cost_usd) AS cost_per_attempt`;
 
 // Two models that have never met on this task: say so, show what each did against others, and leave the
@@ -604,7 +605,8 @@ function drawNoRecord(v, own) {
       'tr',
       null,
       el('th', { scope: 'row' }, modelLabel(name)),
-      el('td', null, r ? `${r.passed} of ${r.attempts} (${percent(r.passed / r.attempts)})` : 'never played this task'),
+      el('td', null, r ? `${r.right} of ${r.attempts} (${percent(r.right / r.attempts)})` : 'never played this task'),
+      el('td', null, r ? `${r.passed} of ${r.attempts}` : '-'),
       el('td', null, r ? `$${fixed(r.cost_per_attempt, 4)}` : '-'),
     );
   };
@@ -621,7 +623,7 @@ function drawNoRecord(v, own) {
       'table',
       { class: 'own' },
       el('caption', null, 'Each model\'s own record on this task, against other opponents'),
-      el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Model'), el('th', { scope: 'col' }, 'Attempts passed'), el('th', { scope: 'col' }, 'Cost per attempt'))),
+      el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Model'), el('th', { scope: 'col' }, 'Attempts with the right result'), el('th', { scope: 'col' }, 'Right process too'), el('th', { scope: 'col' }, 'Cost per attempt'))),
       el('tbody', null, row(v.a), row(v.b)),
     ),
     el('div', { id: 'pair-graph', class: 'pair-graph' }),
@@ -1394,13 +1396,20 @@ async function drawLive(v) {
     const parts = [...new Set([ma, mb])].map((m) => {
       const o = ownOf(m);
       if (!o) return el('span', null, `${shortName(m)} has no record on this task, so there is nothing to go on yet. `);
-      const rate = o.passed / o.attempts;
+      // the result is what fitness asks for; the test's own pass (result and process) is what a batch's early stop counts
+      const rate = o.right / o.attempts;
       const weak = o.attempts >= 5 && rate < rules.good_enough;
+      const stopAt = runner.options.batch_pass_rate;
+      const stops = !weak && runs > 1 && stopAt && o.attempts >= 5 && o.passed / o.attempts < stopAt;
       return el(
         'span',
         weak ? { class: 'expect-weak' } : null,
-        `${shortName(m)} passed ${o.passed} of ${o.attempts} recorded attempts on this task (${percent(rate)}), at about $${fixed(o.cost_per_attempt, 4)} an attempt`,
-        weak ? `: well short of the ${percent(rules.good_enough)} this page asks of a model, so expect it to fail most scenarios. ` : '. ',
+        `${shortName(m)} got the right result in ${o.right} of ${o.attempts} recorded attempts on this task (${percent(rate)}) and followed the test's process too in ${o.passed}, at about $${fixed(o.cost_per_attempt, 4)} an attempt`,
+        weak
+          ? `: well short of the ${percent(rules.good_enough)} this page asks of a model, so expect wrong results in most scenarios. `
+          : stops
+            ? `. The test passes an attempt only when the process is right too, so with the early stop on, this batch is likely to end before its last scenario. `
+            : '. ',
       );
     });
     const known = [ma, mb].map(ownOf);
