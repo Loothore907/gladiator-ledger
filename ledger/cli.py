@@ -619,6 +619,7 @@ def verdict(
                 "a_cost": p["a_cost"],
                 "b_cost": p["b_cost"],
                 "run": p["run"],
+                "suite": p["suite"],  # what kind of sealed record it is in: a suite match, a live race, a live batch
                 "match": p["match"],  # run/workflow/attempt: where the page finds this scenario's replay
             }
             for p in pairs

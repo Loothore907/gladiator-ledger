@@ -7,7 +7,8 @@ network request beyond the files in this folder unless a race runner is attached
 On load the page starts the Relate graph engine (WebAssembly) in a worker, builds the same graph the `ledger`
 command line uses from `data/graph.json`, and then asks it the same Cypher questions. The visitor picks a
 workflow and two models that have played each other on it, chooses whose tolerance for mistakes applies, and gets
-the result as a fight card: the two models, one square per scenario, the comparison, every fault with a level
+the result as a fight card: the two models, the evidence as a graph (a row per sealed match record, a cell per
+scenario, each cell saying how both models ended), the comparison, every fault with a level
 they can change, one verdict, and the build spec (the same Markdown `ledger spec` writes). Any scenario replays
 as a race, step by step, from `data/replays/`.
 

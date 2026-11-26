@@ -27,14 +27,16 @@ uv run ledger verify                                                    # every 
 ### Five things worth a look
 1. **The answer depends on who is asking.** On the page, switch the tolerance from one person to a business, or
    change one fault's level. The same record gives a different answer, with the count behind it.
-2. **The graph behind the answer.** The box marked "Relate graph" shows the Cypher it ran and what came back. Each
-   dot is a scenario both models played. Click one: it replays as a race, and that scenario's world is drawn as a
-   graph of linked records with each model's route on it.
+2. **The graph behind the answer.** The box marked "Relate graph" shows the Cypher it ran and what came back. It
+   is drawn top down: the test version, a row for each sealed match record, the two models. Each cell in a row is
+   one scenario both played, and its two halves say how each model ended: a clean run, the right result with a
+   step skipped, or a wrong result. Point at one to read what happened; click it and it replays as a race, with
+   that scenario's world drawn as a graph of linked records and each model's route on it.
 3. **A new question, with no new match.** "How they got there" asks a pattern of every step on file, such as
    "decided a refund before it had seen the customer". Give one a level and the verdict is judged with it.
 4. **A live race that joins the record as it ends** (hackathon judges for now: "Judge sign-in" on the page). The
-   record says what it expects, a brand-new scenario is raced, and seconds later the race is one more dot in the
-   graph and the verdict has been read again with it.
+   record says what it expects, a brand-new scenario is raced, and seconds later the race is one more cell in
+   the graph and the verdict has been read again with it.
 5. **Check it.** `uv run ledger verify` checks every sealed record, and every figure in this README reproduces
    with the `--until` printed next to it.
 
@@ -106,7 +108,7 @@ command line in CI).
 passes the checks). The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
 the loop: describe a flow, pick two models, choose whose tolerance applies, read the verdict, download the spec. Every
 scenario behind a verdict can be replayed as a race: both models on the same world, step by step, at the pace they
-really ran. The graph goes one level further down, and the page draws it: under the dots of the evidence graph
+really ran. The graph goes one level further down, and the page draws it: under the rows of the evidence graph
 one scenario is opened as a graph of its own, the records of that world and the links between them, with a line
 for each model wherever it had read a record before deciding. Watch a scenario and the same picture fills in as
 the race plays. "How they got there", beside it, loads the steps of every scenario of the task and asks the
@@ -139,7 +141,7 @@ alive: one small service that holds the whole graph, every step included, in one
 sealed record the runner files (checked against its seal first), and hands a page the rows of whatever the page's
 own copy lacks. A page that knows of one asks it on load and loads what is newer into the graph in the tab, and
 when a race started from the page ends, the race is in the graph a moment later: the verdict is read again and
-counts it, the race is one more dot in the evidence graph, and its world is drawn under the dots. The service runs
+counts it, the race is one more cell in the evidence graph, and its world is drawn under the rows. The service runs
 no match and holds no key; the sealed records stay the master copy, and the import stays as the archive. The
 hosted page reads a hosted one (`record` in `site/data/live.json`), which reads the hosted runner. To see it on
 your own machine, beside a runner as above:
@@ -473,7 +475,7 @@ flowchart LR
   the graph that building from all of them leaves (`tests/test_live.py`).
 - **Retrieval.** A full-text index over the workflow text, for "describe your flow".
 - **On show.** Wherever the page reads the graph it says so ("Relate graph") and shows the Cypher it ran, the rows
-  that came back and the time it took in your browser: the evidence behind a verdict (one dot per scenario both
+  that came back and the time it took in your browser: the evidence behind a verdict (a row per sealed record and a cell per scenario both
   models played, linked to the test version and to each model), one of those scenarios opened as a graph of its
   records with both models' routes drawn on it, and each process question.
 - **Agents.** The same store served read-only over MCP, including free-form read-only Cypher, over the steps too.

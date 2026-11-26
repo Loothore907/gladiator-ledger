@@ -1491,47 +1491,99 @@ RETURN l.run_id AS run, l.winner AS winner ORDER BY l.at`;
 // The neighbourhood of the graph a verdict is read from: the test version, the two models, and one dot per
 // scenario both played (a Match), each linked to all three. `ring` marks the scenario just watched; live results
 // (asked from the graph) are drawn dashed, off to the side.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// When a sealed record was started, from its id (which is that moment, in UTC), and what kind of record it is.
+function runWhen(run) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(String(run));
+  return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[4]}:${m[5]}` : String(run);
+}
+const runKind = (suite) => (suite === 'live-race' ? 'live race' : suite === 'live-batch' ? 'live batch' : 'suite match');
+
+// The picture is drawn top down: the test version, then one row per sealed match record (a Run) with one cell per
+// scenario both models played in it (a Match), then the two models. A cell's two halves are the two attempts of
+// that scenario and say how each ended: a clean run, the right result with a step skipped, or a wrong result;
+// a dot marks the half that took the scenario. Every scenario is linked to the version above and to both models
+// below. The picture draws those links once per row (the rails at the sides) and not once per scenario, so
+// seventy scenarios stay seventy things a visitor can point at and pick (owner, 2026-11-26: the old picture drew
+// three lines per scenario and nobody could select one on purpose). `ring` marks one scenario: the one just
+// watched, or just run. Live results the record does not hold yet are a row of their own, dashed, and counted
+// in no verdict.
 async function evidenceGraph(v, ring = null, justRan = false) {
   const live = await ask(LIVE_BETWEEN, { version: v.version, a: v.a, b: v.b });
-  const W = 720;
-  const H = 230;
   const rounds = v.rounds || [];
   const n = rounds.length;
-  const gap = Math.min(30, 430 / Math.max(n, 1));
-  const first = W / 2 - 60 - ((n - 1) * gap) / 2;
-  const dots = rounds.map((round, i) => ({ index: i, x: first + i * gap, y: 118, who: round.winner === v.a ? 'a' : round.winner === v.b ? 'b' : 'tie', ring: i === ring, label: `Scenario ${i + 1}` }));
-  const liveDots = live.map((l, i) => ({ x: W - 110 + i * 26, y: 118, who: l.winner === v.a ? 'a' : l.winner === v.b ? 'b' : 'tie', live: true, label: `Live race ${l.run}` }));
-  const top = { x: W / 2, y: 30 };
-  const left = { x: 150, y: 200 };
-  const right = { x: W - 150, y: 200 };
-  const line = (from, to, cls) => svg('line', { x1: from.x, y1: from.y, x2: to.x, y2: to.y, class: cls });
-  const node = (at, text, cls) => [
-    svg('rect', { x: at.x - 105, y: at.y - 16, width: 210, height: 32, rx: 8, class: `gnode ${cls}` }),
-    svg('text', { x: at.x, y: at.y + 5, 'text-anchor': 'middle', class: 'glabel' }, text),
-  ];
-  const figure = el(
+  const rows = []; // one per sealed record, in the order of the rounds
+  rounds.forEach((r, index) => {
+    const last = rows[rows.length - 1];
+    if (last && last.run === r.run) last.cells.push({ r, index });
+    else rows.push({ run: r.run, suite: r.suite, cells: [{ r, index }] });
+  });
+  const idle = n ? 'Point at a scenario to read what happened in it. Click it to watch both models work it, step by step.' : '';
+  const tip = el('p', { class: 'gtip', id: 'graph-tip', role: 'status', 'aria-live': 'polite' }, idle);
+  const say = (text) => (tip.textContent = text);
+  const half = (side, right, clean) => el('i', { class: `half ${side} ${endOf(right, clean)}` });
+  const cell = ({ r, index }, row) => {
+    const who = r.winner === v.a ? 'a' : r.winner === v.b ? 'b' : 'tie';
+    const text =
+      `Scenario ${index + 1} of ${n}, in the ${runKind(row.suite)} of ${runWhen(row.run)} UTC: ` +
+      `${who === 'tie' ? 'a tie' : `taken by ${shortName(r.winner)} (${whyTaken(r, v.a).text})`}. ` +
+      `${shortName(v.a)}: ${ended(r.a_right, r.a_passed)}. ${shortName(v.b)}: ${ended(r.b_right, r.b_passed)}.`;
+    return el(
+      'button',
+      { type: 'button', class: `gdot ${who}${index === ring ? ' ring' : ''}`, title: `${text} Click to watch it.`, 'aria-label': `${text} Watch the replay.`, 'data-scenario': index + 1, onclick: () => openRace(v, index), onmouseenter: () => say(text), onfocus: () => say(text) },
+      half('a', r.a_right, r.a_passed),
+      half('b', r.b_right, r.b_passed),
+    );
+  };
+  const rowOf = (row) =>
+    el(
+      'div',
+      { class: 'grow', 'data-run': row.run },
+      el('div', { class: 'grun', title: `Sealed record ${row.run}` }, el('b', null, runWhen(row.run)), ` · ${runKind(row.suite)}`, el('br'), plural(row.cells.length, 'scenario'), row.cells.some((c) => c.index === ring) ? (justRan ? ' · just run' : ' · being watched') : ''),
+      el('div', { class: 'gcells' }, row.cells.map((c) => cell(c, row))),
+    );
+  const liveRow = live.length
+    ? el(
+        'div',
+        { class: 'grow live' },
+        el('div', { class: 'grun' }, el('b', null, plural(live.length, 'live race')), el('br'), 'not in the record yet'),
+        el(
+          'div',
+          { class: 'gcells' },
+          live.map((l) => el('span', { class: `gdot live ${l.winner === v.a ? 'a' : l.winner === v.b ? 'b' : 'tie'}`, title: `Live race ${l.run}: sealed, and not in the record yet, so no verdict counts it.` })),
+        ),
+      )
+    : null;
+  const key = (cls, text) => el('span', null, el('i', { class: `gkey ${cls}` }), text);
+  return el(
     'figure',
-    { class: 'graph' },
-    svg(
-      'svg',
-      { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `The graph behind this verdict: ${n} recorded scenarios${live.length ? ` and ${live.length} live` : ''} linking the test version to both models.` },
-      [...dots, ...liveDots].flatMap((d) => [top, left, right].map((to) => line(d, to, `glink${d.ring ? ' ring' : ''}${d.live ? ' live' : ''}`))),
-      node(top, v.version.split('/').pop().split(':')[0], 'task'),
-      node(left, shortName(v.a), 'a'),
-      node(right, shortName(v.b), 'b'),
-      [...dots, ...liveDots].map((d) => svg('circle', { cx: d.x, cy: d.y, r: d.ring || d.live ? 9 : 6, class: `gdot ${d.who}${d.ring ? ' ring' : ''}${d.live ? ' live' : ''}`, ...(d.live ? {} : { tabindex: 0, role: 'button', onclick: () => openRace(v, d.index) }) }, svg('title', null, d.live ? d.label : `${d.label}: watch it`))),
-    ),
+    { class: 'graph', role: 'group', 'aria-label': `The graph behind this verdict: ${plural(n, 'recorded scenario')} in ${plural(rows.length, 'sealed match record')}${live.length ? ` and ${live.length} live` : ''}, each linked to the test version and to both models.` },
+    el('div', { class: 'gtop' }, el('span', { class: 'gnode task', title: v.version }, v.version.split('/').pop().split(':')[0])),
+    el('div', { class: 'gstem', 'aria-hidden': 'true' }),
+    el('div', { class: 'grows' }, el('span', { class: 'grail a', 'aria-hidden': 'true' }), el('span', { class: 'grail b', 'aria-hidden': 'true' }), rows.map(rowOf), liveRow, n || live.length ? null : el('p', { class: 'note' }, 'No recorded scenario links them yet.')),
+    el('div', { class: 'gmodels' }, el('span', { class: 'gnode a' }, shortName(v.a), el('small', null, ' · top half')), el('span', { class: 'gnode b' }, shortName(v.b), el('small', null, ' · bottom half'))),
+    n
+      ? el(
+          'p',
+          { class: 'glegend' },
+          key('clean', 'clean run'),
+          key('skipped', 'right result, a step skipped'),
+          key('wrong', 'wrong result'),
+          key('took', 'took the scenario'),
+          el('span', null, 'each row is one sealed match record'),
+        )
+      : null,
+    tip,
     el(
       'figcaption',
       null,
       n
-        ? 'Each dot is one scenario both models played, linked to the test version it used and to each model, and coloured by who won it. Click a dot to watch that scenario.'
+        ? 'Each cell is one scenario: a freshly generated world, handed to both models. Its top half is how the first model ended, its bottom half the second. A cell says who took the scenario, not who failed: a model can get every decision right and still lose it to a cleaner or cheaper run.'
         : 'The test version and the two models are in the graph, but no recorded scenario links them yet.',
       ring !== null ? (justRan ? ' The ringed one is the race you just ran: it joined the record a moment ago.' : ' The ringed one is the race you just watched.') : '',
-      live.length ? ` The dashed ${live.length === 1 ? 'one is the live race' : 'ones are live races'}: now in the graph and linked the same way, but as a different kind of node, so no verdict counts ${live.length === 1 ? 'it' : 'them'}.` : '',
+      live.length ? ` The dashed ${live.length === 1 ? 'one is a live race' : 'ones are live races'} the record does not hold yet: in the graph as a different kind of node, so no verdict counts ${live.length === 1 ? 'it' : 'them'}.` : '',
     ),
   );
-  return figure;
 }
 
 // The one home of that picture in step 3, labelled for what it is: a Relate graph, with the question it was read
@@ -1585,8 +1637,10 @@ async function drawWorldGraph(v, ring = null, justRan = false) {
   const picture = worldPicture(world, v);
   picture.update(Infinity);
   box.dataset.showing = showing;
+  for (const cell of document.querySelectorAll('#pair-graph .gdot.shown')) cell.classList.remove('shown');
+  document.querySelector(`#pair-graph .gdot[data-scenario="${index + 1}"]`)?.classList.add('shown');
   box.replaceChildren(
-    el('h4', { class: 'world-title' }, `One dot, opened: scenario ${index + 1} of ${rounds.length}`),
+    el('h4', { class: 'world-title' }, `One scenario, opened: scenario ${index + 1} of ${rounds.length}`),
     el(
       'p',
       { class: 'note small' },
@@ -3069,45 +3123,10 @@ function fightCard(spec, v) {
     ),
   ];
 
-  // Each square says who took the scenario and how both ended: both ran it clean (plain), only the winner ran it
-  // clean (dashed outline), or neither did (faded: it went on a tie-break, which is not a win on the job).
-  const stateOf = (r) => (r.a_passed && r.b_passed ? 'both' : r.a_passed || r.b_passed ? 'sole' : 'neither');
-  const tally = { both: 0, sole: 0, neither: 0 };
-  for (const r of v.rounds) tally[stateOf(r)] += 1;
+  // The scenarios themselves are in the Relate graph box (evidenceGraph): one cell each, to point at and to open.
   const arena = [
     el('div', { id: 'pair-graph', class: 'pair-graph' }),
     workedPanel(v),
-    el('h3', { class: 'center' }, `The arena: ${plural(v.pairs, 'scenario')}`),
-    el(
-      'p',
-      { class: 'note center' },
-      'Each scenario is a freshly generated world with its own records and traps. Both models are handed the same one. ' +
-        'A square says who took it, not who failed: a model can get every decision right and still lose the scenario to a cleaner or cheaper run.',
-    ),
-    el(
-      'ol',
-      { class: 'rounds', 'aria-label': 'Who won each scenario' },
-      v.rounds.map((r, i) => {
-        const who = r.winner === a ? 'a' : r.winner === b ? 'b' : 'tie';
-        const what = stateOf(r);
-        const label = who === 'tie' ? `Scenario ${i + 1}: a tie` : `Scenario ${i + 1}: taken by ${shortName(r.winner)} (${whyTaken(r, a).text})`;
-        return el(
-          'li',
-          null,
-          el('button', { type: 'button', class: `round ${who} ${what}`, title: `${label}. Watch it.`, 'aria-label': `${label}. Watch the replay.`, onclick: () => openRace(v, i) }, String(i + 1)),
-        );
-      }),
-    ),
-    el(
-      'p',
-      { class: 'legend' },
-      el('span', { class: 'key a' }), `won by ${shortName(a)}`,
-      el('span', { class: 'key b' }), `won by ${shortName(b)}`,
-      tally.both ? [el('span', { class: 'key both' }), `both ran it clean, the more efficient run won (${tally.both})`] : null,
-      tally.sole ? [el('span', { class: 'key sole' }), `only the winner ran it clean (${tally.sole})`] : null,
-      tally.neither ? [el('span', { class: 'key neither' }), `neither ran it clean, so it went on a tie-break: who got further, then efficiency (${tally.neither})`] : null,
-    ),
-    el('p', { class: 'note center' }, 'Pick a scenario to watch both models work it, step by step.'),
     el('div', { id: 'race', class: 'race', hidden: true }),
     el('div', { id: 'live', class: 'race live' }),
   ];
