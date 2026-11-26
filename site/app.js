@@ -1892,6 +1892,49 @@ async function drawLive(v) {
   const stage = el('div', { id: 'live-stage' });
   const say = el('p', { class: 'finish', id: 'live-result', role: 'status', 'aria-live': 'polite' });
 
+  // The runner plays one race at a time, for everyone. It says when it is busy (/health), whether with a race
+  // this visitor started a moment ago under another choice of models, or with someone else's. The button is then
+  // off and says why, right beside it, and comes back by itself: the runner is asked again every few seconds.
+  const busyNote = el('p', { class: 'live-banner refused', id: 'live-busy', role: 'status', 'aria-live': 'polite', hidden: true });
+  let running = false; // a race or batch this panel started is being played
+  let runnerBusy = false;
+  let asking = 0; // the next time the runner is asked, while it is busy
+  const ready = () => {
+    go.disabled = running || runnerBusy;
+    busyNote.hidden = running || !runnerBusy;
+  };
+  const watchRunner = async (refused = false) => {
+    if (!document.body.contains(go) || running) return;
+    let busy = refused;
+    if (!refused) {
+      try {
+        busy = Boolean((await fetch(`${runner.base}/health`).then((x) => x.json())).busy);
+      } catch {
+        busy = false; // a runner that cannot say is not held against the visitor: the race itself will answer
+      }
+    }
+    if (!document.body.contains(go) || running) return;
+    runnerBusy = busy;
+    if (busy) {
+      busyNote.textContent = refused
+        ? 'That did not start: the runner is busy with another race, and it plays one at a time. Nothing was spent. This button comes back by itself when the runner is free, usually within a minute or two.'
+        : 'The runner is busy with another race right now (it plays one at a time; it may be one you started a moment ago). This button comes back by itself when it is free, usually within a minute or two.';
+      clearTimeout(asking);
+      asking = setTimeout(() => watchRunner(), 4000);
+    }
+    ready();
+  };
+  // a refusal for being busy: take the empty lanes away again, so nothing on screen looks like a race under way
+  const refusedBusy = (error) => {
+    if (!/busy/i.test(error.message)) return false;
+    stage.replaceChildren();
+    say.textContent = '';
+    running = false;
+    watchRunner(true);
+    follow(busyNote, 'center');
+    return true;
+  };
+
   // what is left to spend, by provider, and how many races this sign-in has left
   const showBudget = (options, left) => {
     const parts = (options.budgets || []).map((b) => `${providerName(b.provider)} $${fixed(b.left_usd, 2)} of $${fixed(b.limit_usd, 2)}`);
@@ -1971,7 +2014,8 @@ async function drawLive(v) {
   // A batch: every attempt is shown as it ends, then the result of the whole batch.
   const runBatch = async (runs) => {
     const [ma, mb] = whoPick.value === 'a' ? [a, a] : whoPick.value === 'b' ? [b, b] : [a, b];
-    go.disabled = true;
+    running = true;
+    ready();
     say.textContent = '';
     box.querySelector('#live-winner')?.remove();
     const lanes = batchLanes(ma, mb, runs);
@@ -2049,12 +2093,14 @@ async function drawLive(v) {
       );
       follow(batchBox.firstElementChild, 'nearest');
     } catch (error) {
-      say.textContent = `The batch did not run: ${error.message}`;
+      if (!refusedBusy(error)) say.textContent = `The batch did not run: ${error.message}`;
     } finally {
       clearInterval(ticking);
       lanes.A.finish();
       lanes.B.finish();
-      go.disabled = false;
+      running = false;
+      ready();
+      if (!runnerBusy) watchRunner(); // the runner may still be filing the result: ask before offering the button again
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
         showBudget(options, renewed ? renewed.races_left : null);
@@ -2069,7 +2115,8 @@ async function drawLive(v) {
   go.addEventListener('click', async () => {
     if (Number(runsPick.value) > 1) return runBatch(Number(runsPick.value));
     batchBox.replaceChildren();
-    go.disabled = true;
+    running = true;
+    ready();
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
     stage.replaceChildren(el('p', { class: 'note' }, 'A new world is being generated and handed to both models. Nothing below is a replay.'), laneLegend(), lanes.A.node, lanes.B.node);
@@ -2144,9 +2191,11 @@ async function drawLive(v) {
       const facts = raceFacts(record, task, a, b);
       mine.set(facts.run_id, facts);
     } catch (error) {
-      say.textContent = `The live race did not run: ${error.message}`;
+      if (!refusedBusy(error)) say.textContent = `The live race did not run: ${error.message}`;
     } finally {
-      go.disabled = false;
+      running = false;
+      ready();
+      if (!runnerBusy) watchRunner(); // the runner may still be filing the result: ask before offering the button again
       // the budgets and this sign-in's races have moved: read them again
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
@@ -2163,6 +2212,7 @@ async function drawLive(v) {
     el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
     prior,
     el('div', { class: 'race-controls' }, sizes.length ? [whoPick, runsPick] : null, level, profile, go),
+    busyNote,
     early,
     expect,
     money,
@@ -2173,6 +2223,7 @@ async function drawLive(v) {
     history,
     filed,
   );
+  watchRunner();
 }
 const spec_task = (test) => test.split('/').pop();
 
