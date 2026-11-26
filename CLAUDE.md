@@ -56,6 +56,14 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   got there is judged only by its faults, each at the level the reader gives it, so a fault the reader calls minor
   never makes a model unfit. The head to head still judges a pair as Gladiator does, and a verdict says how many
   scenarios were won on process alone.
+- **The graph goes down to the step (owner, 2026-11-26, to make Relate carry the main use case).** Every step of
+  every attempt is loaded from `record.json` (never from the answer key), with the records of each generated world
+  and how they refer to each other; both attempts of a match share those records. A question about how a model
+  works is a Cypher pattern over them (`STEP_PATTERNS` in `ledger/questions.py`), asked of every attempt on file.
+  A reader may give one a level in a verdict (`--check`); it is then judged like any other fault and labelled as
+  the reader's own, and it never touches the head to head or any verdict it was not asked for. Where the grader
+  counts the same thing, the pattern must agree with it on every attempt (`tests/test_steps.py`). The steps are
+  too big to ship: they live in `data/ledger-steps.rl`, built locally on first use and never committed.
 - **Quoted figures carry their date.** A figure printed in the README or the submission is the record as it stood
   at a stated moment, reproducible with `--until`; CI checks them that way. The page always reads the whole record.
 - The graph is a view: records stay the master copy, and the loader must stay safe to re-run.

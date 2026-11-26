@@ -73,6 +73,55 @@ words of a described flow and then follows the graph to the models and pairs beh
 | `(TestVersion)-[:VALIDATED_BY]->(ValidationRun)` | evidence that the test itself is sound |
 | `(ValidationRun)-[:GUARDS]->(Hazard)` | the corner-cutting player that stands for this hazard was caught (or not) |
 
+## Steps: how an attempt got to its result
+
+A run record also keeps every step of every attempt (`turns`: the tool called, its arguments, what the simulated
+world answered). The steps bridge (`ledger/bridges/steps.py`) reads them, and `load_steps` writes them. They are
+seven times the size of everything above together (62,374 steps on Nov 26, 2026), so the shipped store does not
+carry them: the first question that needs them builds a second, local store from the same records
+(`data/ledger-steps.rl`, `ledger/routes.py`; or `ledger build --steps` into any store). Everything in it comes from
+the public record. Nothing is read from the answer key, and nothing knows any one test.
+
+| Node | Key | Properties | From |
+|---|---|---|---|
+| `Step` | `attempt/n` | n (its place in the attempt, from 1), tool, **kind** (`read`, `check`, `act`, `end`, `talk`), **state** (`ok`, `timeout`: the outcome is unknown, `refused`: the world answered with an error), at_s (seconds since the attempt began), item (the id the step named) | one turn of an attempt |
+| `Item` | `match/id` | id (as the world names it, e.g. `REQ-0004`), **kind** (`refund request`, `order`, `customer`, ...) | one record of a generated world that some step saw, decided or checked, or a notice named |
+
+An item's kind is read from the tools: the tool that looks a record up names it (`get_order`), then the list that
+shows it (`list_refund_requests`), then the field that refers to it (`customer_id`). One kind per family of ids in
+a test, so a customer nobody looked up in one world is still a customer there.
+
+| Relationship | Meaning |
+|---|---|
+| `(Attempt)-[:TOOK]->(Step)` | the attempt's steps (also `(SelfAttempt)-[:TOOK]->(Step)` for a self run) |
+| `(Step)-[:NEXT]->(Step)` | the order of the route, each step to the one after it |
+| `(Step)-[:SAW]->(Item)` | the step's answer showed this record: a lookup, or a row of a list. Not for a call that failed |
+| `(Step)-[:DECIDED]->(Item)` | the step acted on the item; `Step.tool` is the decision. A model's last action on an item is its decision |
+| `(Step)-[:CHECKED]->(Item)` | the step checked whether an action on the item had taken effect |
+| `(Step)-[:TOLD_OF {notice}]->(Item)` | the step's answer carried a notice naming the record (the world announced a change to it) |
+| `(Item)-[:REFERS_TO {field}]->(Item)` | one record names another, as the world's answers show it (a request's `order_id`, an order's `customer_id`). A field refers to a record when its name ends in `_id`, or when a lookup tool takes an argument of that name (`stock_for_sku(sku)`) |
+| `(Item)-[:IN]->(Match)` | the world the record belongs to. **Both attempts of a match share its items**, which is what lets two routes be compared item by item (`(Item)-[:IN]->(SelfCheck)` for a self run) |
+
+`Run.steps` holds the number of steps loaded for a run; a store holds the steps when every run has it.
+
+**Process questions** (`STEP_PATTERNS` in `ledger/questions.py`) are patterns over these, counted per model in the
+scope of fitness (one test version, one set of conditions). Each returns the attempts with the pattern, how often,
+and of those attempts how many still had the right result and how many the test passed:
+
+| Question | The pattern |
+|---|---|
+| `decided-before-seeing` | a step `DECIDED` an item that `REFERS_TO` a record (up to three hops), and no earlier step of the attempt `SAW` that record |
+| `decided-never-saw` | the same with no step at all that saw it. What the grader's "acted without reading" counts |
+| `decided-unknown-record` | a step `DECIDED` an item that no step of either attempt ever `SAW`: an id that names no record |
+| `retried-without-checking` | from an action that timed out, a walk along `NEXT` to the next action on the same item with no `CHECKED` on the way. What the grader's "ambiguous timeout" counts |
+| `told-then-decided` | a step was `TOLD_OF` a record, and a later step `DECIDED` an item that refers to it with no step between that saw it again |
+
+For the two the grader also counts, the graph and the grader agree on every attempt on file
+(`tests/test_steps.py`): over the records each test's own package requires (`task.joins`), and counting an action
+on an unknown record as the grader does. `same_world` lays the two attempts of a match side by side, item by item.
+A reader can give any of these a level in a verdict (`--check decided-before-seeing=serious`); it is then judged
+like a fault the grader counted, under the name "... (your check)", and the head to head is untouched.
+
 ## How a pair is judged
 
 Ledger judges every pair itself, with Gladiator's own rule, copied into `ledger/scoring.py` and disclosed as

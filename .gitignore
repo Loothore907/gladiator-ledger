@@ -12,3 +12,5 @@ operator.json
 /*.rl
 # Installed only to run site/check.cjs
 node_modules/
+# The whole graph with every step: built locally from the records when a question needs it (ledger/routes.py)
+/data/ledger-steps.rl

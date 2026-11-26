@@ -18,6 +18,11 @@ index finds the workflow you describe. Storage mode: the embedded Python library
 (`data/ledger.rl`), opened read-only; the browser demo runs Relate's WebAssembly build with an in-memory store
 built from the same statements; and an MCP server gives AI assistants the same graph, read-only.
 
+**The graph goes down to the step.** Every attempt is a route through a small world of connected records (a refund
+request, its order, the order's customer), and both models walked the same world. So a question about *how* a
+model works is a pattern in the graph, and a new one can be asked of every attempt on file without playing a
+match: [How they got there](#how-they-got-there-ask-the-record-a-new-question).
+
 > Entry for the Relate by Neo4j hackathon (Nov–Dec 2026). The repository ships a Relate store built from **37 real
 > suite matches between 12 models** (closed and open-weights) and every live race run since, so everything below
 > reproduces from a clean clone with **no API keys and no cost**.
@@ -101,7 +106,8 @@ Code and the `ledger` tools appear). For others, add:
 ```json
 {"mcpServers": {"ledger": {"command": "uv", "args": ["run", "--directory", "/path/to/gladiator-ledger", "ledger", "mcp"]}}}
 ```
-The tools are `find_flows`, `who_has_played`, `suggest_opponents`, `verdict`, `write_spec`, `describe_graph` and
+The tools are `find_flows`, `who_has_played`, `suggest_opponents`, `verdict`, `how_they_worked`, `same_world`,
+`write_spec`, `describe_graph` and
 `read_graph` (read-only Cypher). They call the same code as the command line. The server also sends the assistant
 Ledger's rules: task claims only, "leaning" stays "leaning", and no winner the evidence does not name. Ledger needs
 no API key; the assistant is yours. Step-by-step setup: [docs/ASSISTANT.md](docs/ASSISTANT.md).
@@ -245,6 +251,106 @@ fitness with every fault and its count, and every scenario with its winner, how 
 record. `--report all --out spec.md` writes `spec.md`, `spec.cost.md` and `spec.evidence.md`. On the page the
 same three are download buttons under the result, and a live race offers its own report, labelled as live.
 
+## How they got there: ask the record a new question
+A verdict says how an attempt ended. A sealed record also keeps every step of it: the tool the model called, on
+which record, and what the simulated world answered. Ledger loads those steps into the graph as well, with the
+records of each generated world and the way they point at each other, exactly as the world's own answers show it:
+
+```mermaid
+flowchart LR
+    A1["Attempt<br/>Model A"] -->|TOOK| S1["Step 1<br/>list requests"]
+    S1 -->|NEXT| S2["Step 2<br/>get order"]
+    S2 -->|NEXT| S3["Step 3<br/>deny request"]
+    S1 -->|SAW| RQ["refund request<br/>REQ-0004"]
+    S2 -->|SAW| O["order<br/>ORD-00007"]
+    S3 -->|DECIDED| RQ
+    RQ -->|REFERS_TO| O
+    O -->|REFERS_TO| C["customer<br/>CUS-002"]
+    RQ -->|IN| M["Match<br/>one world, two attempts"]
+    A2["Attempt<br/>Model B"] -->|TOOK| T1["its own steps ..."]
+    T1 -->|SAW| C
+```
+
+In that picture Model A denied the request without ever looking at the customer the order belongs to. Nothing in
+the graph says so in a property. It is a **shape**: a decision on an item, a chain of references from that item
+to a record, and no earlier step that saw the record. A fault in how a model works is a pattern over connected
+facts, which is what a graph database is for. The first time a question needs the steps they are loaded from the
+same sealed records into a local store beside the shipped one (62,374 steps and 23,140 world records, about a
+minute, once).
+
+```bash
+uv run ledger process refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00
+```
+```text
+What a decision needs here, as the worlds on file show it: each refund request refers to its order
+(order_id); each refund request refers to its customer (order_id > customer_id).      (output shortened here)
+
+decided-before-seeing: Decided an item before it had seen a record that item depends on.
+  model                                         attempts  with it  times  right anyway  passed anyway
+  anthropic:claude-haiku-5-5                          81       18     40            18              6
+  openrouter:deepseek/deepseek-v4.1-flash-1017        95       77    241            77             12
+
+decided-never-saw: Decided an item without seeing, at any point, a record that item depends on.
+  model                                         attempts  with it  times  right anyway  passed anyway  the grader counted
+  anthropic:claude-haiku-5-5                          81       12     27            12              0                  12
+  openrouter:deepseek/deepseek-v4.1-flash-1017        95       65    156            65              0                  65
+```
+Add `--cypher` and each question is printed as it is asked of the graph. Three things come out of this, and none of
+them needed a new match:
+
+1. **The graph finds what the grader found.** Gladiator's grader counted "acted without reading" while each match
+   was played, from inside the simulated world. The pattern counts it afterwards from the public record alone.
+   Asked for the records the grader itself requires, the two agree on every one of the 1,874 attempts on file at
+   that moment, and so does a second count both of them make (repeating a timed-out action without checking).
+   [`tests/test_steps.py`](tests/test_steps.py) holds them to it.
+2. **A sharper question finds what the grader passed.** The grader asks whether a record was seen at *any* point in
+   the attempt, so a customer looked up later, for another request, counts as read. Asked in order, Haiku decided
+   before seeing in 18 attempts (the grader: 12) and DeepSeek in 77 (the grader: 65). Six of Haiku's and twelve
+   of DeepSeek's passed the test's own process check although they had decided first and looked afterwards.
+3. **And what it cost: on this task, nothing.** All 18 of Haiku's and all 77 of DeepSeek's still got every refund
+   decision right. In scenario 2 below, DeepSeek denies four requests on the order alone, and Haiku, which read the
+   customer each time, reaches the same four decisions. Ledger does not say whether skipping the lookup matters.
+   It gives you the count and what came of it, and you set the level:
+
+```bash
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --check decided-before-seeing=serious
+```
+```text
+Neither is fit for this task. anthropic:claude-haiku-5-5 did it better of the two, which is not the same as fit.
+  anthropic:claude-haiku-5-5: NOT fit. ...
+      because: decided before seeing a record it depends on (your check) (serious) in 18 of 81 attempts, over the 10% allowed
+  openrouter:deepseek/deepseek-v4.1-flash-1017: NOT fit. ...
+      because: decided before seeing a record it depends on (your check) (serious) in 77 of 95 attempts, over the 10% allowed
+```
+A question you add is judged exactly like a fault the grader counted: by the level you give it. At `minor` the
+answer is the one in step 3. The head to head never changes: it is the same pairs, judged the same way.
+
+**The same world, two routes.** Both models played the same generated world, so their attempts share its records
+in the graph and can be laid side by side, item by item:
+
+```bash
+uv run ledger route refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --scenario 2
+```
+```text
+Scenario 2 of 43: the same world, two routes  (20261122-070649-4239f8/refund-queue/2, won by A)
+
+  REQ-0001
+    A  deny_request at step 27, had seen customer and order
+    B  deny_request at step 8, had seen order, NOT customer CUS-003
+
+  REQ-0002  <- decided differently
+    A  issue_refund at step 22, had seen customer and order
+    B  deny_request at step 9, had seen customer and order
+  ...
+  Decided differently: 1 of 12 items. Decided before seeing a record the item depends on: A 0, B 4.
+```
+Without `--scenario` it prints one line for each of the 43 scenarios. The questions that ship are
+`decided-before-seeing`, `decided-never-saw`, `decided-unknown-record` (acted on an id that names no record:
+once in the whole record), `retried-without-checking` and `told-then-decided` (was told a record had changed and
+decided without reading it again). `--needs customer` keeps a question to one kind of record. An assistant gets
+the same through `how_they_worked` and `same_world`, and can write its own pattern over a route with `read_graph`.
+These figures are the record at 05:00 UTC on Nov 26, 2026. The page does not show the steps as a graph yet.
+
 ## How and why Relate is used
 Relate is the store and the query engine, not an export target. Every answer above is a walk through connected
 facts:
@@ -268,19 +374,27 @@ flowchart LR
     B -->|FROM| S2["Source: epoch"]
 ```
 
-- **Why a graph.** A verdict is the set of matches where two models' attempts share a world. A fair opponent is a
+- **Why a graph, most of all: the steps.** An attempt is a path, the world it ran in is a small graph of records,
+  and two attempts of one match run through the same records. "Decided a refund before seeing the customer" is
+  three hops and an ordering, "repeated an action without checking" is a walk forward along the route
+  (`(first)-[:NEXT]->+(again)` with no check on the way), and "where did they part ways" is two paths through
+  shared nodes. None of these is a column anywhere. See
+  [How they got there](#how-they-got-there-ask-the-record-a-new-question).
+- **Why a graph, for the verdict.** A verdict is the set of matches where two models' attempts share a world. A fair opponent is a
   neighbour over a benchmark, joined to the pairs those two have already played. A guardrail is the difference
   between where a hazard *could* occur (test version → hazard) and where a model *fell* for it (attempt → hazard).
   A spec is all three paths, read off the same nodes. In a flat report each is a custom script; here each is one
   Cypher query (`ledger/questions.py`).
 - **Storage.** Embedded Python library (`relate-db`), a single-file store (`data/ledger.rl`), opened read-only for
   every question. In the browser, the WebAssembly build with an in-memory store, built from the same statements.
+  The steps are seven times the size of everything else, so they live in a second single-file store built
+  locally from the same records on first use (`data/ledger-steps.rl`, about 75 MB, not committed).
 - **Retrieval.** A full-text index over the workflow text, for "describe your flow".
 - **On show.** The page draws the graph beside the steps ("Relate graph: the graph behind your answer"): the
   workflows, the models tested on the one you chose, the scenarios your two models both played, the faults each
   made and any live races. Each step lights up the part it reads and shows the Cypher Relate ran for it, with the
   rows returned and the time taken in your browser.
-- **Agents.** The same store served read-only over MCP, including free-form read-only Cypher.
+- **Agents.** The same store served read-only over MCP, including free-form read-only Cypher, over the steps too.
 - **Safe to rebuild.** The loader `MERGE`s on stable keys behind uniqueness constraints, so loading the same records
   again changes nothing. The records stay the master copy; the store is a view of them.
 - **Bridges.** Evidence reaches the graph through a bridge (`ledger/bridges/`): a source reads its own files and
@@ -288,7 +402,8 @@ flowchart LR
   (matches and test validation) and `epoch` (published scores, used only to suggest opponents). Another source of
   the same kinds of evidence plugs in the same way (`uv run ledger ask sources`).
 
-Graph: 11 kinds of node and 17 relationships. See [docs/SCHEMA.md](docs/SCHEMA.md).
+Graph: 11 kinds of node and 17 relationships in the shipped store, and with the steps 13 and 24. See
+[docs/SCHEMA.md](docs/SCHEMA.md).
 
 ## More questions the graph answers
 The matches come from [Gladiator](https://github.com/Loothore907/gladiator-core), an open head-to-head evaluation

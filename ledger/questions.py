@@ -22,6 +22,11 @@ because each one follows connections across runs: models, matches, test versions
   close_to               Which models score closest to this one on a published benchmark (to pick an opponent).
   sources                Where the evidence came from: each bridge, and how much it contributed.
 
+  Steps (asked of a store that holds the steps, ledger/routes.py): how a model got to its result.
+  what_decisions_need    What a decision on this task depends on: the records its item refers to, and through which.
+  STEP_CHECKS            Process questions, each one pattern over the steps, counted per model on a task.
+  same_world             One scenario, item by item: what each model had seen when it decided, and what it decided.
+
 Judged pairs exclude attempts that ended for reasons outside the models' control (outages, run caps).
 """
 
@@ -375,6 +380,102 @@ RETURN s.name AS source, s.description AS description, runs, validation_checks, 
 ORDER BY source
 """
 
+# ---------------------------------------------------------------------------------------------------------------
+# Steps. Every attempt is a route through a small world of records: (Attempt)-[:TOOK]->(Step)-[:NEXT]->(Step),
+# each step linked to the record it saw, decided or checked, and the records linked to each other as the world's
+# answers show ((refund request)-[:REFERS_TO]->(order)-[:REFERS_TO]->(customer)). A fault in how a model worked is
+# then a pattern in that graph, and a new one can be asked of every attempt on file without playing a match.
+#
+# What a decision on this task depends on, read from the world itself: the kinds of record a decided item refers
+# to, directly or through another record, and the fields that lead there.
+WHAT_DECISIONS_NEED = """
+MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(mt:Match)<-[:IN]-(t:Item)
+WHERE EXISTS { (t)<-[:DECIDED]-(:Step) }
+MATCH p = (t)-[:REFERS_TO*1..3]->(need:Item)
+RETURN t.kind AS decided, [x IN relationships(p) | x.field] AS via, need.kind AS needs, count(*) AS times
+ORDER BY size(via), needs
+"""
+
+# The scope of a process question is the scope of fitness (TASK_ATTEMPTS): one test version under one set of
+# conditions, every attempt each model made there. {found} is the pattern, which binds `x` once for each thing
+# the model did; an attempt without it still counts, with nothing found.
+STEP_CHECK = """
+MATCH (tv:TestVersion {{key: $version_key}})<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
+      (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
+WHERE NOT mt.excluded AND ($conditions IS NULL OR mt.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
+  AND ($until IS NULL OR r.started_unix <= $until)
+{found}
+WITH m.name AS model, a, count(DISTINCT x) AS times
+RETURN model, count(a) AS attempts, sum(times) AS times,
+       sum(CASE WHEN times > 0 THEN 1 ELSE 0 END) AS attempts_with,
+       sum(CASE WHEN times > 0 AND coalesce(a.task_correct, a.passed) THEN 1 ELSE 0 END) AS right_with,
+       sum(CASE WHEN times > 0 AND a.passed THEN 1 ELSE 0 END) AS passed_with
+ORDER BY model
+"""
+
+# The patterns. $kinds, where a pattern takes it, keeps it to some kinds of needed record (NULL: every kind).
+STEP_PATTERNS = {
+    # Decided an item before any step of the attempt had shown a record the item depends on. The order matters:
+    # a record looked up afterwards (for another item, say) does not count as seen.
+    "decided-before-seeing": """
+OPTIONAL MATCH (a)-[:TOOK]->(act:Step {kind: 'act'})-[:DECIDED]->(x:Item)-[:REFERS_TO*1..3]->(need:Item)
+WHERE act.state <> 'refused' AND ($kinds IS NULL OR need.kind IN $kinds)
+  AND NOT EXISTS { MATCH (need)<-[:SAW]-(seen:Step)<-[:TOOK]-(a) WHERE seen.n < act.n }""",
+    # The same, whatever the order: no step of the whole attempt showed the record. This is what Gladiator's
+    # grader counts as "acted without reading", and the graph agrees with it attempt by attempt (tests/test_steps).
+    "decided-never-saw": """
+OPTIONAL MATCH (a)-[:TOOK]->(act:Step {kind: 'act'})-[:DECIDED]->(x:Item)-[:REFERS_TO*1..3]->(need:Item)
+WHERE act.state <> 'refused' AND ($kinds IS NULL OR need.kind IN $kinds)
+  AND NOT EXISTS { MATCH (need)<-[:SAW]-(:Step)<-[:TOOK]-(a) }""",
+    # Acted on an id that names no record of the world: nothing the world answered, to either model, ever showed it.
+    "decided-unknown-record": """
+OPTIONAL MATCH (a)-[:TOOK]->(act:Step {kind: 'act'})-[:DECIDED]->(x:Item)
+WHERE act.state <> 'refused' AND NOT EXISTS { (x)<-[:SAW]-(:Step) }""",
+    # An action timed out with its outcome unknown, and the model's next move on that item was to act again:
+    # nothing on the route between the two checked whether the first had gone through. A path question, walked
+    # forward along the route. Gladiator's grader counts the same thing, and the graph agrees with it.
+    "retried-without-checking": """
+OPTIONAL MATCH (a)-[:TOOK]->(first:Step {kind: 'act', state: 'timeout'})-[:DECIDED]->(t:Item)
+OPTIONAL MATCH p = (first)-[:NEXT]->+(x:Step {kind: 'act'})
+WHERE (x)-[:DECIDED]->(t) AND none(s IN nodes(p)[1..-1] WHERE (s)-[:CHECKED]->(t) OR (s)-[:DECIDED]->(t))""",
+    # The world announced that a record had changed, and the model then decided an item that depends on that
+    # record without looking the record up again. Not a fault in itself: the notice says what changed.
+    "told-then-decided": """
+OPTIONAL MATCH (a)-[:TOOK]->(told:Step)-[:TOLD_OF]->(rec:Item)<-[:REFERS_TO*1..3]-(x:Item)<-[:DECIDED]-(act:Step {kind: 'act'}),
+               (act)<-[:TOOK]-(a)
+WHERE act.n > told.n AND act.state <> 'refused' AND ($kinds IS NULL OR rec.kind IN $kinds)
+  AND NOT EXISTS { MATCH (rec)<-[:SAW]-(again:Step)<-[:TOOK]-(a) WHERE again.n > told.n AND again.n < act.n }""",
+}
+STEP_CHECKS = {name: STEP_CHECK.format(found=pattern) for name, pattern in STEP_PATTERNS.items()}
+
+# The same world, item by item: for every item either model decided in these scenarios, what each of them decided
+# (its last action on the item), at which step, and for every record the item depends on, whether the model had
+# seen it by then. Both attempts walk the same items, so their two routes can be laid side by side.
+SAME_WORLD = """
+MATCH (mt:Match)<-[:IN]-(t:Item)
+WHERE mt.key IN $matches AND EXISTS { (t)<-[:DECIDED]-(:Step) }
+MATCH (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
+OPTIONAL MATCH (a)-[:TOOK]->(act:Step {kind: 'act'})-[:DECIDED]->(t)
+WITH mt, t, a, m, act ORDER BY act.n
+WITH mt, t, a, m, last(collect(act)) AS act
+OPTIONAL MATCH (t)-[:REFERS_TO*1..3]->(need:Item)
+WITH mt, t, a, m, act, need,
+     CASE WHEN act IS NULL THEN NULL
+          ELSE EXISTS { MATCH (need)<-[:SAW]-(s:Step)<-[:TOOK]-(a) WHERE s.n < act.n } END AS seen
+ORDER BY need.kind, need.id
+WITH mt, t, a, m, act,
+     collect(CASE WHEN need IS NULL THEN NULL ELSE {record: need.id, kind: need.kind, seen: seen} END) AS needs
+RETURN mt.key AS match, t.id AS item, t.kind AS kind, m.name AS model, a.side AS side, act.tool AS decision,
+       act.n AS step, act.state AS state, needs
+ORDER BY match, item, side
+"""
+
+
+def for_self_runs(query: str) -> str:
+    """The same question asked of self runs (one model on both sides), which keep their own labels in the graph."""
+    return query.replace(":Match", ":SelfCheck").replace(":Attempt", ":SelfAttempt")
+
+
 ALL = {
     "best_under_budget": BEST_UNDER_BUDGET,
     "head_to_head": HEAD_TO_HEAD,
@@ -398,4 +499,7 @@ ALL = {
     "self_faults": SELF_FAULTS,
     "self_consistency": SELF_CONSISTENCY,
     "task_faults": TASK_FAULTS,
+    "what_decisions_need": WHAT_DECISIONS_NEED,
+    "same_world": SAME_WORLD,
+    **{f"steps:{name}": query for name, query in STEP_CHECKS.items()},
 }
