@@ -891,8 +891,11 @@ async function openRace(v, index) {
   ];
   const finish = el('p', { class: 'finish', id: 'race-finish', hidden: true }, round.winner === 'tie' ? 'This scenario was a tie.' : `${shortName(round.winner)} took this scenario: ${how}.`);
   const play = el('button', { type: 'button', id: 'race-play' }, 'Play');
+  racePicture = null;
+  raceClock = () => clock;
   const paint = () => {
     const done = lanes.map((lane) => lane.draw(clock)).every(Boolean);
+    if (racePicture) racePicture.update(clock);
     finish.hidden = !done;
     if (done) playing = false;
     play.textContent = playing ? 'Pause' : done ? 'Play again' : 'Play';
@@ -950,31 +953,193 @@ async function openRace(v, index) {
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// Under a replay: the two routes through that world, item by item, read from the steps in the graph. Both models
-// walked the same records, so for every item the graph can say what each decided and what each had seen by then.
+// ---- one scenario's world as a picture ------------------------------------------------------------------------
+
+const worlds = new Map(); // scenario -> its world as the graph gives it (ledger.sameWorld), asked once
+
+// Loads one scenario's steps into the graph (if they are not there yet) and reads its world back: the records,
+// how they refer to each other, what each model decided and when it first saw each record. Null when the
+// scenario has no steps (a race run in this tab, until it is imported).
+function worldOf(match) {
+  if (!worlds.has(match)) {
+    worlds.set(
+      match,
+      (async () => {
+        await loadSteps([match]);
+        const before = performance.now();
+        const [world] = await ledger.sameWorld([match]);
+        return world ? { world, ms: performance.now() - before } : null;
+      })(),
+    );
+  }
+  return worlds.get(match);
+}
+
+// The picture: the world's records as nodes, in columns by how far they are from an item that gets decided, and
+// linked as the world's own answers link them. On every link each model has its own line (the first model's
+// above, the second's below), drawn from the moment that model read the record the link leads to: solid when it
+// read it before deciding the item on that row, dashed when only afterwards, and red and dotted when it never
+// did. A dot beside an item appears when the model decides it. `update(clock)` shows the picture as it stood
+// `clock` seconds into the attempts, so it plays along with the race; Infinity shows how it ended.
+function worldPicture(world, v) {
+  const sideOf = Object.fromEntries(Object.entries(world.models).map(([side, model]) => [model, side]));
+  const lanes = [['a', sideOf[v.a], v.a, -3], ['b', sideOf[v.b], v.b, 3]];
+  const byId = new Map(world.records.map((r) => [r.id, r]));
+  const referred = new Set(world.records.flatMap((r) => r.refers.map((x) => x.to)));
+  const depth = new Map();
+  let frontier = world.records.filter((r) => !referred.has(r.id)).map((r) => r.id);
+  for (let d = 0; frontier.length && d < 6; d += 1) {
+    const next = [];
+    for (const id of frontier) {
+      if (depth.has(id)) continue;
+      depth.set(id, d);
+      for (const x of (byId.get(id) || { refers: [] }).refers) if (!depth.has(x.to)) next.push(x.to);
+    }
+    frontier = next;
+  }
+  for (const r of world.records) if (!depth.has(r.id)) depth.set(r.id, 0);
+  const columns = [];
+  for (const r of world.records) (columns[depth.get(r.id)] ||= []).push(r.id);
+  // which decided items a record belongs to (the rows it is drawn for)
+  const roots = new Map(columns[0].map((id) => [id, [id]]));
+  for (let d = 0; d < columns.length; d += 1) {
+    for (const id of columns[d] || []) {
+      for (const x of byId.get(id).refers) roots.set(x.to, [...new Set([...(roots.get(x.to) || []), ...(roots.get(id) || [])])]);
+    }
+  }
+  // rows: the decided items in order; every later column sits where the records that refer to it sit
+  const ROW = 26;
+  const TOP = 34;
+  const y = new Map();
+  columns[0].sort().forEach((id, i) => y.set(id, TOP + i * ROW));
+  for (let d = 1; d < columns.length; d += 1) {
+    const wish = (id) => {
+      const from = world.records.filter((r) => y.has(r.id) && r.refers.some((x) => x.to === id)).map((r) => y.get(r.id));
+      return from.length ? from.reduce((sum, at) => sum + at, 0) / from.length : TOP;
+    };
+    const placed = columns[d].map((id) => [id, wish(id)]).sort((p, q) => p[1] - q[1] || (p[0] < q[0] ? -1 : 1));
+    let last = -Infinity;
+    for (const [id, at] of placed) {
+      last = Math.max(at, last + ROW);
+      y.set(id, last);
+    }
+  }
+  const W = 720;
+  const NODE = 96;
+  const LEFT = 196; // room for what was decided, written beside each item
+  const x = (d) => (columns.length < 2 ? LEFT : LEFT + (d * (W - LEFT - NODE / 2 - 12)) / (columns.length - 1));
+  const H = Math.max(...y.values()) + 22;
+  const decisions = new Map(); // item -> {a: its decision, b: its decision}
+  for (const item of world.items) {
+    decisions.set(item.item, Object.fromEntries(lanes.map(([cls, side]) => [cls, (item.sides[side] || {}).decision ? item.sides[side] : null])));
+  }
+  const timed = []; // [element, the second it appears]
+  const show = (node, at) => {
+    timed.push([node, at]);
+    return node;
+  };
+  const marks = [];
+  for (const r of world.records) {
+    for (const link of r.refers) {
+      if (!y.has(link.to)) continue;
+      const from = { x: x(depth.get(r.id)) + NODE / 2, y: y.get(r.id) };
+      const to = { x: x(depth.get(link.to)) - NODE / 2, y: y.get(link.to) };
+      marks.push(svg('line', { x1: from.x, y1: from.y, x2: to.x, y2: to.y, class: 'wbase' }));
+      for (const [cls, side, model, shift] of lanes) {
+        const decided = (roots.get(r.id) || []).map((root) => (decisions.get(root) || {})[cls]).filter(Boolean);
+        if (!decided.length) continue; // this model decided nothing on this row
+        const first = decided.reduce((p, q) => (q.step < p.step ? q : p));
+        const seen = (world.seen[side] || {})[link.to];
+        const state = !seen ? 'never' : seen.step < first.step ? 'before' : 'late';
+        const words = { before: 'had read it before deciding', late: 'read it only after deciding', never: 'never read it' }[state];
+        marks.push(
+          show(
+            svg('line', { x1: from.x, y1: from.y + shift, x2: to.x, y2: to.y + shift, class: `wl ${cls} ${state}` }, svg('title', null, `${shortName(model)} ${words}: ${link.to}`)),
+            seen ? seen.at_s : first.at_s,
+          ),
+        );
+      }
+    }
+  }
+  const nodes = world.records.map((r) => {
+    const at = { x: x(depth.get(r.id)), y: y.get(r.id) };
+    const mine = decisions.get(r.id);
+    const differ = mine && mine.a && mine.b && mine.a.decision !== mine.b.decision;
+    const parts = [
+      svg('rect', { x: at.x - NODE / 2, y: at.y - 10, width: NODE, height: 20, rx: 6, class: `wnode${differ ? ' differ' : ''}` }),
+      svg('text', { x: at.x, y: at.y + 4, 'text-anchor': 'middle' }, r.id),
+    ];
+    if (mine) {
+      for (const [cls, , model, shift] of lanes) {
+        const did = mine[cls];
+        if (!did) continue;
+        const said = `${shortName(model)}: ${stepWords(did.decision)} at step ${did.step}`;
+        parts.push(show(svg('circle', { cx: at.x - NODE / 2 - 9, cy: at.y + shift * 1.6, r: 3.6, class: `wdec ${cls}` }, svg('title', null, said)), did.at_s));
+        // what it decided, in its own colour when the two differ and once in plain ink when they agree
+        if (differ) parts.push(show(svg('text', { x: at.x - NODE / 2 - 18, y: at.y + (cls === 'a' ? -2 : 10), 'text-anchor': 'end', class: `wsaid ${cls}` }, stepWords(did.decision)), did.at_s));
+      }
+      if (!differ && (mine.a || mine.b)) {
+        const one = mine.a && mine.b ? (mine.a.at_s <= mine.b.at_s ? mine.a : mine.b) : mine.a || mine.b;
+        parts.push(show(svg('text', { x: at.x - NODE / 2 - 18, y: at.y + 4, 'text-anchor': 'end', class: 'wsaid' }, stepWords(one.decision)), one.at_s));
+      }
+    }
+    return parts;
+  });
+  const heads = columns.map((ids, d) => {
+    const kinds = [...new Set(ids.map((id) => byId.get(id).kind))];
+    // the last column's heading ends at the picture's edge, so a long one ("customers and skus") is not cut off
+    const last = d === columns.length - 1 && d > 0;
+    return svg('text', { x: last ? x(d) + NODE / 2 : x(d), y: 14, 'text-anchor': last ? 'end' : 'middle', class: 'whead' }, kinds.map((k) => `${k}s`).join(' and '));
+  });
+  const figure = el(
+    'figure',
+    { class: 'world' },
+    svg(
+      'svg',
+      { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `The world of this scenario as a graph: ${plural(world.records.length, 'record')} and the links between them, with what each model had read when it decided.` },
+      heads,
+      marks,
+      nodes,
+    ),
+    el(
+      'figcaption',
+      null,
+      el('span', { class: 'wkey' }, svg('svg', { viewBox: '0 0 34 10', class: 'wsample' }, svg('line', { x1: 1, y1: 3, x2: 33, y2: 3, class: 'wl a before' }), svg('line', { x1: 1, y1: 8, x2: 33, y2: 8, class: 'wl b before' })), ` ${shortName(v.a)} above, ${shortName(v.b)} below: had read the record before deciding that row`),
+      el('span', { class: 'wkey' }, svg('svg', { viewBox: '0 0 34 10', class: 'wsample' }, svg('line', { x1: 1, y1: 5, x2: 33, y2: 5, class: 'wl a late' })), ' read it only after deciding'),
+      el('span', { class: 'wkey' }, svg('svg', { viewBox: '0 0 34 10', class: 'wsample' }, svg('line', { x1: 1, y1: 5, x2: 33, y2: 5, class: 'wl never' })), ' never read it'),
+    ),
+  );
+  const update = (clock) => {
+    for (const [node, at] of timed) node.toggleAttribute('hidden', at > clock);
+  };
+  return { node: figure, update };
+}
+
+let racePicture = null; // the picture under the race on screen, played along with it
+let raceClock = () => Infinity; // how far that race has got, in seconds
+
+// Under a replay: that scenario's world as a graph with both routes drawn on it, played along with the race, and
+// the same thing item by item as a table.
 async function drawSameWorld(v, index) {
   const box = $('same-world');
   if (!box) return;
   const round = v.rounds[index];
   box.replaceChildren(el('p', { class: 'note' }, 'Loading both routes into the graph…'));
-  let world;
-  let ms;
+  let found;
   let needs;
   try {
-    await loadSteps([round.match]);
-    const before = performance.now();
-    [world] = await ledger.sameWorld([round.match]);
-    ms = performance.now() - before;
+    found = await worldOf(round.match);
     needs = await ledger.whatDecisionsNeed(v.version);
   } catch (error) {
     box.replaceChildren(el('p', { class: 'note' }, `The steps of this scenario could not be read (${error.message}).`));
     return;
   }
   if ($('same-world') !== box) return;
-  if (!world) {
+  if (!found) {
     box.replaceChildren(el('p', { class: 'note' }, 'The steps of this scenario are not in the graph yet: a race run in this tab joins them once it is imported.'));
     return;
   }
+  const { world, ms } = found;
   const sideOf = Object.fromEntries(Object.entries(world.models).map(([side, model]) => [model, side]));
   const cell = (side) => {
     if (!side || !side.decision) return el('span', { class: 'note' }, 'left undone');
@@ -989,37 +1154,19 @@ async function drawSameWorld(v, index) {
   };
   const unseen = (model) => world.decided_unseen[sideOf[model]] || 0;
   const differ = world.decided_differently.length;
+  const picture = worldPicture(world, v);
+  racePicture = picture;
+  picture.update(raceClock());
   box.replaceChildren(
-    el('h4', { class: 'pair-graph-title' }, el('span', { class: 'relate-badge' }, 'Relate graph'), ' The same world, item by item'),
+    el('h4', { class: 'pair-graph-title' }, el('span', { class: 'relate-badge' }, 'Relate graph'), ' The same world, two routes'),
     el(
       'p',
       { class: 'note' },
-      'Every step of this scenario is now in the graph, linked to the record it read or decided, and both models walked the same records. ',
+      'Every step of this scenario is in the graph, linked to the record it read or decided, and both models walked the same records. ',
       needs.length ? `Here ${needsWords(needs)}. ` : '',
-      'So for each item the graph can say what each model decided, and whether it had by then seen the records that item depends on.',
+      'The picture fills in as the race plays: a line is drawn when a model reads a record, a dot when it decides.',
     ),
-    el(
-      'div',
-      { class: 'table-wrap' },
-      el(
-        'table',
-        { class: 'stack routes' },
-        el('thead', null, el('tr', null, el('th', { scope: 'col' }, sentence((world.items[0] || {}).kind || 'item')), el('th', { scope: 'col', class: 'a' }, shortName(v.a)), el('th', { scope: 'col', class: 'b' }, shortName(v.b)))),
-        el(
-          'tbody',
-          null,
-          world.items.map((item) =>
-            el(
-              'tr',
-              { class: item.differ ? 'differ' : null },
-              el('td', { class: 'lead' }, item.item, item.differ ? el('span', { class: 'chip warn' }, 'decided differently') : null),
-              el('td', { 'data-label': shortName(v.a) }, cell(item.sides[sideOf[v.a]])),
-              el('td', { 'data-label': shortName(v.b) }, cell(item.sides[sideOf[v.b]])),
-            ),
-          ),
-        ),
-      ),
-    ),
+    picture.node,
     el(
       'p',
       { class: 'finish', id: 'same-world-sum' },
@@ -1030,6 +1177,33 @@ async function drawSameWorld(v, index) {
       'p',
       { class: 'note small', id: 'same-world-stats' },
       `Read from the steps in the graph with one Cypher query: ${plural(world.items.length * 2, 'row')} · ${ms < 1 ? 'under 1' : Math.round(ms)} ms · run by Relate in this browser tab.`,
+    ),
+    el(
+      'details',
+      { class: 'graph-query' },
+      el('summary', null, 'Show it item by item'),
+      el(
+        'div',
+        { class: 'table-wrap' },
+        el(
+          'table',
+          { class: 'stack routes' },
+          el('thead', null, el('tr', null, el('th', { scope: 'col' }, sentence((world.items[0] || {}).kind || 'item')), el('th', { scope: 'col', class: 'a' }, shortName(v.a)), el('th', { scope: 'col', class: 'b' }, shortName(v.b)))),
+          el(
+            'tbody',
+            null,
+            world.items.map((item) =>
+              el(
+                'tr',
+                { class: item.differ ? 'differ' : null },
+                el('td', { class: 'lead' }, item.item, item.differ ? el('span', { class: 'chip warn' }, 'decided differently') : null),
+                el('td', { 'data-label': shortName(v.a) }, cell(item.sides[sideOf[v.a]])),
+                el('td', { 'data-label': shortName(v.b) }, cell(item.sides[sideOf[v.b]])),
+              ),
+            ),
+          ),
+        ),
+      ),
     ),
     el('details', { class: 'graph-query' }, el('summary', null, 'Show the query'), el('pre', null, questionsText.same_world.trim())),
   );
@@ -1226,6 +1400,41 @@ async function drawPairGraph(v, ring = null) {
       ' in this browser tab.',
     ),
     el('details', { class: 'graph-query' }, el('summary', null, 'Show the query'), el('pre', null, query.trim())),
+    el('div', { id: 'world-graph', class: 'world-graph' }),
+  );
+  drawWorldGraph(v, ring);
+}
+
+// Under the dots: one of them opened. The scenario just watched, or the first one, as a graph of its own: the
+// records of that world and what each model had read when it decided. It is the same graph, one level down.
+async function drawWorldGraph(v, ring = null) {
+  const box = $('world-graph');
+  const rounds = v.rounds || [];
+  if (!box || !rounds.length) return;
+  const index = ring ?? 0;
+  let found;
+  try {
+    found = await worldOf(rounds[index].match);
+  } catch {
+    return; // the picture is an extra: without it the box is what it was
+  }
+  if ($('world-graph') !== box || !found) return;
+  const { world } = found;
+  const sideOf = Object.fromEntries(Object.entries(world.models).map(([side, model]) => [model, side]));
+  const unseen = (model) => world.decided_unseen[sideOf[model]] || 0;
+  const picture = worldPicture(world, v);
+  picture.update(Infinity);
+  box.replaceChildren(
+    el('h4', { class: 'world-title' }, `One dot, opened: scenario ${index + 1} of ${rounds.length}`),
+    el(
+      'p',
+      { class: 'note small' },
+      'Each scenario is a small world of linked records, and every step either model took in it is in the graph too. ',
+      `In this one they decided differently on ${world.decided_differently.length} of ${plural(world.items.length, 'item')}, and decided before reading a record the item depends on: `,
+      `${shortName(v.a)} ${unseen(v.a)}, ${shortName(v.b)} ${unseen(v.b)}. `,
+      ring === null ? el('button', { type: 'button', class: 'quiet small', id: 'world-watch', onclick: () => openRace(v, index) }, 'Watch it fill in') : 'It filled in below as the race played.',
+    ),
+    picture.node,
   );
 }
 
@@ -1683,6 +1892,49 @@ async function drawLive(v) {
   const stage = el('div', { id: 'live-stage' });
   const say = el('p', { class: 'finish', id: 'live-result', role: 'status', 'aria-live': 'polite' });
 
+  // The runner plays one race at a time, for everyone. It says when it is busy (/health), whether with a race
+  // this visitor started a moment ago under another choice of models, or with someone else's. The button is then
+  // off and says why, right beside it, and comes back by itself: the runner is asked again every few seconds.
+  const busyNote = el('p', { class: 'live-banner refused', id: 'live-busy', role: 'status', 'aria-live': 'polite', hidden: true });
+  let running = false; // a race or batch this panel started is being played
+  let runnerBusy = false;
+  let asking = 0; // the next time the runner is asked, while it is busy
+  const ready = () => {
+    go.disabled = running || runnerBusy;
+    busyNote.hidden = running || !runnerBusy;
+  };
+  const watchRunner = async (refused = false) => {
+    if (!document.body.contains(go) || running) return;
+    let busy = refused;
+    if (!refused) {
+      try {
+        busy = Boolean((await fetch(`${runner.base}/health`).then((x) => x.json())).busy);
+      } catch {
+        busy = false; // a runner that cannot say is not held against the visitor: the race itself will answer
+      }
+    }
+    if (!document.body.contains(go) || running) return;
+    runnerBusy = busy;
+    if (busy) {
+      busyNote.textContent = refused
+        ? 'That did not start: the runner is busy with another race, and it plays one at a time. Nothing was spent. This button comes back by itself when the runner is free, usually within a minute or two.'
+        : 'The runner is busy with another race right now (it plays one at a time; it may be one you started a moment ago). This button comes back by itself when it is free, usually within a minute or two.';
+      clearTimeout(asking);
+      asking = setTimeout(() => watchRunner(), 4000);
+    }
+    ready();
+  };
+  // a refusal for being busy: take the empty lanes away again, so nothing on screen looks like a race under way
+  const refusedBusy = (error) => {
+    if (!/busy/i.test(error.message)) return false;
+    stage.replaceChildren();
+    say.textContent = '';
+    running = false;
+    watchRunner(true);
+    follow(busyNote, 'center');
+    return true;
+  };
+
   // what is left to spend, by provider, and how many races this sign-in has left
   const showBudget = (options, left) => {
     const parts = (options.budgets || []).map((b) => `${providerName(b.provider)} $${fixed(b.left_usd, 2)} of $${fixed(b.limit_usd, 2)}`);
@@ -1762,7 +2014,8 @@ async function drawLive(v) {
   // A batch: every attempt is shown as it ends, then the result of the whole batch.
   const runBatch = async (runs) => {
     const [ma, mb] = whoPick.value === 'a' ? [a, a] : whoPick.value === 'b' ? [b, b] : [a, b];
-    go.disabled = true;
+    running = true;
+    ready();
     say.textContent = '';
     box.querySelector('#live-winner')?.remove();
     const lanes = batchLanes(ma, mb, runs);
@@ -1840,12 +2093,14 @@ async function drawLive(v) {
       );
       follow(batchBox.firstElementChild, 'nearest');
     } catch (error) {
-      say.textContent = `The batch did not run: ${error.message}`;
+      if (!refusedBusy(error)) say.textContent = `The batch did not run: ${error.message}`;
     } finally {
       clearInterval(ticking);
       lanes.A.finish();
       lanes.B.finish();
-      go.disabled = false;
+      running = false;
+      ready();
+      if (!runnerBusy) watchRunner(); // the runner may still be filing the result: ask before offering the button again
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
         showBudget(options, renewed ? renewed.races_left : null);
@@ -1860,7 +2115,8 @@ async function drawLive(v) {
   go.addEventListener('click', async () => {
     if (Number(runsPick.value) > 1) return runBatch(Number(runsPick.value));
     batchBox.replaceChildren();
-    go.disabled = true;
+    running = true;
+    ready();
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
     stage.replaceChildren(el('p', { class: 'note' }, 'A new world is being generated and handed to both models. Nothing below is a replay.'), laneLegend(), lanes.A.node, lanes.B.node);
@@ -1935,9 +2191,11 @@ async function drawLive(v) {
       const facts = raceFacts(record, task, a, b);
       mine.set(facts.run_id, facts);
     } catch (error) {
-      say.textContent = `The live race did not run: ${error.message}`;
+      if (!refusedBusy(error)) say.textContent = `The live race did not run: ${error.message}`;
     } finally {
-      go.disabled = false;
+      running = false;
+      ready();
+      if (!runnerBusy) watchRunner(); // the runner may still be filing the result: ask before offering the button again
       // the budgets and this sign-in's races have moved: read them again
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
@@ -1954,6 +2212,7 @@ async function drawLive(v) {
     el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
     prior,
     el('div', { class: 'race-controls' }, sizes.length ? [whoPick, runsPick] : null, level, profile, go),
+    busyNote,
     early,
     expect,
     money,
@@ -1964,6 +2223,7 @@ async function drawLive(v) {
     history,
     filed,
   );
+  watchRunner();
 }
 const spec_task = (test) => test.split('/').pop();
 
@@ -2497,6 +2757,7 @@ function fightCard(spec, v) {
   for (const r of v.rounds) tally[stateOf(r)] += 1;
   const arena = [
     el('div', { id: 'pair-graph', class: 'pair-graph' }),
+    workedPanel(v),
     el('h3', { class: 'center' }, `The arena: ${plural(v.pairs, 'scenario')}`),
     el(
       'p',
@@ -2681,7 +2942,6 @@ function drawVerdict(spec, v) {
         )
       : null,
     fightCard(spec, v),
-    workedPanel(v),
     d.notes.length ? el('ul', { class: 'notes' }, d.notes.map((n) => el('li', null, plainNames(n, [d.a, d.b])))) : null,
 
     el('h3', null, 'Blueprint'),

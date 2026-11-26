@@ -466,8 +466,26 @@ ORDER BY need.kind, need.id
 WITH mt, t, a, m, act,
      collect(CASE WHEN need IS NULL THEN NULL ELSE {record: need.id, kind: need.kind, seen: seen} END) AS needs
 RETURN mt.key AS match, t.id AS item, t.kind AS kind, m.name AS model, a.side AS side, act.tool AS decision,
-       act.n AS step, act.state AS state, needs
+       act.n AS step, act.at_s AS at_s, act.state AS state, needs
 ORDER BY match, item, side
+"""
+
+# The world itself, for drawing it: every record of these scenarios with the records it refers to, and for each
+# model the first step at which it saw each record (and when, in seconds since its attempt began).
+WORLD_RECORDS = """
+MATCH (mt:Match)<-[:IN]-(x:Item)
+WHERE mt.key IN $matches
+OPTIONAL MATCH (x)-[r:REFERS_TO]->(y:Item)
+WITH mt, x, y, r ORDER BY y.id
+RETURN mt.key AS match, x.id AS id, x.kind AS kind,
+       collect(CASE WHEN y IS NULL THEN NULL ELSE {to: y.id, field: r.field} END) AS refers
+ORDER BY match, id
+"""
+WORLD_SEEN = """
+MATCH (mt:Match)<-[:IN]-(a:Attempt)-[:TOOK]->(s:Step)-[:SAW]->(i:Item)
+WHERE mt.key IN $matches
+RETURN mt.key AS match, a.side AS side, i.id AS record, min(s.n) AS step, min(s.at_s) AS at_s
+ORDER BY match, side, record
 """
 
 
@@ -501,5 +519,7 @@ ALL = {
     "task_faults": TASK_FAULTS,
     "what_decisions_need": WHAT_DECISIONS_NEED,
     "same_world": SAME_WORLD,
+    "world_records": WORLD_RECORDS,
+    "world_seen": WORLD_SEEN,
     **{f"steps:{name}": query for name, query in STEP_CHECKS.items()},
 }

@@ -119,7 +119,9 @@ and of those attempts how many still had the right result and how many the test 
 
 For the two the grader also counts, the graph and the grader agree on every attempt on file
 (`tests/test_steps.py`): over the records each test's own package requires (`task.joins`), and counting an action
-on an unknown record as the grader does. `same_world` lays the two attempts of a match side by side, item by item.
+on an unknown record as the grader does. `same_world` lays the two attempts of a match side by side, item by item;
+`world_records` and `world_seen` return the world itself (every record with the records it refers to) and the
+step at which each model first saw each record, which is what the page draws a scenario from.
 A reader can give any of these a level in a verdict (`--check decided-before-seeing=serious`); it is then judged
 like a fault the grader counted, under the name "... (your check)", and the head to head is untouched.
 

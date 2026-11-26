@@ -14,9 +14,12 @@ as a race, step by step, from `data/replays/`.
 **The steps, in the graph.** The graph the page builds on load stops at the attempt. When a question is about how
 a model worked, the page fetches the steps of the scenarios it needs from `data/steps/` (one small file per match
 record), expands them to the rows the command line loads, and writes them into the same graph with the same
-statements. Under a replay that is one scenario, and the two routes are laid side by side item by item. Under
-the verdict, "How they got there" loads every scenario of the task (about ten seconds) and asks each process
-question of them; the level a visitor gives one is judged in the verdict like any other fault.
+statements. One scenario is enough for the picture in the evidence box and under a replay: that world's records
+as nodes, linked as the world's answers link them, with a line for each model where it had read a record before
+deciding (dashed: only afterwards; red and dotted: never). Under a replay it fills in as the race plays, and the
+same thing is there item by item as a table. "How they got there" loads every scenario of the task (about ten
+seconds) and asks each process question of them; the level a visitor gives one is judged in the verdict like
+any other fault.
 
 **Live races.** The data is every finished, sealed match on file. The page can also ask a Gladiator race runner
 for one fresh scenario (or a batch of them) and show it as it happens: open it with `?runner=<address>` for a

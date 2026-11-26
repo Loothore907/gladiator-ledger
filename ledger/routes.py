@@ -218,9 +218,19 @@ def same_world(ask, matches: list[str]) -> list[dict]:
     """Scenarios, item by item: the two models on the same world. For each item, what each decided and which of
     the records it depends on each had seen by then. Per scenario: `decided_differently` lists the items where
     the two chose differently, `decided_unseen` counts, per model, the items decided before a needed record
-    was seen."""
+    was seen. `records` is the world itself (every record and the records it refers to) and `seen` says, per
+    side, at which step and second each record was first seen: what a picture of the two routes is drawn from."""
     worlds: dict[str, dict] = {}
-    for r in ask(questions.SAME_WORLD, {"matches": list(matches)}):
+    asked = {"matches": list(matches)}
+    records: dict[str, list] = {}
+    for r in ask(questions.WORLD_RECORDS, asked):
+        refers = [dict(x) for x in r["refers"] if x is not None]
+        records.setdefault(r["match"], []).append({"id": r["id"], "kind": r["kind"], "refers": refers})
+    seen: dict[str, dict] = {}
+    for r in ask(questions.WORLD_SEEN, asked):
+        first = {"step": r["step"], "at_s": r["at_s"]}
+        seen.setdefault(r["match"], {}).setdefault(r["side"], {})[r["record"]] = first
+    for r in ask(questions.SAME_WORLD, asked):
         world = worlds.setdefault(r["match"], {"match": r["match"], "models": {}, "items": {}})
         world["models"][r["side"]] = r["model"]
         item = world["items"].setdefault(r["item"], {"item": r["item"], "kind": r["kind"], "sides": {}})
@@ -229,6 +239,7 @@ def same_world(ask, matches: list[str]) -> list[dict]:
             "model": r["model"],
             "decision": r["decision"],
             "step": r["step"],
+            "at_s": r["at_s"],
             "state": r["state"],
             "needs": needs,
             "unseen": [n["record"] for n in needs if n["seen"] is False],
@@ -242,6 +253,8 @@ def same_world(ask, matches: list[str]) -> list[dict]:
         for item in items:
             item["differ"] = len({s["decision"] for s in item["sides"].values()}) > 1
         world["items"] = items
+        world["records"] = records.get(key, [])
+        world["seen"] = seen.get(key, {})
         world["decided_differently"] = [i["item"] for i in items if i["differ"]]
         world["decided_unseen"] = {
             side: sum(1 for i in items if i["sides"].get(side, {}).get("unseen")) for side in sorted(world["models"])

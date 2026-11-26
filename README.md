@@ -71,10 +71,11 @@ command line in CI).
 passes the checks). The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
 the loop: describe a flow, pick two models, choose whose tolerance applies, read the verdict, download the spec. Every
 scenario behind a verdict can be replayed as a race: both models on the same world, step by step, at the pace they
-really ran. Under the replay the page loads that scenario's steps into its graph and lays the two routes side by
-side, item by item: what each model decided, and whether it had by then seen the records the item depends on.
-"How they got there", under the verdict, loads the steps of every scenario of the task and asks the process
-questions of them. Give one a level and the verdict above is judged with it
+really ran. The graph goes one level further down, and the page draws it: under the dots of the evidence graph
+one scenario is opened as a graph of its own, the records of that world and the links between them, with a line
+for each model wherever it had read a record before deciding. Watch a scenario and the same picture fills in as
+the race plays. "How they got there", beside it, loads the steps of every scenario of the task and asks the
+process questions of them. Give one a level and the verdict is judged with it
 ([How they got there](#how-they-got-there-ask-the-record-a-new-question)).
 
 **Live races (hackathon judges for now, coming soon for everyone).** Under the recorded scenarios the page can
@@ -355,9 +356,11 @@ decided without reading it again). `--needs customer` keeps a question to one ki
 the same through `how_they_worked` and `same_world`, and can write its own pattern over a route with `read_graph`.
 These figures are the record at 05:00 UTC on Nov 26, 2026.
 
-**On the page.** The same questions run in your browser, on the same statements. Open a scenario to watch it and
-the table under the race is the second command above. "How they got there" under the verdict is the first, with a
-level to set beside each question: the page fetches the steps of that task (a small file per match record), loads
+**On the page.** The same questions run in your browser, on the same statements. The evidence box in step 3
+draws one scenario as a graph of its records without a click: a solid line where a model had read a record before
+deciding, a dashed one where it read it only afterwards, a red dotted one where it never did. Open a scenario
+and that picture plays along with the race (it is the second command above, drawn). "How they got there", just
+below, is the first command, with a level to set beside each question: the page fetches the steps of that task (a small file per match record), loads
 them into the graph in the tab, which takes about ten seconds, and each count is then one query. The page check
 in CI holds every one of these answers to the command line's.
 
@@ -402,8 +405,8 @@ flowchart LR
 - **Retrieval.** A full-text index over the workflow text, for "describe your flow".
 - **On show.** Wherever the page reads the graph it says so ("Relate graph") and shows the Cypher it ran, the rows
   that came back and the time it took in your browser: the evidence behind a verdict (one dot per scenario both
-  models played, linked to the test version and to each model), the two routes through one world under a replay,
-  and each process question.
+  models played, linked to the test version and to each model), one of those scenarios opened as a graph of its
+  records with both models' routes drawn on it, and each process question.
 - **Agents.** The same store served read-only over MCP, including free-form read-only Cypher, over the steps too.
 - **Safe to rebuild.** The loader `MERGE`s on stable keys behind uniqueness constraints, so loading the same records
   again changes nothing. The records stay the master copy; the store is a view of them.

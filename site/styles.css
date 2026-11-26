@@ -60,6 +60,30 @@ h1 em { font-style: normal; text-decoration: underline; text-decoration-color: v
 .pair-graph figure.graph { margin-top: 8px; }
 .pair-graph .gdot[role='button'] { cursor: pointer; }
 .pair-graph .gdot[role='button']:hover, .pair-graph .gdot[role='button']:focus-visible { stroke: var(--ink); stroke-width: 2; }
+.world-graph { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.world-graph:empty { display: none; }
+.world-title { margin: 0 0 4px; font-size: 15.5px; }
+figure.world { margin: 10px 0 6px; }
+figure.world > svg { display: block; width: 100%; height: auto; }
+figure.world figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted); }
+figure.world figcaption svg.wsample { display: inline-block; width: 34px; height: 10px; vertical-align: middle; }
+.world [hidden] { display: none; }
+.world line.wbase { stroke: var(--line); stroke-width: 1; }
+.world line.wl, .wsample line.wl { stroke-width: 2.2; stroke-linecap: round; }
+.world line.wl.a, .wsample line.wl.a { stroke: var(--side-a); }
+.world line.wl.b, .wsample line.wl.b { stroke: var(--side-b); }
+.world line.wl.late, .wsample line.wl.late { stroke-dasharray: 5 4; }
+.world line.wl.never, .wsample line.wl.never { stroke: var(--stop); stroke-dasharray: 0.5 4.5; stroke-width: 2.6; }
+.world rect.wnode { fill: var(--surface); stroke: var(--line); }
+.world rect.wnode.differ { fill: var(--warn-soft); stroke: var(--warn); }
+.world text { font-size: 11px; fill: var(--ink); }
+.world text.whead { font-size: 10.5px; fill: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; }
+.world text.wsaid { fill: var(--muted); }
+.world text.wsaid.a { fill: var(--side-a); }
+.world text.wsaid.b { fill: var(--side-b); }
+.world circle.wdec.a { fill: var(--side-a); }
+.world circle.wdec.b { fill: var(--side-b); }
+.world figcaption .wkey { display: inline-block; margin-right: 14px; }
 .same-world { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .same-world:empty { display: none; }
 table.routes td { vertical-align: top; }

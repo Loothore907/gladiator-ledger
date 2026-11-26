@@ -83,6 +83,8 @@ function fakeRunner(models, extra) {
       return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }], batch_pass_rate: 0.8 }) });
     }
     if (req.url === '/races') return json(res, 200, { races: run, batches });
+    // the real runner plays one race at a time and says when it is busy; `server.busy` makes this one say so
+    if (req.url === '/health') return json(res, 200, { ok: true, busy: Boolean(server.busy) });
     if (!['/race', '/signin'].includes(req.url) || req.method !== 'POST') return res.writeHead(404, cors).end();
     let body = '';
     req.on('data', (chunk) => (body += chunk));
@@ -96,6 +98,7 @@ function fakeRunner(models, extra) {
       }
       server.asked = ask;
       if (ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
+      if (server.busy) return json(res, 409, { error: 'The runner is busy with another race or a test being checked. Try again in a minute.' });
       if (ask.runs > 1) {
         // a batch: each attempt as it ends, then the facts of the whole batch. Side A fails its third attempt.
         if (ask.runs !== 10) return json(res, 400, { error: 'A batch must be one of these sizes: 10.' });
@@ -394,14 +397,30 @@ async function main() {
         const dots = await page.locator('#pair-graph figure.graph circle').count();
         const ringed = await page.locator('#pair-graph figure.graph circle.ring').count();
         if (dots !== squares || ringed !== 1) problems.push(`the graph picture shows ${dots} dots (${ringed} ringed) for ${squares} scenarios`);
-        // under the replay: the same world item by item, read from the steps now in the graph. It must say what
-        // the command line says about that scenario (the first of this pair).
+        // under the replay: the same world as a picture and item by item, read from the steps now in the graph.
+        // It must say what the command line says about that scenario (the first of this pair).
         const drawn = await page.waitForSelector('#same-world-sum', { timeout: 15000 }).then(() => true, () => false);
         if (!drawn) problems.push('the replay shows no item-by-item comparison of the two routes');
         else {
           const now = await page.evaluate(() => window.ledgerDemo.current());
           const told = await page.evaluate(([t, x, y]) => window.ledgerDemo.route(t, x, y, 1), [now.task, now.a, now.b]);
           const world = told.scenarios[0];
+          // the picture: one node per record of that world, every mark shown once the race has ended, and one
+          // broken line (dashed: read afterwards; dotted: never read) for every record a model had not seen
+          // when it decided
+          const picture = '#same-world figure.world > svg';
+          const boxes = await page.locator(`${picture} rect.wnode`).count();
+          if (boxes !== world.records.length) problems.push(`the picture of the world has ${boxes} nodes for ${world.records.length} records`);
+          const waiting = await page.locator(`${picture} [hidden]`).count();
+          if (waiting) problems.push(`${waiting} marks of the picture are still hidden after the race ended`);
+          const broken = (await page.locator(`${picture} line.wl.late`).count()) + (await page.locator(`${picture} line.wl.never`).count());
+          const notSeen = world.items.reduce((n, item) => n + Object.values(item.sides).reduce((m, side) => m + side.unseen.length, 0), 0);
+          if (broken !== notSeen) problems.push(`the picture draws ${broken} broken lines, the graph says ${notSeen} records were not seen in time`);
+          if (!(await page.locator(`${picture} line.wl.before`).count())) problems.push('the picture draws no line for a record read in time');
+          // the evidence box shows the same scenario as it ended, one level down from its dot
+          const opened = await page.waitForSelector('#world-graph figure.world', { timeout: 15000 }).then(() => true, () => false);
+          if (!opened) problems.push('the evidence box does not open a scenario as a graph of its own');
+          else if ((await page.locator('#world-graph figure.world > svg rect.wnode').count()) !== world.records.length) problems.push('the evidence box draws another world than the scenario watched');
           const rows = await page.locator('#same-world table.routes tbody tr').count();
           const marked = await page.locator('#same-world table.routes tr.differ').count();
           const unseen = await page.locator('#same-world table.routes .chip.bad').count();
@@ -482,7 +501,6 @@ async function main() {
     }
     if (await page.locator('#unmet-list, #live-a, #live-b').count()) problems.push('the page has a second place to choose models');
     if (!unmetSeen) problems.push('no pair that never met was found to check (the data should have some)');
-    if (!unmetSeen) problems.push('no pair that never met was found to check (the data should have some)');
 
     // The example button must walk all three steps on its own and end on a drawn verdict with enough evidence.
     await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
@@ -498,6 +516,11 @@ async function main() {
     // numbers and the question it was read with. The panel that used to sit beside the steps is gone.
     if (example) {
       await page.waitForSelector('#pair-graph figure.graph circle', { timeout: 8000 }).catch(() => problems.push('step 3 has no graph picture'));
+      // and under the dots, one scenario opened as a graph of its own without a click: the records of its world,
+      // with every mark shown (it is drawn as the scenario ended)
+      await page.waitForSelector('#world-graph figure.world > svg rect.wnode', { timeout: 15000 }).catch(() => problems.push('step 3 does not show a scenario as a graph of its records'));
+      if (await page.locator('#world-graph figure.world > svg [hidden]').count()) problems.push('the scenario drawn in step 3 has marks still hidden');
+      if (!(await page.locator('#world-watch').count())) problems.push('the scenario drawn in step 3 offers no way to watch it');
       const shown = await page.evaluate(async () => {
         const v = await window.ledgerDemo.current();
         return {
@@ -691,7 +714,7 @@ async function main() {
       if (off) problems.push(`${off} live steps are drawn past the end of the track`);
       // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
       await live.waitForSelector('#pair-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
-      const drawn = await live.locator('#pair-graph circle').count();
+      const drawn = await live.locator('#pair-graph circle.gdot').count(); // the scenario dots, not the marks of the world drawn under them
       if (drawn !== pair.pairs + 1) problems.push(`the graph after the live race shows ${drawn} dots, not ${pair.pairs} recorded + 1 live`);
       const after = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
       if (after.pairs !== pair.pairs || after.wins[pair.a] !== pair.wins[pair.a]) problems.push('a live result changed the recorded verdict');
@@ -706,6 +729,28 @@ async function main() {
         if (!written.includes(part)) problems.push(`the live write-up lacks ${JSON.stringify(part)}: ${JSON.stringify(written.slice(0, 600))}`);
       }
       if ((await live.locator('#live-history .race-card').count()) !== 1) problems.push('one live race should be written up once');
+      // The runner plays one race at a time. A run it refuses for being busy must not look like a race under way:
+      // no empty lanes, the button off, and the reason right beside it. The button must come back by itself once
+      // the runner is free (the page asks it every few seconds), with nothing spent.
+      {
+        const budgets = () => live.evaluate((at) => fetch(`${at}/options`).then((x) => x.json()).then((o) => JSON.stringify(o.budgets)), runnerUrl);
+        const before = await budgets();
+        runner.busy = true;
+        await live.locator('#live-go').click();
+        await live
+          .waitForFunction(() => document.getElementById('live-go').disabled && !document.getElementById('live-busy').hidden, null, { timeout: 6000 })
+          .catch(() => problems.push('a run refused by a busy runner did not switch the button off and say so'));
+        const told = await live.locator('#live-busy').innerText();
+        if (!/busy/.test(told) || !/comes back by itself/.test(told)) problems.push(`the busy notice reads ${JSON.stringify(told)}`);
+        if (await live.locator('#live-stage > *').count()) problems.push('a run refused by a busy runner left lanes on screen, as if a race were under way');
+        if ((await live.locator('#live-result').innerText()).trim()) problems.push('a busy runner is reported twice: once beside the button and once as a result');
+        runner.busy = false;
+        await live
+          .waitForFunction(() => !document.getElementById('live-go').disabled && document.getElementById('live-busy').hidden, null, { timeout: 12000 })
+          .catch(() => problems.push('the button did not come back when the runner was free again'));
+        const after = await budgets();
+        if (before !== after) problems.push('a refused run moved the live budget');
+      }
       // A batch: the same test ten times in one go. First one model on both lanes (a steadiness check), then the pair.
       if ((await live.locator('#live-runs option:not([disabled])').count()) !== 2) problems.push('the live panel does not offer exactly the batch sizes the runner has');
       if ((await live.locator('#live-runs option[disabled]').count()) !== 2) problems.push('the bigger batch sizes are not shown as coming');

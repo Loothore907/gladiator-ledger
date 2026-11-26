@@ -602,7 +602,20 @@ RETURN mt.key AS match ORDER BY match`;
   // the records it depends on each had seen by then. The steps of `matches` must be in the graph (loadSteps).
   async function sameWorld(matches) {
     const worlds = new Map();
-    for (const r of await ask(questions.same_world, { matches: [...matches] })) {
+    const asked = { matches: [...matches] };
+    // the world itself (every record and the records it refers to) and when each model first saw each record:
+    // what a picture of the two routes is drawn from
+    const records = new Map();
+    for (const r of await ask(questions.world_records, asked)) {
+      if (!records.has(r.match)) records.set(r.match, []);
+      records.get(r.match).push({ id: r.id, kind: r.kind, refers: (r.refers || []).filter((x) => x !== null).map((x) => ({ ...x })) });
+    }
+    const seen = new Map();
+    for (const r of await ask(questions.world_seen, asked)) {
+      if (!seen.has(r.match)) seen.set(r.match, {});
+      (seen.get(r.match)[r.side] ||= {})[r.record] = { step: r.step, at_s: r.at_s };
+    }
+    for (const r of await ask(questions.same_world, asked)) {
       if (!worlds.has(r.match)) worlds.set(r.match, { match: r.match, models: {}, items: new Map() });
       const world = worlds.get(r.match);
       world.models[r.side] = r.model;
@@ -612,6 +625,7 @@ RETURN mt.key AS match ORDER BY match`;
         model: r.model,
         decision: r.decision ?? null,
         step: r.step ?? null,
+        at_s: r.at_s ?? null,
         state: r.state ?? null,
         needs,
         unseen: needs.filter((n) => n.seen === false).map((n) => n.record),
@@ -628,6 +642,8 @@ RETURN mt.key AS match ORDER BY match`;
         match: world.match,
         models: world.models,
         items,
+        records: records.get(key) || [],
+        seen: seen.get(key) || {},
         decided_differently: items.filter((i) => i.differ).map((i) => i.item),
         decided_unseen: Object.fromEntries(sides.map((s) => [s, items.filter((i) => ((i.sides[s] || {}).unseen || []).length).length])),
       });
@@ -656,7 +672,7 @@ RETURN mt.key AS match ORDER BY match`;
       const sideOf = Object.fromEntries(Object.entries(w.models).map(([side, model]) => [model, side]));
       const pair = pairs.findIndex((p) => p.match === w.match);
       Object.assign(w, { scenario: pair + 1, winner: pairs[pair].winner, side: { [a]: sideOf[a] ?? null, [b]: sideOf[b] ?? null } });
-      if (scenario === null) delete w.items;
+      if (scenario === null) for (const detail of ['items', 'records', 'seen']) delete w[detail];
     }
     out.scenarios = worlds;
     return out;
