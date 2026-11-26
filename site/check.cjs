@@ -412,7 +412,7 @@ async function main() {
           const sum = await page.locator('#same-world-sum').innerText();
           if (!sum.includes(`differently on ${world.decided_differently.length} of ${world.items.length} item`)) problems.push(`the item-by-item summary reads ${JSON.stringify(sum)}`);
           if (!/\d+ rows · /.test(await page.locator('#same-world-stats').innerText())) problems.push('the item-by-item panel does not say what its query returned');
-          if (!(await page.locator('#same-world details.graph-query pre').innerText()).includes('REFERS_TO')) problems.push('the item-by-item panel does not show its query');
+          if (!((await page.locator('#same-world details.graph-query pre').textContent()) || '').includes('REFERS_TO')) problems.push('the item-by-item panel does not show its query');
         }
         // How they got there: asking loads the steps of the task, each question shows both models with the
         // command line's counts, and a level the visitor gives one of them is judged in the verdict above.
