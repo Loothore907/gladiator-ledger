@@ -182,7 +182,18 @@ def test_the_same_world_item_by_item(small):
     assert first["item"] == "REQ-1" and first["sides"]["B"]["unseen"] == ["CUS-1"]
     assert first["sides"]["A"]["decision"] == "deny_request" and first["sides"]["A"]["step"] == 4
     # the last action on an item is its decision: REQ-2 was refunded at step 8 after a timeout at step 6
-    assert world["items"][1]["sides"]["A"]["step"] == 8
+    assert world["items"][1]["sides"]["A"]["step"] == 8 and world["items"][1]["sides"]["A"]["at_s"] == 8.0
+    # the world itself, for a picture of the two routes: every record with what it refers to, and when each
+    # model first saw each record (the hasty one saw the customer at step 5, after deciding REQ-1 at step 3)
+    assert world["records"] == [
+        {"id": "CUS-1", "kind": "customer", "refers": []},
+        {"id": "ORD-1", "kind": "order", "refers": [{"to": "CUS-1", "field": "customer_id"}]},
+        {"id": "ORD-2", "kind": "order", "refers": [{"to": "CUS-1", "field": "customer_id"}]},
+        {"id": "REQ-1", "kind": "refund request", "refers": [{"to": "ORD-1", "field": "order_id"}]},
+        {"id": "REQ-2", "kind": "refund request", "refers": [{"to": "ORD-2", "field": "order_id"}]},
+    ]
+    assert world["seen"]["B"]["CUS-1"] == {"step": 5, "at_s": 5.0} and world["seen"]["A"]["CUS-1"]["step"] == 3
+    assert world["seen"]["A"]["REQ-1"] == {"step": 1, "at_s": 1.0}
 
 
 def test_a_readers_own_check_is_judged_at_the_level_the_reader_gives_it(small):
@@ -359,5 +370,9 @@ def test_two_routes_through_one_world(shipped):
     # every scenario in a line: the same pairs the verdict counts, in the same order
     every = cli.route(str(STORE), shipped, "refund-queue", HAIKU, DEEPSEEK, until=UNTIL)
     assert [w["scenario"] for w in every["scenarios"]] == list(range(1, 44))
-    assert all("items" not in w for w in every["scenarios"])
+    assert all("items" not in w and "records" not in w and "seen" not in w for w in every["scenarios"])
+    # the one scenario carries its world: 12 requests, their 12 orders and the customers behind them
+    kinds = [r["kind"] for r in world["records"]]
+    assert kinds.count("refund request") == kinds.count("order") == 12 and 1 <= kinds.count("customer") <= 12
+    assert set(world["seen"]) == {"A", "B"}
     assert cli.route(str(STORE), shipped, "refund-queue", HAIKU, DEEPSEEK, scenario=99, until=UNTIL)["note"]

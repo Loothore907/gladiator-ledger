@@ -394,14 +394,30 @@ async function main() {
         const dots = await page.locator('#pair-graph figure.graph circle').count();
         const ringed = await page.locator('#pair-graph figure.graph circle.ring').count();
         if (dots !== squares || ringed !== 1) problems.push(`the graph picture shows ${dots} dots (${ringed} ringed) for ${squares} scenarios`);
-        // under the replay: the same world item by item, read from the steps now in the graph. It must say what
-        // the command line says about that scenario (the first of this pair).
+        // under the replay: the same world as a picture and item by item, read from the steps now in the graph.
+        // It must say what the command line says about that scenario (the first of this pair).
         const drawn = await page.waitForSelector('#same-world-sum', { timeout: 15000 }).then(() => true, () => false);
         if (!drawn) problems.push('the replay shows no item-by-item comparison of the two routes');
         else {
           const now = await page.evaluate(() => window.ledgerDemo.current());
           const told = await page.evaluate(([t, x, y]) => window.ledgerDemo.route(t, x, y, 1), [now.task, now.a, now.b]);
           const world = told.scenarios[0];
+          // the picture: one node per record of that world, every mark shown once the race has ended, and one
+          // broken line (dashed: read afterwards; dotted: never read) for every record a model had not seen
+          // when it decided
+          const picture = '#same-world figure.world > svg';
+          const boxes = await page.locator(`${picture} rect.wnode`).count();
+          if (boxes !== world.records.length) problems.push(`the picture of the world has ${boxes} nodes for ${world.records.length} records`);
+          const waiting = await page.locator(`${picture} [hidden]`).count();
+          if (waiting) problems.push(`${waiting} marks of the picture are still hidden after the race ended`);
+          const broken = (await page.locator(`${picture} line.wl.late`).count()) + (await page.locator(`${picture} line.wl.never`).count());
+          const notSeen = world.items.reduce((n, item) => n + Object.values(item.sides).reduce((m, side) => m + side.unseen.length, 0), 0);
+          if (broken !== notSeen) problems.push(`the picture draws ${broken} broken lines, the graph says ${notSeen} records were not seen in time`);
+          if (!(await page.locator(`${picture} line.wl.before`).count())) problems.push('the picture draws no line for a record read in time');
+          // the evidence box shows the same scenario as it ended, one level down from its dot
+          const opened = await page.waitForSelector('#world-graph figure.world', { timeout: 15000 }).then(() => true, () => false);
+          if (!opened) problems.push('the evidence box does not open a scenario as a graph of its own');
+          else if ((await page.locator('#world-graph figure.world > svg rect.wnode').count()) !== world.records.length) problems.push('the evidence box draws another world than the scenario watched');
           const rows = await page.locator('#same-world table.routes tbody tr').count();
           const marked = await page.locator('#same-world table.routes tr.differ').count();
           const unseen = await page.locator('#same-world table.routes .chip.bad').count();
@@ -482,7 +498,6 @@ async function main() {
     }
     if (await page.locator('#unmet-list, #live-a, #live-b').count()) problems.push('the page has a second place to choose models');
     if (!unmetSeen) problems.push('no pair that never met was found to check (the data should have some)');
-    if (!unmetSeen) problems.push('no pair that never met was found to check (the data should have some)');
 
     // The example button must walk all three steps on its own and end on a drawn verdict with enough evidence.
     await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
@@ -498,6 +513,11 @@ async function main() {
     // numbers and the question it was read with. The panel that used to sit beside the steps is gone.
     if (example) {
       await page.waitForSelector('#pair-graph figure.graph circle', { timeout: 8000 }).catch(() => problems.push('step 3 has no graph picture'));
+      // and under the dots, one scenario opened as a graph of its own without a click: the records of its world,
+      // with every mark shown (it is drawn as the scenario ended)
+      await page.waitForSelector('#world-graph figure.world > svg rect.wnode', { timeout: 15000 }).catch(() => problems.push('step 3 does not show a scenario as a graph of its records'));
+      if (await page.locator('#world-graph figure.world > svg [hidden]').count()) problems.push('the scenario drawn in step 3 has marks still hidden');
+      if (!(await page.locator('#world-watch').count())) problems.push('the scenario drawn in step 3 offers no way to watch it');
       const shown = await page.evaluate(async () => {
         const v = await window.ledgerDemo.current();
         return {

@@ -785,7 +785,8 @@ def route(store: str, steps: str, workflow: str, a: str, b: str, scenario: int |
         side_of = {model: side for side, model in w["models"].items()}
         w.update(scenario=numbers[w["match"]], winner=winners[w["match"]], side={a: side_of.get(a), b: side_of.get(b)})
         if scenario is None:
-            w.pop("items")
+            for detail in ("items", "records", "seen"):
+                w.pop(detail)
     out["scenarios"] = worlds
     return out
 
