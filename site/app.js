@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { costMarkdown, createLedger, evidenceMarkdown } from './ledger.js';
+import { costMarkdown, createLedger, evidenceMarkdown, expandSteps } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -27,14 +27,15 @@ worker.onmessage = ({ data }) => {
 };
 worker.onerror = (event) => markFailed(new Error(event.message || 'The engine worker failed to start.'));
 
-async function ask(query, params) {
+async function send(message) {
   await graphReady;
   return new Promise((resolve, reject) => {
     const id = nextId++;
     waiting.set(id, { resolve, reject });
-    worker.postMessage({ id, query, params: params || {} });
+    worker.postMessage({ id, ...message });
   });
 }
+const ask = (query, params) => send({ query, params: params || {} });
 
 const getJson = (path) =>
   fetch(new URL(path, import.meta.url)).then((r) => {
@@ -42,8 +43,44 @@ const getJson = (path) =>
     return r.json();
   });
 
+// ---- steps, loaded into the graph only for the scenarios a question is about -----------------------------------
+
+const stepFiles = new Map(); // run id -> its step file, fetched once (null when there is none)
+const worldsLoaded = new Set(); // scenarios whose steps are in the graph
+const worldsMissing = new Set(); // scenarios with no steps to load: a race run in this tab, until it is imported
+let stepProgress = null; // (done, total) while steps load, for whoever is showing progress
+
+function stepFile(run, known) {
+  if (!stepFiles.has(run)) stepFiles.set(run, known.includes(run) ? getJson(`./data/steps/${run}.json`) : Promise.resolve(null));
+  return stepFiles.get(run);
+}
+
+// Puts the steps of these scenarios ("<run>/<workflow>/<attempt>") into the graph, a run file at a time.
+async function loadSteps(matches) {
+  const wanted = new Map(); // run -> its scenarios still to load
+  for (const match of matches) {
+    if (worldsLoaded.has(match) || worldsMissing.has(match)) continue;
+    const cut = match.indexOf('/');
+    const run = match.slice(0, cut);
+    if (!wanted.has(run)) wanted.set(run, []);
+    wanted.get(run).push(match.slice(cut + 1));
+  }
+  const total = [...wanted.values()].reduce((n, worlds) => n + worlds.length, 0);
+  let done = 0;
+  const known = wanted.size ? (await ledgerReady).rules.steps_for : [];
+  for (const [run, worlds] of wanted) {
+    const file = await stepFile(run, known);
+    const here = worlds.filter((w) => file && file.worlds[w]);
+    if (here.length) await send({ load: expandSteps(file, new Set(here)) });
+    for (const w of worlds) (here.includes(w) ? worldsLoaded : worldsMissing).add(`${run}/${w}`);
+    done += worlds.length;
+    if (stepProgress) stepProgress(done, total);
+  }
+  return { missing: matches.filter((m) => worldsMissing.has(m)).length };
+}
+
 const ledgerReady = Promise.all([getJson('./data/questions.json'), getJson('./data/rules.json')]).then(
-  ([questions, rules]) => ({ rules, questions, ledger: createLedger(ask, questions, rules) }),
+  ([questions, rules]) => ({ rules, questions, ledger: createLedger(ask, questions, rules, loadSteps) }),
 );
 ledgerReady.catch(() => {});
 
@@ -86,6 +123,15 @@ window.ledgerDemo = {
     const { ledger } = await ledgerReady;
     return ledger.markdown(await ledger.spec(task, a, b));
   },
+  // how they got there, asked of the steps: the process questions for a pair, their routes through the same
+  // worlds, and a verdict with the reader's own check at a level
+  process: async (task, a, b) => (await ledgerReady).ledger.process(task, a, b),
+  route: async (task, a, b, scenario = null) => (await ledgerReady).ledger.route(task, a, b, scenario),
+  verdictChecked: async (task, a, b, profile, levels) => {
+    const { ledger, rules } = await ledgerReady;
+    return ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, null, { levels, kinds: null });
+  },
+  stepsLoaded: async () => ({ scenarios: worldsLoaded.size, missing: worldsMissing.size }),
 };
 
 // ---- small DOM helpers --------------------------------------------------------------------------------------
@@ -120,6 +166,7 @@ const state = {
   openOnly: false,
   profile: null, // whose tolerance decides "fit for the task" (set from the rules once loaded)
   overrides: {}, // the visitor's own level for a fault, by fault name; kept per task
+  checks: {}, // the visitor's own process questions, by name, each at the level they gave it
   flowFaults: new Map(), // test id -> the faults its grader can report
 };
 const names = new Map(); // model id -> display name, as the graph has it
@@ -566,7 +613,8 @@ async function chooseSecond(model) {
 async function showVerdict(scroll = false) {
   const mine = ++turn;
   const overrides = Object.keys(state.overrides).length ? state.overrides : null;
-  const judged = await ledger.verdict(state.task, state.a, state.b, null, rules.good_enough, rules.min_pairs, state.profile, overrides);
+  const checks = Object.keys(state.checks).length ? { levels: state.checks, kinds: null } : null;
+  const judged = await ledger.verdict(state.task, state.a, state.b, null, rules.good_enough, rules.min_pairs, state.profile, overrides, checks);
   if (judged.verdict === 'no data') {
     // the two have never met on this task: no verdict, and no pretending there is one
     const own = await ask(OWN_RECORD, { version: judged.version, a: state.a, b: state.b });
@@ -891,13 +939,201 @@ async function openRace(v, index) {
     laneLegend(),
     ...lanes.map((lane) => lane.node),
     finish,
+    el('div', { id: 'same-world', class: 'same-world' }),
   );
   drawPairGraph(v, index);
+  drawSameWorld(v, index);
   if (still) {
     clock = span;
     paint();
   } else start();
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Under a replay: the two routes through that world, item by item, read from the steps in the graph. Both models
+// walked the same records, so for every item the graph can say what each decided and what each had seen by then.
+async function drawSameWorld(v, index) {
+  const box = $('same-world');
+  if (!box) return;
+  const round = v.rounds[index];
+  box.replaceChildren(el('p', { class: 'note' }, 'Loading both routes into the graph…'));
+  let world;
+  let ms;
+  let needs;
+  try {
+    await loadSteps([round.match]);
+    const before = performance.now();
+    [world] = await ledger.sameWorld([round.match]);
+    ms = performance.now() - before;
+    needs = await ledger.whatDecisionsNeed(v.version);
+  } catch (error) {
+    box.replaceChildren(el('p', { class: 'note' }, `The steps of this scenario could not be read (${error.message}).`));
+    return;
+  }
+  if ($('same-world') !== box) return;
+  if (!world) {
+    box.replaceChildren(el('p', { class: 'note' }, 'The steps of this scenario are not in the graph yet: a race run in this tab joins them once it is imported.'));
+    return;
+  }
+  const sideOf = Object.fromEntries(Object.entries(world.models).map(([side, model]) => [model, side]));
+  const cell = (side) => {
+    if (!side || !side.decision) return el('span', { class: 'note' }, 'left undone');
+    const seen = side.needs.filter((n) => n.seen).map((n) => n.kind);
+    return [
+      el('span', { class: 'did' }, stepWords(side.decision), side.state === 'timeout' ? ' (timed out)' : ''),
+      el('span', { class: 'note' }, ` at step ${side.step}`),
+      el('br'),
+      seen.length ? el('span', { class: 'note' }, `had seen the ${seen.join(' and the ')} `) : null,
+      side.needs.filter((n) => !n.seen).map((n) => el('span', { class: 'chip bad', title: n.record }, `had not seen the ${n.kind}`)),
+    ];
+  };
+  const unseen = (model) => world.decided_unseen[sideOf[model]] || 0;
+  const differ = world.decided_differently.length;
+  box.replaceChildren(
+    el('h4', { class: 'pair-graph-title' }, el('span', { class: 'relate-badge' }, 'Relate graph'), ' The same world, item by item'),
+    el(
+      'p',
+      { class: 'note' },
+      'Every step of this scenario is now in the graph, linked to the record it read or decided, and both models walked the same records. ',
+      needs.length ? `Here ${needsWords(needs)}. ` : '',
+      'So for each item the graph can say what each model decided, and whether it had by then seen the records that item depends on.',
+    ),
+    el(
+      'div',
+      { class: 'table-wrap' },
+      el(
+        'table',
+        { class: 'stack routes' },
+        el('thead', null, el('tr', null, el('th', { scope: 'col' }, sentence((world.items[0] || {}).kind || 'item')), el('th', { scope: 'col', class: 'a' }, shortName(v.a)), el('th', { scope: 'col', class: 'b' }, shortName(v.b)))),
+        el(
+          'tbody',
+          null,
+          world.items.map((item) =>
+            el(
+              'tr',
+              { class: item.differ ? 'differ' : null },
+              el('td', { class: 'lead' }, item.item, item.differ ? el('span', { class: 'chip warn' }, 'decided differently') : null),
+              el('td', { 'data-label': shortName(v.a) }, cell(item.sides[sideOf[v.a]])),
+              el('td', { 'data-label': shortName(v.b) }, cell(item.sides[sideOf[v.b]])),
+            ),
+          ),
+        ),
+      ),
+    ),
+    el(
+      'p',
+      { class: 'finish', id: 'same-world-sum' },
+      `They decided differently on ${differ} of ${plural(world.items.length, 'item')}. `,
+      `Decided before seeing a record the item depends on: ${shortName(v.a)} ${unseen(v.a)}, ${shortName(v.b)} ${unseen(v.b)}.`,
+    ),
+    el(
+      'p',
+      { class: 'note small', id: 'same-world-stats' },
+      `Read from the steps in the graph with one Cypher query: ${plural(world.items.length * 2, 'row')} · ${ms < 1 ? 'under 1' : Math.round(ms)} ms · run by Relate in this browser tab.`,
+    ),
+    el('details', { class: 'graph-query' }, el('summary', null, 'Show the query'), el('pre', null, questionsText.same_world.trim())),
+  );
+}
+
+// "each refund request refers to its order (order_id); ...": what a decision depends on, in words (cli.needs_line).
+const needsWords = (needs) => needs.map((n) => `each ${n.decided} refers to its ${n.needs} (${n.via.join(' > ')})`).join('; ');
+
+// ---- how they got there: process questions asked of every step on file ----------------------------------------
+
+const worked = new Map(); // task and pair -> what the steps said (the counts do not depend on the levels chosen)
+const NOT_COUNTED = 'not counted';
+const checkOfFault = (fault) => Object.keys(rules.step_checks).find((name) => `${rules.step_checks[name].fault} (your check)` === fault) || null;
+
+function setCheck(name, level) {
+  const next = { ...state.checks };
+  if (level === NOT_COUNTED) delete next[name];
+  else next[name] = level;
+  state.checks = next;
+  showVerdict();
+}
+
+// The panel in step 3. Until asked it only says what it would do; asking loads the steps of every scenario of
+// this task into the graph (some seconds) and then each question is one Cypher pattern over them.
+function workedPanel(v) {
+  const key = `${v.task}|${v.a}|${v.b}`;
+  const box = el('section', { id: 'worked', class: 'pair-graph worked' });
+  const head = el('h3', { class: 'pair-graph-title' }, el('span', { class: 'relate-badge' }, 'Relate graph'), ' How they got there');
+  const draw = (found) => {
+    const row = (c, m) =>
+      el(
+        'li',
+        { class: m.model === v.a ? 'a' : 'b' },
+        el('strong', null, shortName(m.model)),
+        `: in ${m.attempts_with} of ${plural(m.attempts, 'attempt')}`,
+        m.attempts_with ? ` (${plural(m.times, 'time')}). ${m.right_with} of those still got every decision right, and ${m.passed_with} passed the test's own check.` : '.',
+        c.grader_counts ? ` The grader counted ${m.grader_attempts_with || 0}.` : '',
+      );
+    box.replaceChildren(
+      head,
+      el(
+        'p',
+        { class: 'note' },
+        `Every step of every scenario of this task is now in the graph. ${found.decisions_need.length ? `Here ${needsWords(found.decisions_need)}. ` : ''}`,
+        'Each question below is one pattern over those steps. A count is a fact, not a fault: say how serious it is for you and the verdict above is judged with it.',
+      ),
+      ...found.checks.map((c) =>
+        el(
+          'div',
+          { class: 'question', 'data-check': c.check },
+          el('h4', null, c.asks),
+          c.note ? el('p', { class: 'note small' }, c.note) : null,
+          el('ul', { class: 'who' }, c.models.map((m) => row(c, m))),
+          el(
+            'label',
+            { class: 'note' },
+            'For you this is ',
+            el(
+              'select',
+              { class: `own-level ${state.checks[c.check] || ''}`, 'aria-label': `How serious is this for you: ${c.asks}`, onchange: (event) => setCheck(c.check, event.target.value) },
+              [NOT_COUNTED, ...rules.policy.levels].map((level) => el('option', { value: level, selected: level === (state.checks[c.check] || NOT_COUNTED) }, level)),
+            ),
+          ),
+          el('details', { class: 'graph-query' }, el('summary', null, 'Show the query'), el('pre', null, c.cypher)),
+        ),
+      ),
+      ...(found.not_loaded ? [el('p', { class: 'note small' }, `${plural(found.not_loaded, 'scenario')} had no steps to load (a race run in this tab joins them once it is imported).`)] : []),
+    );
+  };
+  if (worked.has(key)) {
+    draw(worked.get(key));
+    return box;
+  }
+  const note = el('span', { class: 'note', role: 'status', 'aria-live': 'polite' });
+  const go = el('button', { type: 'button', id: 'worked-go' }, 'Ask the steps');
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    note.textContent = ' Loading the steps into the graph…';
+    stepProgress = (done, total) => {
+      note.textContent = ` Loading the steps into the graph: ${done} of ${plural(total, 'scenario')}…`;
+    };
+    try {
+      const found = await ledger.process(v.task, v.a, v.b);
+      worked.set(key, found);
+      if ($('worked') === box) draw(found);
+    } catch (error) {
+      note.textContent = ` The steps could not be read (${error.message}).`;
+      go.disabled = false;
+    } finally {
+      stepProgress = null;
+    }
+  });
+  box.replaceChildren(
+    head,
+    el(
+      'p',
+      { class: 'note' },
+      'The verdict above counts how each attempt ended. The sealed records also keep every step: which record each model read, and what it decided, in order. ',
+      'Load them into the graph and ask how these two worked: did either decide an item before it had seen a record that item depends on, or repeat an action without checking? ',
+      'It takes some seconds, and nothing is re-run.',
+    ),
+    el('p', null, go, note),
+  );
+  return box;
 }
 
 const shown = { v: null }; // the verdict on screen, when there is one
@@ -2345,6 +2581,9 @@ function fightCard(spec, v) {
         'aria-label': `How serious is "${row.fault}" for you?`,
         title: LEVEL_HELP[row.level],
         onchange: (event) => {
+          // a process question the visitor added keeps its level where it was given (How they got there)
+          const own = checkOfFault(row.fault);
+          if (own) return setCheck(own, event.target.value);
           state.overrides = { ...state.overrides, [row.fault]: event.target.value };
           showVerdict();
         },
@@ -2442,6 +2681,7 @@ function drawVerdict(spec, v) {
         )
       : null,
     fightCard(spec, v),
+    workedPanel(v),
     d.notes.length ? el('ul', { class: 'notes' }, d.notes.map((n) => el('li', null, plainNames(n, [d.a, d.b])))) : null,
 
     el('h3', null, 'Blueprint'),

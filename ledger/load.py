@@ -36,6 +36,7 @@ Steps (load_steps; ledger/bridges/steps.py): how each attempt got to its result.
   (Item)-[:IN]->(Match)                         both attempts of a pair played the same world and share its items
 """
 
+import hashlib
 from pathlib import Path
 
 import relate
@@ -281,11 +282,22 @@ def load(records_root: Path, store: str) -> dict:
     }
 
 
+def steps_stamp() -> str:
+    """What the steps in a store were loaded by: a digest of the bridge that reads them and the statements that
+    write them. A store built by other code than this checkout's does not hold "the steps" (ledger/routes.py
+    rebuilds it), so a change to either can never be answered from an old local store."""
+    written = [*STEP_SCHEMA, WRITE_ITEMS, WRITE_REFERS, WRITE_STEPS, WRITE_NEXT]
+    source = Path(steps.__file__).read_text(encoding="utf-8").replace("\r\n", "\n")
+    return hashlib.sha256("\n".join([source, *written]).encode("utf-8")).hexdigest()[:16]
+
+
 def load_steps(records_root: Path, store: str, batch: int = 100) -> dict:
     """Load every step of every attempt, and the world records they touched, into a store that already holds the
-    runs (load). Safe to repeat. Each run is marked with the number of steps loaded for it (Run.steps), which is
-    how a store says its steps are complete (ledger/routes.py)."""
+    runs (load). Safe to repeat. Each run is marked with the number of steps loaded for it (Run.steps) and with
+    what loaded them (Run.steps_loader, steps_stamp), which is how a store says its steps are complete and
+    current (ledger/routes.py)."""
     totals = {"runs": 0, "steps": 0, "items": 0}
+    stamp = steps_stamp()
     with relate.connect(store) as conn:
         for statement in STEP_SCHEMA:
             conn.execute(statement)
@@ -300,7 +312,8 @@ def load_steps(records_root: Path, store: str, batch: int = 100) -> dict:
                 conn.execute(WRITE_STEPS.format(**labels), {"routes": routes})
                 conn.execute(WRITE_NEXT, {"routes": routes})
             n = sum(len(r["steps"]) for r in run["routes"])
-            conn.execute("MATCH (r:Run {run_id: $id}) SET r.steps = $n", {"id": run["run_id"], "n": n})
+            marked = {"id": run["run_id"], "n": n, "stamp": stamp}
+            conn.execute("MATCH (r:Run {run_id: $id}) SET r.steps = $n, r.steps_loader = $stamp", marked)
             totals["runs"] += 1
             totals["steps"] += n
             totals["items"] += len(run["items"])

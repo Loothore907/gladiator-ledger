@@ -88,14 +88,15 @@ def record_ids(data: Path) -> list[str]:
 
 def holds_steps(store: str, data: Path | None = None) -> bool:
     """Does this store hold the steps of every run it knows (and, given the data folder, of every record on
-    file)? A run's steps are complete when the loader has marked it (Run.steps)."""
+    file), loaded by this checkout's code? A run's steps are complete when the loader has marked it (Run.steps),
+    and current when the mark is this code's (Run.steps_loader, load.steps_stamp)."""
     if not Path(store).exists():
         return False
     try:
-        runs = _rows(store, "MATCH (r:Run) RETURN r.run_id AS id, r.steps IS NOT NULL AS loaded")
+        runs = _rows(store, "MATCH (r:Run) RETURN r.run_id AS id, r.steps_loader AS loader")
     except relate.Error:
         return False
-    if not runs or not all(r["loaded"] for r in runs):
+    if not runs or not all(r["loader"] == load.steps_stamp() for r in runs):
         return False
     return data is None or sorted(r["id"] for r in runs) == record_ids(data)
 

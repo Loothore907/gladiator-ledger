@@ -66,7 +66,8 @@ fit it says so and lists the tested models that are.
   (`(first)-[:NEXT]->+(again)`). Two such patterns ask what Gladiator's grader counted during the matches, and
   the graph agrees with it on all 1,874 attempts. A sharper one, asked in order, finds 18 attempts the grader
   passed, and shows that on the refund queue the skipped lookup never cost a wrong decision. A reader gives any
-  of them a level and the verdict follows. No new match is played for any of it.
+  of them a level and the verdict follows. No new match is played for any of it. The page does the same in the
+  browser: it loads the steps of a scenario, or of a whole task, into its own graph and runs the same patterns.
 - **Full-text index** over each workflow's text for step 1.
 - **The WebAssembly build, in memory, in a browser worker.** The demo page builds the whole graph client-side
   with the same statements as the command line, and a CI check compares more than 8,000 values between the two,

@@ -152,7 +152,7 @@ async function pickSecond(page, model) {
 
 async function main() {
   const expected = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'expected.json'), 'utf8'));
-  for (const part of ['verdicts', 'specs', 'judged', 'judged_specs', 'flows', 'opponents']) {
+  for (const part of ['verdicts', 'specs', 'judged', 'judged_specs', 'flows', 'opponents', 'process', 'routes', 'checked']) {
     if (!Array.isArray(expected[part]) || !expected[part].length) {
       throw new Error(`data/expected.json has no ${part}: nothing to compare. Rebuild it with "uv run ledger site".`);
     }
@@ -247,6 +247,27 @@ async function main() {
     for (const [i, want] of expected.conditions.apart.entries()) {
       const got = await page.evaluate(([reference, other]) => window.ledgerDemo.conditionsApart(reference, other), [want.reference, want.other]);
       same(want.what, got, `conditions.apart[${i}]`);
+    }
+    // How they got there. The page loads the steps of a pair's scenarios into its own graph (data/steps/) and must
+    // then give the command line's answers: the two routes through the same worlds (one scenario item by item,
+    // and a line for every scenario), each process question's counts, and a verdict judged with a reader's own
+    // check at a level.
+    for (const [i, want] of expected.routes.entries()) {
+      const { task, a, b } = want.one;
+      const where = `routes[${i}] (${task}: ${a} vs ${b})`;
+      const scenario = want.one.scenarios[0].scenario;
+      same(want.one, await page.evaluate(([t, x, y, n]) => window.ledgerDemo.route(t, x, y, n), [task, a, b, scenario]), `${where}, scenario ${scenario}`);
+      same(want.every, await page.evaluate(([t, x, y]) => window.ledgerDemo.route(t, x, y), [task, a, b]), `${where}, every scenario`);
+    }
+    for (const [i, want] of expected.process.entries()) {
+      const got = await page.evaluate(([t, x, y]) => window.ledgerDemo.process(t, x, y), [want.found.task, want.a, want.b]);
+      same(want.found, got, `process[${i}] (${want.found.task}: ${want.a} vs ${want.b})`);
+      if (got.not_loaded) problems.push(`process[${i}]: ${got.not_loaded} scenarios of the shipped record had no steps to load`);
+    }
+    for (const [i, want] of expected.checked.entries()) {
+      const v = want.verdict;
+      const got = await page.evaluate(([t, x, y, p, levels]) => window.ledgerDemo.verdictChecked(t, x, y, p, levels), [v.task, v.a, v.b, v.profile, want.checks]);
+      same(v, got, `checked[${i}] (${v.task}: ${v.a} vs ${v.b}, ${JSON.stringify(want.checks)})`);
     }
     for (const [i, want] of expected.opponents.entries()) {
       const got = await page.evaluate(([m, open]) => window.ledgerDemo.opponents(m, open), [want.asked, want.open_only]);
@@ -373,6 +394,62 @@ async function main() {
         const dots = await page.locator('#pair-graph figure.graph circle').count();
         const ringed = await page.locator('#pair-graph figure.graph circle.ring').count();
         if (dots !== squares || ringed !== 1) problems.push(`the graph picture shows ${dots} dots (${ringed} ringed) for ${squares} scenarios`);
+        // under the replay: the same world item by item, read from the steps now in the graph. It must say what
+        // the command line says about that scenario (the first of this pair).
+        const drawn = await page.waitForSelector('#same-world-sum', { timeout: 15000 }).then(() => true, () => false);
+        if (!drawn) problems.push('the replay shows no item-by-item comparison of the two routes');
+        else {
+          const now = await page.evaluate(() => window.ledgerDemo.current());
+          const told = await page.evaluate(([t, x, y]) => window.ledgerDemo.route(t, x, y, 1), [now.task, now.a, now.b]);
+          const world = told.scenarios[0];
+          const rows = await page.locator('#same-world table.routes tbody tr').count();
+          const marked = await page.locator('#same-world table.routes tr.differ').count();
+          const unseen = await page.locator('#same-world table.routes .chip.bad').count();
+          const records = world.items.reduce((n, item) => n + Object.values(item.sides).reduce((m, side) => m + side.unseen.length, 0), 0);
+          if (rows !== world.items.length) problems.push(`the item-by-item table has ${rows} rows for ${world.items.length} items`);
+          if (marked !== world.decided_differently.length) problems.push(`the table marks ${marked} items as decided differently, the graph says ${world.decided_differently.length}`);
+          if (unseen !== records) problems.push(`the table flags ${unseen} records as not seen, the graph says ${records}`);
+          const sum = await page.locator('#same-world-sum').innerText();
+          if (!sum.includes(`differently on ${world.decided_differently.length} of ${world.items.length} item`)) problems.push(`the item-by-item summary reads ${JSON.stringify(sum)}`);
+          if (!/\d+ rows · /.test(await page.locator('#same-world-stats').innerText())) problems.push('the item-by-item panel does not say what its query returned');
+          if (!((await page.locator('#same-world details.graph-query pre').textContent()) || '').includes('REFERS_TO')) problems.push('the item-by-item panel does not show its query');
+        }
+        // How they got there: asking loads the steps of the task, each question shows both models with the
+        // command line's counts, and a level the visitor gives one of them is judged in the verdict above.
+        {
+          const now = await page.evaluate(() => window.ledgerDemo.current());
+          const told = await page.evaluate(([t, x, y]) => window.ledgerDemo.process(t, x, y), [now.task, now.a, now.b]);
+          await page.locator('#worked-go').click();
+          const asked = await page.waitForSelector('#worked .question', { timeout: 90000 }).then(() => true, () => false);
+          if (!asked) problems.push('asking how they got there never showed a question');
+          else {
+            const questions = await page.locator('#worked .question').count();
+            if (questions !== told.checks.length) problems.push(`the page asks ${questions} process questions, the command line ${told.checks.length}`);
+            for (const c of told.checks) {
+              const text = await page.locator(`#worked .question[data-check="${c.check}"] ul.who`).innerText();
+              for (const m of c.models) {
+                if (!text.includes(`in ${m.attempts_with} of ${m.attempts} attempt`)) problems.push(`${c.check}: the page does not show ${m.attempts_with} of ${m.attempts} for ${m.model}: ${JSON.stringify(text)}`);
+              }
+            }
+            // the question both models show most often: unforgivable must turn the answer round and add the
+            // fault to the card, and "not counted" must put the answer back
+            const busiest = [...told.checks].sort((x, y) => Math.min(...y.models.map((m) => m.attempts_with)) - Math.min(...x.models.map((m) => m.attempts_with)))[0];
+            if (!Math.min(...busiest.models.map((m) => m.attempts_with))) problems.push('no process question was found in both models of the pair checked: nothing to judge');
+            else {
+              const headline = () => page.locator('#verdict-headline').innerText();
+              const before = await headline();
+              const picker = () => page.locator(`#worked .question[data-check="${busiest.check}"] select`);
+              await picker().selectOption('unforgivable');
+              const moved = await page.waitForFunction((old) => document.getElementById('verdict-headline')?.innerText !== old, before, { timeout: 20000 }).then(() => true, () => false);
+              if (!moved || !/^Neither is fit/.test(await headline())) problems.push(`making "${busiest.check}" unforgivable did not make both models unfit: ${JSON.stringify(await headline())}`);
+              if (!(await page.locator('.tape-row', { hasText: '(your check)' }).count())) problems.push('the visitor\'s own check is not listed among the faults');
+              if ((await picker().inputValue()) !== 'unforgivable') problems.push('the level given to a process question is not kept on screen');
+              await picker().selectOption('not counted');
+              await page.waitForFunction((old) => document.getElementById('verdict-headline')?.innerText === old, before, { timeout: 20000 }).catch(() => problems.push('taking the check away did not restore the verdict'));
+              if (await page.locator('.tape-row', { hasText: '(your check)' }).count()) problems.push('a check that is not counted is still listed among the faults');
+            }
+          }
+        }
       }
     }
 

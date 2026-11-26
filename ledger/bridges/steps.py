@@ -210,3 +210,97 @@ def read_steps(root: Path):
         record = json.loads(path.read_text(encoding="utf-8"))
         if gladiator.seal_ok(record):
             yield run_steps(record["body"])
+
+
+# ---- a compact form for the browser page ---------------------------------------------------------------------
+# The page loads steps a run at a time, only for the scenarios it is asked about, so each run's rows are also
+# written small (ledger/site.py): ids without the world in front of them, steps as arrays, tools by number.
+# `expand` gives back exactly what `run_steps` returned; site/ledger.js does the same on the page.
+KINDS = ["read", "check", "act", "end", "talk"]
+STATES = [OK, TIMEOUT, REFUSED]
+
+
+def compact(run: dict) -> dict:
+    """One run's rows (run_steps) in the small form the page fetches."""
+    tools: list[str] = []
+    worlds: dict[str, dict] = {}
+    cut = len(run["run_id"]) + 1
+
+    def world_of(key: str) -> dict:
+        return worlds.setdefault(key[cut:], {"items": [], "refers": [], "routes": {}})
+
+    def local(world: str, key: str) -> str:
+        return key[len(world) + 1 :]
+
+    for item in run["items"]:
+        world_of(item["world"])["items"].append([item["id"], item["kind"]])
+    for route in run["routes"]:
+        world, side = route["attempt"].rsplit("/", 1)
+        steps = []
+        for s in route["steps"]:
+            if s["tool"] not in tools:
+                tools.append(s["tool"])
+            saw = [local(world, k) for k in s["saw"]]
+            told = [[local(world, t["item"]), t["notice"]] for t in s["told"]]
+            row = [tools.index(s["tool"]), KINDS.index(s["kind"]), STATES.index(s["state"]), s["at_s"], s["item"]]
+            # what a step saw is left out when it is the one record the step named (every plain lookup)
+            plain = [s["item"]] if s["kind"] == READ and s["state"] == OK and s["item"] else []
+            if told:
+                row += [saw, told]
+            elif saw != plain:
+                row += [saw]
+            steps.append(row)
+        world_of(world)["routes"][side] = steps
+    for r in run["refers"]:
+        world = next(w for w in worlds if r["a"].startswith(f"{run['run_id']}/{w}/"))
+        full = f"{run['run_id']}/{world}"
+        worlds[world]["refers"].append([local(full, r["a"]), local(full, r["b"]), r["field"]])
+    return {"run": run["run_id"], "self": run["self"], "tools": tools, "worlds": worlds}
+
+
+def expand(small: dict, only: set[str] | None = None) -> dict:
+    """The loader's rows from the compact form. `only` keeps it to some worlds ("<workflow>/<attempt>")."""
+    run_id, tools = small["run"], small["tools"]
+    items, refers, routes = [], [], []
+    for name, w in small["worlds"].items():
+        if only is not None and name not in only:
+            continue
+        world = f"{run_id}/{name}"
+        items += [{"key": f"{world}/{i}", "id": i, "kind": kind, "world": world} for i, kind in w["items"]]
+        refers += [{"a": f"{world}/{a}", "b": f"{world}/{b}", "field": field} for a, b, field in w["refers"]]
+        for side, rows in w["routes"].items():
+            steps = []
+            for n, row in enumerate(rows, 1):
+                tool, kind, state, at_s, item = tools[row[0]], KINDS[row[1]], STATES[row[2]], row[3], row[4]
+                saw = row[5] if len(row) > 5 else ([item] if kind == READ and state == OK and item else [])
+                told = row[6] if len(row) > 6 else []
+                steps.append(
+                    {
+                        "key": f"{world}/{side}/{n}",
+                        "n": n,
+                        "tool": tool,
+                        "kind": kind,
+                        "state": state,
+                        "at_s": at_s,
+                        "item": item,
+                        "saw": [f"{world}/{i}" for i in saw],
+                        "decided": [f"{world}/{item}"] if kind == ACT and item else [],
+                        "checked": [f"{world}/{item}"] if kind == CHECK and item else [],
+                        "told": [{"item": f"{world}/{i}", "notice": notice} for i, notice in told],
+                    }
+                )
+            routes.append({"attempt": f"{world}/{side}", "steps": steps})
+    return {"run_id": run_id, "self": small["self"], "items": items, "refers": refers, "routes": routes}
+
+
+def export(records: Path, out: Path) -> dict:
+    """One compact step file per sealed match record under `records`, as out/<run_id>.json. Returns their sizes."""
+    out.mkdir(parents=True, exist_ok=True)
+    for stale in out.glob("*.json"):
+        stale.unlink()
+    sizes = {}
+    for run in read_steps(records):
+        target = out / f"{run['run_id']}.json"
+        target.write_text(json.dumps(compact(run), separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+        sizes[target.name] = target.stat().st_size
+    return sizes
