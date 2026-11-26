@@ -213,26 +213,59 @@ def flow_facts(sides: dict) -> dict:
     return out
 
 
-def settle_flows(runs: list[dict]) -> None:
-    """One account of each workflow version from every run on file, written into every row of that version: every
-    tool any model used on it, and the brief and policy of its lowest-numbered wording (from the earliest run
-    that has it). Without this the graph kept whatever the record loaded last happened to say, so the text of a
-    workflow, and the tools listed for it, could change with every race that was imported."""
-    rows: dict[str, list[dict]] = {}
-    for run in sorted(runs, key=lambda r: r["run_id"]):
+class Flows:
+    """One account of each workflow version, made from every record seen so far, whatever order they came in.
+
+    One record shows only part of a workflow: the tools its two models happened to use, one wording of the brief,
+    the action budget of the level it was played at. The graph holds one account of each version:
+      - every tool any model used on it;
+      - the text (brief, policy, which wording it is) and action budget from its lowest-numbered wording, as the
+        earliest record shows it;
+      - what the test package says of itself (title, tags, status and so on) as the newest record has it.
+    The account depends only on which records have been seen, never on which came last, so a record added to a
+    store that is already built leaves the same graph as building it again from all of them (ledger/live.py)."""
+
+    TEXT = ("brief", "policy", "wording", "action_budget")
+    PACKAGE = ("title", "tags", "emulates", "test_type", "status", "forked_from")
+
+    def __init__(self):
+        self.known: dict[str, dict] = {}
+
+    def absorb(self, run: dict) -> None:
         for scenario in [*run["matches"], *run["self_checks"]]:
-            rows.setdefault(scenario["version_key"], []).append(scenario["version"])
-    for versions in rows.values():
-        tools = sorted({tool for v in versions for tool in v.get("tools") or []})
-        worded = [v for v in versions if v.get("brief")]
-        text = min(worded, key=lambda v: v.get("wording", 0)) if worded else {}  # the first of the lowest wording
-        settled = {k: text[k] for k in ("brief", "policy", "wording") if text.get(k) not in (None, "")}
-        if tools:
-            settled["tools"] = tools
-        for v in versions:
-            for key in ("brief", "policy", "wording", "tools"):
+            v = scenario["version"]
+            k = self.known.setdefault(scenario["version_key"], {"tools": set(), "text": None, "package": None})
+            k["tools"].update(v.get("tools") or [])
+            if v.get("brief"):
+                rank = (v.get("wording", 0), run["run_id"])
+                if k["text"] is None or rank < k["text"][0]:
+                    k["text"] = (rank, {key: v[key] for key in self.TEXT if v.get(key) not in (None, "")})
+            if k["package"] is None or run["run_id"] >= k["package"][0]:
+                package = {key: v[key] for key in self.PACKAGE if v.get(key) not in (None, [], "")}
+                k["package"] = (run["run_id"], {**(k["package"][1] if k["package"] else {}), **package})
+
+    def apply(self, run: dict) -> None:
+        """Write the account as it stands into every row of this run."""
+        for scenario in [*run["matches"], *run["self_checks"]]:
+            v, k = scenario["version"], self.known[scenario["version_key"]]
+            for key in (*self.TEXT, *self.PACKAGE, "tools"):
                 v.pop(key, None)
-            v.update(settled)
+            v.update(k["package"][1] if k["package"] else {})
+            v.update(k["text"][1] if k["text"] else {})
+            if k["tools"]:
+                v["tools"] = sorted(k["tools"])
+
+
+def settle_flows(runs: list[dict], flows: Flows | None = None) -> Flows:
+    """Give every row the one account of its workflow version (Flows). Without this the graph kept whatever the
+    record loaded last happened to say, so the text of a workflow, and the tools listed for it, could change with
+    every race that was imported. `flows` carries what earlier records showed, for a record added later."""
+    flows = flows or Flows()
+    for run in runs:
+        flows.absorb(run)
+    for run in runs:
+        flows.apply(run)
+    return flows
 
 
 def run_rows(body: dict, seal: str) -> dict:

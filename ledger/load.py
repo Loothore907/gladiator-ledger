@@ -245,29 +245,35 @@ SET r += s.props
 """
 
 
+def write_to(conn, evidence: Evidence) -> dict:
+    """Write one bridge's evidence through a connection that is already open (a service that keeps its store
+    open adds a record this way). Safe to repeat: the second time creates nothing."""
+    stats = {}
+    for statement in SCHEMA:
+        conn.execute(statement)
+    source = {"name": evidence.source, "description": evidence.description}
+    if evidence.runs:
+        stats["runs"] = conn.execute(WRITE, {"runs": evidence.runs, "source": source}).stats
+        if any(r.get("includes") for r in evidence.runs):
+            conn.execute(WRITE_INCLUDES, {"runs": evidence.runs})
+        if any(r.get("can_show") for r in evidence.runs):
+            faults = conn.execute(WRITE_FAULTS, {"runs": evidence.runs}).stats
+            made = conn.execute(WRITE_MADE, {"runs": evidence.runs}).stats
+            stats["faults"] = {k: faults[k] + made[k] for k in ("nodes_created", "relationships_created")}
+        if any(r.get("self_checks") for r in evidence.runs):
+            conn.execute(WRITE_SELF, {"runs": evidence.runs})
+            conn.execute(WRITE_SELF_MADE, {"runs": evidence.runs})
+    if evidence.checks:
+        stats["checks"] = conn.execute(WRITE_VALIDATIONS, {"checks": evidence.checks, "source": source}).stats
+    if evidence.scores:
+        stats["scores"] = conn.execute(WRITE_SCORES, {"scores": evidence.scores, "source": source}).stats
+    return stats
+
+
 def write(evidence: Evidence, store: str) -> dict:
     """Write one bridge's evidence to the store. Safe to repeat: the second time creates nothing."""
-    stats = {}
     with relate.connect(store) as conn:
-        for statement in SCHEMA:
-            conn.execute(statement)
-        source = {"name": evidence.source, "description": evidence.description}
-        if evidence.runs:
-            stats["runs"] = conn.execute(WRITE, {"runs": evidence.runs, "source": source}).stats
-            if any(r.get("includes") for r in evidence.runs):
-                conn.execute(WRITE_INCLUDES, {"runs": evidence.runs})
-            if any(r.get("can_show") for r in evidence.runs):
-                faults = conn.execute(WRITE_FAULTS, {"runs": evidence.runs}).stats
-                made = conn.execute(WRITE_MADE, {"runs": evidence.runs}).stats
-                stats["faults"] = {k: faults[k] + made[k] for k in ("nodes_created", "relationships_created")}
-            if any(r.get("self_checks") for r in evidence.runs):
-                conn.execute(WRITE_SELF, {"runs": evidence.runs})
-                conn.execute(WRITE_SELF_MADE, {"runs": evidence.runs})
-        if evidence.checks:
-            stats["checks"] = conn.execute(WRITE_VALIDATIONS, {"checks": evidence.checks, "source": source}).stats
-        if evidence.scores:
-            stats["scores"] = conn.execute(WRITE_SCORES, {"scores": evidence.scores, "source": source}).stats
-    return stats
+        return write_to(conn, evidence)
 
 
 def load(records_root: Path, store: str) -> dict:
@@ -282,6 +288,20 @@ def load(records_root: Path, store: str) -> dict:
     }
 
 
+def loader_stamp() -> str:
+    """What a store was built by: a digest of everything that turns a sealed record into the graph (the bridges,
+    the judging rule, the cost corrections and every statement here). A store kept by a service is rebuilt from
+    its records when this no longer matches, so it never answers from what older code wrote (ledger/live.py)."""
+    from ledger import costs, scoring
+
+    sources = [
+        Path(m.__file__).read_text(encoding="utf-8").replace("\r\n", "\n") for m in (gladiator, steps, scoring, costs)
+    ]
+    written = [*SCHEMA, WRITE, WRITE_INCLUDES, WRITE_FAULTS, WRITE_MADE, WRITE_SELF, WRITE_SELF_MADE]
+    written += [*STEP_SCHEMA, WRITE_ITEMS, WRITE_REFERS, WRITE_STEPS, WRITE_NEXT]
+    return hashlib.sha256("\n".join([*sources, *written]).encode("utf-8")).hexdigest()[:16]
+
+
 def steps_stamp() -> str:
     """What the steps in a store were loaded by: a digest of the bridge that reads them and the statements that
     write them. A store built by other code than this checkout's does not hold "the steps" (ledger/routes.py
@@ -291,31 +311,36 @@ def steps_stamp() -> str:
     return hashlib.sha256("\n".join([source, *written]).encode("utf-8")).hexdigest()[:16]
 
 
+def write_steps(conn, run: dict, batch: int = 100) -> int:
+    """One run's steps (ledger/bridges/steps.py, run_steps) through an open connection, into a store that already
+    holds the run. Marks the run with the number of steps loaded and what loaded them. Returns that number."""
+    labels = {"world": "SelfCheck", "attempt": "SelfAttempt"} if run["self"] else LABELS
+    for at in range(0, len(run["items"]), batch * 20):
+        conn.execute(WRITE_ITEMS.format(**labels), {"items": run["items"][at : at + batch * 20]})
+    for at in range(0, len(run["refers"]), batch * 20):
+        conn.execute(WRITE_REFERS, {"refers": run["refers"][at : at + batch * 20]})
+    for at in range(0, len(run["routes"]), batch):
+        routes = run["routes"][at : at + batch]
+        conn.execute(WRITE_STEPS.format(**labels), {"routes": routes})
+        conn.execute(WRITE_NEXT, {"routes": routes})
+    n = sum(len(r["steps"]) for r in run["routes"])
+    marked = {"id": run["run_id"], "n": n, "stamp": steps_stamp()}
+    conn.execute("MATCH (r:Run {run_id: $id}) SET r.steps = $n, r.steps_loader = $stamp", marked)
+    return n
+
+
 def load_steps(records_root: Path, store: str, batch: int = 100) -> dict:
     """Load every step of every attempt, and the world records they touched, into a store that already holds the
     runs (load). Safe to repeat. Each run is marked with the number of steps loaded for it (Run.steps) and with
     what loaded them (Run.steps_loader, steps_stamp), which is how a store says its steps are complete and
     current (ledger/routes.py)."""
     totals = {"runs": 0, "steps": 0, "items": 0}
-    stamp = steps_stamp()
     with relate.connect(store) as conn:
         for statement in STEP_SCHEMA:
             conn.execute(statement)
         for run in steps.read_steps(records_root):
-            labels = {"world": "SelfCheck", "attempt": "SelfAttempt"} if run["self"] else LABELS
-            for at in range(0, len(run["items"]), batch * 20):
-                conn.execute(WRITE_ITEMS.format(**labels), {"items": run["items"][at : at + batch * 20]})
-            for at in range(0, len(run["refers"]), batch * 20):
-                conn.execute(WRITE_REFERS, {"refers": run["refers"][at : at + batch * 20]})
-            for at in range(0, len(run["routes"]), batch):
-                routes = run["routes"][at : at + batch]
-                conn.execute(WRITE_STEPS.format(**labels), {"routes": routes})
-                conn.execute(WRITE_NEXT, {"routes": routes})
-            n = sum(len(r["steps"]) for r in run["routes"])
-            marked = {"id": run["run_id"], "n": n, "stamp": stamp}
-            conn.execute("MATCH (r:Run {run_id: $id}) SET r.steps = $n, r.steps_loader = $stamp", marked)
+            totals["steps"] += write_steps(conn, run, batch)
             totals["runs"] += 1
-            totals["steps"] += n
             totals["items"] += len(run["items"])
     return totals
 
@@ -339,14 +364,16 @@ def load_scores(root: Path, store: str) -> dict:
     return {"loaded": len(evidence.scores), "skipped": evidence.skipped, "stats": stats.get("scores", {})}
 
 
+# (TestVersion)-[:FORKED_FROM]->(TestVersion) where a package names its parent and the parent is loaded.
+LINK_FORKS = """
+MATCH (child:TestVersion) WHERE child.forked_from IS NOT NULL
+MATCH (parent:TestVersion) WHERE parent.test_id + '@' + parent.version = child.forked_from
+   OR parent.test_id = child.forked_from
+MERGE (child)-[:FORKED_FROM]->(parent)
+"""
+
+
 def link_forks(store: str) -> None:
-    """(TestVersion)-[:FORKED_FROM]->(TestVersion) where a package names its parent and the parent is loaded."""
+    """Link every fork to its parent (LINK_FORKS)."""
     with relate.connect(store) as conn:
-        conn.execute(
-            """
-            MATCH (child:TestVersion) WHERE child.forked_from IS NOT NULL
-            MATCH (parent:TestVersion) WHERE parent.test_id + '@' + parent.version = child.forked_from
-               OR parent.test_id = child.forked_from
-            MERGE (child)-[:FORKED_FROM]->(parent)
-            """
-        )
+        conn.execute(LINK_FORKS)
