@@ -30,6 +30,12 @@ async function build() {
   execute(graph.writes.includes, { runs: graph.rows.runs });
   execute(graph.writes.faults, { runs: graph.rows.runs });
   execute(graph.writes.made, { runs: graph.rows.runs });
+  // runs of one model against itself: kept apart from matches (SelfCheck, SelfAttempt), counted in that model's own
+  // fitness for the task and never in a head-to-head
+  if (graph.rows.runs.some((run) => (run.self_checks || []).length)) {
+    execute(graph.writes.self, { runs: graph.rows.runs });
+    execute(graph.writes.self_made, { runs: graph.rows.runs });
+  }
   execute(graph.link_forks);
   execute(graph.writes.checks, { checks: graph.rows.checks, source: graph.sources.gladiator });
   execute(graph.writes.scores, { scores: graph.rows.scores, source: graph.sources.epoch });

@@ -40,7 +40,7 @@ def test_export_carries_what_the_page_needs(fresh):
     graph = json.loads((fresh / "graph.json").read_text(encoding="utf-8"))
     assert set(graph["rows"]) == {"runs", "checks", "scores"}
     # faults and the faults each attempt made are written from the run rows, after the runs themselves
-    assert set(graph["writes"]) == {"runs", "includes", "faults", "made", "checks", "scores"}
+    assert set(graph["writes"]) == {"runs", "includes", "faults", "made", "self", "self_made", "checks", "scores"}
     assert any(r["made"] for r in graph["rows"]["runs"]) and all(r["can_show"] for r in graph["rows"]["runs"])
     assert graph["rows"]["runs"] and graph["rows"]["checks"] and graph["rows"]["scores"]
     expected = json.loads((fresh / "expected.json").read_text(encoding="utf-8"))
@@ -49,6 +49,13 @@ def test_export_carries_what_the_page_needs(fresh):
     assert len(expected["judged"]) == len(expected["judged_specs"]) == 3 * len(site.CHECKED)
     assert {j["verdict"]["outcome"] for j in expected["judged"]} >= {"neither fit", "only one fit"}
     assert {v["verdict"] for v in expected["verdicts"]} >= {"better"}  # at least one settled answer is checked
+    # one checked pair has a model that was also run against itself: those attempts are in its fitness, and how
+    # often it ended the same way is reported (the page is held to both)
+    with_self = [j["verdict"] for j in expected["judged"] if j["verdict"].get("consistency")]
+    assert with_self, "no checked pair carries a self run: the page's handling of them is not being checked"
+    for v in with_self:
+        row = v["consistency"][0]
+        assert v["fit"][row["model"]]["attempts"] >= row["attempts"] > 0
 
 
 def test_export_carries_the_steps_and_what_they_answer(fresh):
