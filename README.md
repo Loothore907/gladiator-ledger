@@ -71,7 +71,11 @@ command line in CI).
 passes the checks). The `site/` folder is a static page. It builds the graph in your browser with Relate's WebAssembly build and walks
 the loop: describe a flow, pick two models, choose whose tolerance applies, read the verdict, download the spec. Every
 scenario behind a verdict can be replayed as a race: both models on the same world, step by step, at the pace they
-really ran.
+really ran. Under the replay the page loads that scenario's steps into its graph and lays the two routes side by
+side, item by item: what each model decided, and whether it had by then seen the records the item depends on.
+"How they got there", under the verdict, loads the steps of every scenario of the task and asks the process
+questions of them. Give one a level and the verdict above is judged with it
+([How they got there](#how-they-got-there-ask-the-record-a-new-question)).
 
 **Live races (hackathon judges for now, coming soon for everyone).** Under the recorded scenarios the page can
 ask a [Gladiator race runner](https://github.com/Loothore907/gladiator-core/blob/main/docs/DEPLOYMENT.md) for one
@@ -349,7 +353,13 @@ Without `--scenario` it prints one line for each of the 43 scenarios. The questi
 once in the whole record), `retried-without-checking` and `told-then-decided` (was told a record had changed and
 decided without reading it again). `--needs customer` keeps a question to one kind of record. An assistant gets
 the same through `how_they_worked` and `same_world`, and can write its own pattern over a route with `read_graph`.
-These figures are the record at 05:00 UTC on Nov 26, 2026. The page does not show the steps as a graph yet.
+These figures are the record at 05:00 UTC on Nov 26, 2026.
+
+**On the page.** The same questions run in your browser, on the same statements. Open a scenario to watch it and
+the table under the race is the second command above. "How they got there" under the verdict is the first, with a
+level to set beside each question: the page fetches the steps of that task (a small file per match record), loads
+them into the graph in the tab, which takes about ten seconds, and each count is then one query. The page check
+in CI holds every one of these answers to the command line's.
 
 ## How and why Relate is used
 Relate is the store and the query engine, not an export target. Every answer above is a walk through connected
@@ -390,10 +400,10 @@ flowchart LR
   The steps are seven times the size of everything else, so they live in a second single-file store built
   locally from the same records on first use (`data/ledger-steps.rl`, about 75 MB, not committed).
 - **Retrieval.** A full-text index over the workflow text, for "describe your flow".
-- **On show.** The page draws the graph beside the steps ("Relate graph: the graph behind your answer"): the
-  workflows, the models tested on the one you chose, the scenarios your two models both played, the faults each
-  made and any live races. Each step lights up the part it reads and shows the Cypher Relate ran for it, with the
-  rows returned and the time taken in your browser.
+- **On show.** Wherever the page reads the graph it says so ("Relate graph") and shows the Cypher it ran, the rows
+  that came back and the time it took in your browser: the evidence behind a verdict (one dot per scenario both
+  models played, linked to the test version and to each model), the two routes through one world under a replay,
+  and each process question.
 - **Agents.** The same store served read-only over MCP, including free-form read-only Cypher, over the steps too.
 - **Safe to rebuild.** The loader `MERGE`s on stable keys behind uniqueness constraints, so loading the same records
   again changes nothing. The records stay the master copy; the store is a view of them.

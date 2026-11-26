@@ -60,6 +60,22 @@ h1 em { font-style: normal; text-decoration: underline; text-decoration-color: v
 .pair-graph figure.graph { margin-top: 8px; }
 .pair-graph .gdot[role='button'] { cursor: pointer; }
 .pair-graph .gdot[role='button']:hover, .pair-graph .gdot[role='button']:focus-visible { stroke: var(--ink); stroke-width: 2; }
+.same-world { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.same-world:empty { display: none; }
+table.routes td { vertical-align: top; }
+table.routes .did { font-weight: 600; }
+table.routes .chip { margin: 3px 4px 0 0; font-size: 12.5px; }
+table.routes tr.differ td { background: var(--warn-soft); }
+table.routes th.a { color: var(--side-a); }
+table.routes th.b { color: var(--side-b); }
+.worked .question { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.worked .question h4 { margin: 0 0 4px; font-size: 15.5px; }
+.worked ul.who { margin: 6px 0 8px; padding-left: 18px; }
+.worked ul.who li.a strong { color: var(--side-a); }
+.worked ul.who li.b strong { color: var(--side-b); }
+select.own-level { font: inherit; font-size: 13px; padding: 2px 6px; margin-left: 4px; border-radius: 999px; border: 1px solid var(--line); background: var(--sunken); color: var(--ink); }
+select.own-level.unforgivable { border-color: var(--stop); background: var(--stop-soft); color: var(--stop); font-weight: 600; }
+select.own-level.serious { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
 .graph-query summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
 .graph-query pre { margin: 6px 0 0; max-height: 200px; overflow: auto; font: 11.5px/1.5 var(--mono); background: var(--sunken); border-radius: 8px; padding: 9px 11px; white-space: pre-wrap; }
 .live-history { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }

@@ -213,7 +213,47 @@ export function signTestP(wins, losses) {
 
 export const testId = (name) => (name.includes('/') ? name : `gladiator/${name}`);
 
-export function createLedger(ask, questions, rules) {
+// One run's steps from the small form of data/steps/<run>.json, as the rows the loader writes
+// (ledger/bridges/steps.py, expand). `only` keeps it to some worlds ("<workflow>/<attempt>").
+const STEP_KINDS = ['read', 'check', 'act', 'end', 'talk'];
+const STEP_STATES = ['ok', 'timeout', 'refused'];
+export function expandSteps(small, only = null) {
+  const items = [];
+  const refers = [];
+  const routes = [];
+  for (const [name, w] of Object.entries(small.worlds)) {
+    if (only && !only.has(name)) continue;
+    const world = `${small.run}/${name}`;
+    for (const [id, kind] of w.items) items.push({ key: `${world}/${id}`, id, kind, world });
+    for (const [a, b, field] of w.refers) refers.push({ a: `${world}/${a}`, b: `${world}/${b}`, field });
+    for (const [side, rows] of Object.entries(w.routes)) {
+      const steps = rows.map((row, i) => {
+        const [tool, kind, state, item] = [small.tools[row[0]], STEP_KINDS[row[1]], STEP_STATES[row[2]], row[4]];
+        const saw = row.length > 5 ? row[5] : kind === 'read' && state === 'ok' && item ? [item] : [];
+        const told = row.length > 6 ? row[6] : [];
+        return {
+          key: `${world}/${side}/${i + 1}`,
+          n: i + 1,
+          tool,
+          kind,
+          state,
+          at_s: row[3],
+          item,
+          saw: saw.map((x) => `${world}/${x}`),
+          decided: kind === 'act' && item ? [`${world}/${item}`] : [],
+          checked: kind === 'check' && item ? [`${world}/${item}`] : [],
+          told: told.map(([x, notice]) => ({ item: `${world}/${x}`, notice })),
+        };
+      });
+      routes.push({ attempt: `${world}/${side}`, steps });
+    }
+  }
+  return { run_id: small.run, self: small.self, items, refers, routes };
+}
+
+// `loadSteps(matches)` puts the steps of those scenarios into the graph (the page fetches their files) and
+// resolves to {missing: how many had no steps to load}. Without it, questions about steps find nothing.
+export function createLedger(ask, questions, rules, loadSteps = async () => ({ missing: 0 })) {
   const filler = new Set(rules.filler);
 
   // The words worth searching for in a described flow (lower case, letters and digits only, filler removed).
@@ -398,7 +438,7 @@ export function createLedger(ask, questions, rules) {
   // Every model's fitness for one task version, counting every attempt it made under one set of conditions,
   // whoever the opponent was and whether the match was a suite match or a live race. `suite` keeps it to one
   // suite's matches (a fixed set).
-  async function fitness(test, version, conditions, suite, profile, overrides = null, bar = null) {
+  async function fitness(test, version, conditions, suite, profile, overrides = null, bar = null, checks = null) {
     const scope = { version_key: version, conditions, suite, until: null };
     const faults = {};
     for (const { model, ...f } of await ask(questions.task_faults, scope)) (faults[model] ||= []).push(f);
@@ -420,8 +460,205 @@ export function createLedger(ask, questions, rules) {
         mine.times += f.times;
       }
     }
+    // the reader's own process questions join the faults, at the levels the reader gave them
+    if (checks && Object.keys(checks.levels || {}).length) {
+      await loadScope(scope);
+      const own = await asFaults(scope, checks.levels, checks.kinds || null);
+      for (const [model, added] of Object.entries(own.faults)) (faults[model] ||= []).push(...added);
+      overrides = { ...(overrides || {}), ...own.levels };
+    }
     const out = {};
     for (const [model, r] of attempts) out[model] = assess(test, r, faults[model] || [], profile, overrides, bar);
+    return out;
+  }
+
+  // ---- steps: how a model got to its result (ledger/routes.py, and process and route in ledger/cli.py) --------
+
+  const stepChecks = rules.step_checks;
+  const forSelfRuns = (query) => query.replaceAll(':Match', ':SelfCheck').replaceAll(':Attempt', ':SelfAttempt');
+  // The scenarios of a scope, so their steps can be loaded before a question is asked of them.
+  const WORLDS_IN_SCOPE = `MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run)
+WHERE ($conditions IS NULL OR mt.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
+RETURN mt.key AS match ORDER BY match`;
+  const scopesLoaded = new Map(); // scope -> how many of its scenarios had no steps to load
+
+  async function loadScope(scope) {
+    const key = JSON.stringify([scope.version_key, scope.conditions, scope.suite]);
+    if (!scopesLoaded.has(key)) {
+      const worlds = [...(await ask(WORLDS_IN_SCOPE, scope)), ...(await ask(forSelfRuns(WORLDS_IN_SCOPE), scope))];
+      scopesLoaded.set(key, (await loadSteps(worlds.map((r) => r.match))).missing);
+    }
+    return scopesLoaded.get(key);
+  }
+
+  // The scope a process question is asked in: the task's current version under one set of conditions, which is
+  // the scope of fitness. For two models, the conditions their verdict is read under; for a task alone, the
+  // conditions most of its suite record was played under.
+  async function stepScope(workflow, a = null, b = null, suite = null) {
+    const test = testId(workflow);
+    const version = await currentVersion(test);
+    if (version === null || version === undefined) return null;
+    const task = { test_id: test, suite, version_key: version, until: null };
+    const record = new Map((await ask(questions.task_conditions, task)).map((r) => [r.conditions, r.pairs]));
+    let conditions = null;
+    if (a && b) {
+      const met = await ask(questions.pair_conditions, { ...task, a, b });
+      if (!met.length) return null;
+      conditions = referenceConditions(met, record);
+    } else {
+      for (const c of [...record.keys()].sort(byCodePoint)) {
+        if (conditions === null || record.get(c) > record.get(conditions)) conditions = c;
+      }
+    }
+    return { version_key: version, conditions, suite, until: null };
+  }
+
+  // What a decision on this task depends on, as the worlds in the graph show it: [{decided, needs, via}].
+  async function whatDecisionsNeed(versionKey) {
+    const seen = new Set();
+    const out = [];
+    for (const r of await ask(questions.what_decisions_need, { version_key: versionKey })) {
+      const key = `${r.decided}\u0000${r.needs}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ decided: r.decided, needs: r.needs, via: [...r.via] });
+    }
+    return out;
+  }
+
+  // One process question, per model, in a scope. Self runs count like any other attempt of that model.
+  async function check(name, scope, kinds = null) {
+    const params = { ...scope, kinds: kinds && kinds.length ? kinds : null };
+    const query = questions[`steps:${name}`];
+    const found = new Map((await ask(query, params)).map((r) => [r.model, { ...r }]));
+    for (const extra of await ask(forSelfRuns(query), params)) {
+      const mine = found.get(extra.model);
+      if (!mine) continue;
+      for (const key of ['attempts', 'times', 'attempts_with', 'right_with', 'passed_with']) mine[key] += extra[key];
+    }
+    return [...found.keys()].sort(byCodePoint).map((model) => found.get(model));
+  }
+
+  // How two models worked on one task: every process question counted from the steps, beside the grader's own
+  // count where the grader has one. `not_loaded` says how many scenarios of the scope had no steps to load
+  // (a race run in this tab, until it is imported).
+  async function process(workflow, a, b, names = null, kinds = null) {
+    const test = testId(workflow);
+    const scope = await stepScope(workflow, a, b);
+    if (!scope) return { task: test, checks: [], note: 'No judged match on file for this.' };
+    const notLoaded = await loadScope(scope);
+    const graded = new Map();
+    for (const f of [...(await ask(questions.task_faults, scope)), ...(await ask(questions.self_faults, scope))]) {
+      const key = `${f.model}\u0000${f.fault}`;
+      graded.set(key, (graded.get(key) || 0) + f.attempts_with);
+    }
+    const kept = kinds && kinds.length ? kinds : null;
+    const found = [];
+    for (const name of names || Object.keys(stepChecks)) {
+      const about = stepChecks[name];
+      const models = [];
+      for (const m of await check(name, scope, about.kinds ? kept : null)) {
+        if (m.model !== a && m.model !== b) continue;
+        models.push({ ...m, grader_attempts_with: about.grader ? (graded.get(`${m.model}\u0000${about.grader}`) ?? null) : null });
+      }
+      found.push({
+        check: name,
+        asks: about.asks,
+        note: about.note,
+        grader_counts: about.grader,
+        needs: about.kinds ? kept : null,
+        models,
+        cypher: questions[`steps:${name}`].trim(),
+      });
+    }
+    return {
+      task: test,
+      version: scope.version_key,
+      conditions: scope.conditions,
+      suite: scope.suite,
+      until: null,
+      decisions_need: await whatDecisionsNeed(scope.version_key),
+      checks: found,
+      not_loaded: notLoaded,
+    };
+  }
+
+  // A reader's own checks as fault rows for fitness: {model: [fault row]} and the level each was given.
+  async function asFaults(scope, levels, kinds = null) {
+    const faults = {};
+    const given = {};
+    for (const [name, level] of Object.entries(levels)) {
+      const about = stepChecks[name];
+      const fault = `${about.fault} (your check)`;
+      given[fault] = level;
+      for (const m of await check(name, scope, about.kinds ? kinds : null)) {
+        (faults[m.model] ||= []).push({ fault, kind: 'check', kind_of: null, attempts_with: m.attempts_with, times: m.times });
+      }
+    }
+    return { faults, levels: given };
+  }
+
+  // Scenarios, item by item: the two models on the same world. For each item, what each decided and which of
+  // the records it depends on each had seen by then. The steps of `matches` must be in the graph (loadSteps).
+  async function sameWorld(matches) {
+    const worlds = new Map();
+    for (const r of await ask(questions.same_world, { matches: [...matches] })) {
+      if (!worlds.has(r.match)) worlds.set(r.match, { match: r.match, models: {}, items: new Map() });
+      const world = worlds.get(r.match);
+      world.models[r.side] = r.model;
+      if (!world.items.has(r.item)) world.items.set(r.item, { item: r.item, kind: r.kind, sides: {} });
+      const needs = (r.needs || []).filter((n) => n !== null).map((n) => ({ ...n }));
+      world.items.get(r.item).sides[r.side] = {
+        model: r.model,
+        decision: r.decision ?? null,
+        step: r.step ?? null,
+        state: r.state ?? null,
+        needs,
+        unseen: needs.filter((n) => n.seen === false).map((n) => n.record),
+      };
+    }
+    const out = [];
+    for (const key of matches) {
+      const world = worlds.get(key);
+      if (!world) continue;
+      const items = [...world.items.values()];
+      for (const item of items) item.differ = new Set(Object.values(item.sides).map((s) => s.decision)).size > 1;
+      const sides = Object.keys(world.models).sort(byCodePoint);
+      out.push({
+        match: world.match,
+        models: world.models,
+        items,
+        decided_differently: items.filter((i) => i.differ).map((i) => i.item),
+        decided_unseen: Object.fromEntries(sides.map((s) => [s, items.filter((i) => ((i.sides[s] || {}).unseen || []).length).length])),
+      });
+    }
+    return out;
+  }
+
+  // The same world, two routes: for the scenarios two models both played (the pairs their verdict counts), where
+  // they decided differently and what each had seen when it decided. One scenario in full with `scenario`
+  // (1 is the first), a line per scenario without it.
+  async function route(workflow, a, b, scenario = null) {
+    const test = testId(workflow);
+    const scope = await stepScope(workflow, a, b);
+    const out = { task: test, a, b, scenarios: [] };
+    if (!scope) return { ...out, note: `${a} and ${b} never met on ${test}.` };
+    const pairs = await ask(questions.pair_on_task, { test_id: test, a, b, ...scope });
+    Object.assign(out, { version: scope.version_key, conditions: scope.conditions, pairs: pairs.length });
+    const chosen = scenario === null ? pairs : pairs.slice(scenario - 1, scenario);
+    if (scenario !== null && !chosen.length) {
+      return { ...out, note: `There are ${pairs.length} scenarios; --scenario takes 1 to ${pairs.length}.` };
+    }
+    await loadSteps(chosen.map((p) => p.match));
+    out.decisions_need = await whatDecisionsNeed(scope.version_key);
+    const worlds = await sameWorld(chosen.map((p) => p.match));
+    for (const w of worlds) {
+      const sideOf = Object.fromEntries(Object.entries(w.models).map(([side, model]) => [model, side]));
+      const pair = pairs.findIndex((p) => p.match === w.match);
+      Object.assign(w, { scenario: pair + 1, winner: pairs[pair].winner, side: { [a]: sideOf[a] ?? null, [b]: sideOf[b] ?? null } });
+      if (scenario === null) delete w.items;
+    }
+    out.scenarios = worlds;
     return out;
   }
 
@@ -470,6 +707,7 @@ export function createLedger(ask, questions, rules) {
     minPairs = rules.min_pairs,
     profile = null,
     overrides = null,
+    checks = null,
   ) {
     const test = testId(workflow);
     const version = await currentVersion(test);
@@ -561,8 +799,9 @@ export function createLedger(ask, questions, rules) {
     if (profile) {
       // Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
       const versionKey = pairs.map((p) => p.version).sort(byCodePoint).at(-1);
-      const everyone = await fitness(test, versionKey, conditions, suite, profile, overrides);
+      const everyone = await fitness(test, versionKey, conditions, suite, profile, overrides, null, checks);
       out.profile = profile;
+      if (checks && Object.keys(checks.levels || {}).length) out.own_checks = { levels: checks.levels, needs: checks.kinds ?? null };
       out.fit = { [a]: everyone[a], [b]: everyone[b] };
       [out.outcome, out.headline, out.use] = outcome({ a, b, better, verdict: kind }, out.fit);
       out.rounds = pairs.map((p) => ({
@@ -872,6 +1111,12 @@ export function createLedger(ask, questions, rules) {
     scoresOf,
     referenceConditions,
     conditionsApart,
+    stepChecks,
+    stepScope,
+    process,
+    route,
+    sameWorld,
+    whatDecisionsNeed,
   };
 }
 

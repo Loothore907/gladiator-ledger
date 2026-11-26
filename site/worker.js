@@ -1,9 +1,12 @@
 // The graph engine, in a dedicated worker: builds an in-memory Relate graph from data/graph.json once, then
-// answers Cypher sent by the page. Nothing leaves the browser.
+// answers Cypher sent by the page. Steps (data/steps/<run>.json) are loaded into the same graph later, only for
+// the scenarios a question is about. Nothing leaves the browser.
 
 import init, { RelateDb } from './vendor/relate-wasm/relate.js';
 
 let db = null;
+let stepWrites = null; // the statements that load steps, kept from graph.json for when a question needs them
+let stepSchema = false;
 
 function execute(text, params) {
   const result = JSON.parse(db.execute(text, params ? JSON.stringify(params) : null));
@@ -30,6 +33,7 @@ async function build() {
   execute(graph.link_forks);
   execute(graph.writes.checks, { checks: graph.rows.checks, source: graph.sources.gladiator });
   execute(graph.writes.scores, { scores: graph.rows.scores, source: graph.sources.epoch });
+  stepWrites = graph.steps;
   const count = (text) => execute(text)[0].n;
   return {
     matches: count('MATCH (r:Run) RETURN count(r) AS n'),
@@ -39,6 +43,27 @@ async function build() {
     fetch_ms: loaded - started,
     build_ms: performance.now() - loaded,
   };
+}
+
+// Loads steps and the world records they touched (rows as ledger/bridges/steps.py makes them: {self, items,
+// refers, routes}) with the statements the command line uses. Every write is a MERGE on a stable key, so loading
+// the same rows twice changes nothing.
+function loadSteps(rows) {
+  if (!stepSchema) {
+    for (const statement of stepWrites.schema) execute(statement);
+    stepSchema = true;
+  }
+  const writes = rows.self ? { ...stepWrites.writes, ...stepWrites.self_writes } : stepWrites.writes;
+  execute(writes.items, { items: rows.items });
+  execute(writes.refers, { refers: rows.refers });
+  let steps = 0;
+  for (let at = 0; at < rows.routes.length; at += 100) {
+    const routes = rows.routes.slice(at, at + 100);
+    execute(writes.steps, { routes });
+    execute(writes.next, { routes });
+    for (const route of routes) steps += route.steps.length;
+  }
+  return [{ items: rows.items.length, steps }];
 }
 
 const ready = build().then(
@@ -53,10 +78,10 @@ const ready = build().then(
 );
 
 onmessage = async (event) => {
-  const { id, query, params } = event.data;
+  const { id, query, params, load } = event.data;
   if (!(await ready)) return postMessage({ type: 'result', id, error: 'The graph did not build.' });
   try {
-    postMessage({ type: 'result', id, rows: execute(query, params) });
+    postMessage({ type: 'result', id, rows: load ? loadSteps(load) : execute(query, params) });
   } catch (error) {
     postMessage({ type: 'result', id, error: String((error && error.message) || error) });
   }

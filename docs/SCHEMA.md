@@ -79,8 +79,9 @@ A run record also keeps every step of every attempt (`turns`: the tool called, i
 world answered). The steps bridge (`ledger/bridges/steps.py`) reads them, and `load_steps` writes them. They are
 seven times the size of everything above together (62,374 steps on Nov 26, 2026), so the shipped store does not
 carry them: the first question that needs them builds a second, local store from the same records
-(`data/ledger-steps.rl`, `ledger/routes.py`; or `ledger build --steps` into any store). Everything in it comes from
-the public record. Nothing is read from the answer key, and nothing knows any one test.
+(`data/ledger-steps.rl`, `ledger/routes.py`; or `ledger build --steps` into any store). The browser page loads
+them into its own graph the same way, a scenario or a task at a time, from `site/data/steps/`. Everything in it
+comes from the public record. Nothing is read from the answer key, and nothing knows any one test.
 
 | Node | Key | Properties | From |
 |---|---|---|---|

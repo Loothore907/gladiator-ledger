@@ -6,13 +6,16 @@ command line, so the page builds the same graph in the visitor's browser and giv
   rules.json     constants the page must share with the command line (thresholds, filler words, guardrails)
   expected.json  answers computed here by the command-line code, which the page's own answers are checked against
   replays/       one file per match record: every step of every attempt, for replaying a scenario as a race
+  steps/         one file per match record: the same steps as rows for the graph, with the world records they
+                 touched (ledger/bridges/steps.py, compact). The page loads them into its graph only for the
+                 scenarios it is asked about, with the statements under "steps" in graph.json.
 """
 
 import json
 from pathlib import Path
 
-from ledger import cli, load, policy, questions, replay, reports, spec
-from ledger.bridges import epoch, gladiator
+from ledger import cli, load, policy, questions, replay, reports, routes, spec
+from ledger.bridges import epoch, gladiator, steps
 
 # Pairs the page is checked against: (task, model a, model b).
 CHECKED = [
@@ -23,6 +26,11 @@ CHECKED = [
 ]
 # A reader's own rule, to check that overrides move the answer the same way on the page.
 OWN_RULE = {"acted without reading": "unforgivable", "duplicate effect": "minor"}
+# A reader's own process question at a level, to check that it moves the answer the same way on the page, and the
+# scenario whose two routes are compared item by item.
+OWN_CHECK = {"decided-before-seeing": "serious"}
+ROUTE_SCENARIO = 2
+SELF = {"world": "SelfCheck", "attempt": "SelfAttempt"}
 DESCRIBED = ["an agent that handles refund requests for damaged orders", "page the on-call owner for alerts"]
 
 
@@ -92,6 +100,20 @@ def export(data: Path, store: str, out: Path) -> dict:
                     "epoch": {"name": epoch.NAME, "description": epoch.DESCRIPTION},
                 },
                 "rows": {"runs": runs.runs, "checks": checks.checks, "scores": scores.scores},
+                # the statements that load steps (data/steps/<run>.json), run only when a question needs them
+                "steps": {
+                    "schema": load.STEP_SCHEMA,
+                    "writes": {
+                        "items": load.WRITE_ITEMS.format(**load.LABELS),
+                        "refers": load.WRITE_REFERS,
+                        "steps": load.WRITE_STEPS.format(**load.LABELS),
+                        "next": load.WRITE_NEXT,
+                    },
+                    "self_writes": {
+                        "items": load.WRITE_ITEMS.format(**SELF),
+                        "steps": load.WRITE_STEPS.format(**SELF),
+                    },
+                },
             },
         ),
         "questions.json": _dump(out / "questions.json", questions.ALL),
@@ -117,6 +139,11 @@ def export(data: Path, store: str, out: Path) -> dict:
                     "fault_levels": policy.FAULT_LEVELS,
                     "task_levels": policy.TASK_LEVELS,
                 },
+                # the process questions asked of the steps: what each asks, and what the grader counts for it
+                "step_checks": routes.CHECKS,
+                # the records that have a step file (data/steps/<run>.json), so the page never asks for one that
+                # does not exist (a race played in the visitor's tab has none until it is imported)
+                "steps_for": [r["run_id"] for r in runs.runs],
             },
         ),
     }
@@ -124,6 +151,8 @@ def export(data: Path, store: str, out: Path) -> dict:
     # One file per match record, fetched only when a visitor opens a scenario to watch it.
     replays = replay.export(data / "records", out / "replays")
     sizes["replays/"] = sum(replays.values())
+    # The same steps as rows for the graph, a file per record, loaded only for the scenarios a visitor asks about.
+    sizes["steps/"] = sum(steps.export(data / "records", out / "steps").values())
 
     def ask(q, p):
         return cli.rows(store, q, p)
@@ -154,6 +183,24 @@ def export(data: Path, store: str, out: Path) -> dict:
     expected["flows"].append(cli.find_flows(store, "zebra unicorns"))
     expected["opponents"].append(cli.opponents(store, "anthropic:claude-haiku-5-5", open_only=True))
     expected["opponents"].append(cli.opponents(store, "openrouter:minimax/minimax-m3.1-flash"))
+    # How they got there, asked of the steps: the process questions for each pair, their two routes through the
+    # same worlds (a line per scenario, and one scenario item by item), and a verdict with a reader's own check.
+    with_steps = routes.ensure(store, data)
+    expected["process"] = [
+        {"a": a, "b": b, "found": cli.process(store, with_steps, task, a, b)} for task, a, b in CHECKED
+    ]
+    expected["routes"] = [
+        {
+            "every": cli.route(store, with_steps, task, a, b),
+            "one": cli.route(store, with_steps, task, a, b, scenario=ROUTE_SCENARIO),
+        }
+        for task, a, b in CHECKED
+    ]
+    own = {"store": with_steps, "levels": OWN_CHECK, "kinds": None}
+    expected["checked"] = [
+        {"checks": OWN_CHECK, "verdict": cli.verdict(store, task, a, b, profile=policy.DEFAULT_PROFILE, checks=own)}
+        for task, a, b in CHECKED
+    ]
     expected["conditions"] = _conditions_examples()
     sizes["expected.json"] = _dump(out / "expected.json", expected)
     return sizes

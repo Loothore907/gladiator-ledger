@@ -103,6 +103,26 @@ def test_the_bridge_reads_steps_items_and_how_the_items_refer_to_each_other(smal
     assert len(run["items"]) == 5 and not run["self"]
 
 
+def test_the_small_form_for_the_page_gives_back_the_same_rows(small):
+    folder, _, _ = small
+    run = next(steps.read_steps(folder / "runs"))
+    packed = steps.compact(run)
+    assert packed["tools"][0] == "list_refund_requests" and list(packed["worlds"]) == ["x/1"]
+    world = packed["worlds"]["x/1"]
+    # a plain lookup carries no list of what it saw; the list and the step with a notice do
+    assert world["routes"]["B"][0][5] == ["REQ-1", "REQ-2"] and len(world["routes"]["B"][1]) == 5
+    assert world["routes"]["B"][4][6] == [["CUS-1", "CORRECTION: customer CUS-1 is now standard."]]
+    back = steps.expand(packed)
+
+    def by(rows, *keys):
+        return sorted(rows, key=lambda r: [r[k] for k in keys])
+
+    assert by(back["items"], "key") == by(run["items"], "key")
+    assert by(back["refers"], "a", "b") == by(run["refers"], "a", "b")
+    assert by(back["routes"], "attempt") == by(run["routes"], "attempt")
+    assert steps.expand(packed, only=set()) == {"run_id": "r1", "self": False, "items": [], "refers": [], "routes": []}
+
+
 def test_loading_steps_twice_changes_nothing_and_marks_the_run(small):
     folder, store, first = small
     count = "MATCH (n) RETURN labels(n)[0] AS kind, count(*) AS n ORDER BY kind"
@@ -114,6 +134,12 @@ def test_loading_steps_twice_changes_nothing_and_marks_the_run(small):
     made = {r["kind"]: r["n"] for r in before[1]}
     assert made["TOOK"] == 17 and made["NEXT"] == 15 and made["REFERS_TO"] == 4 and made["TOLD_OF"] == 1
     assert routes.holds_steps(store) and routes.ensure(store) == store
+    # steps loaded by other code than this checkout's are not "the steps": the store is rebuilt, never trusted
+    with relate.connect(store) as conn:
+        conn.execute("MATCH (r:Run) SET r.steps_loader = 'an older loader'")
+    assert not routes.holds_steps(store)
+    load.load_steps(folder / "runs", store)
+    assert routes.holds_steps(store)
 
 
 def test_each_pattern_finds_what_the_model_did(small):
@@ -240,12 +266,15 @@ RETURN a.key AS attempt, found, coalesce(made.count, 0) AS graded
 
 
 @pytest.fixture(scope="module")
-def shipped(tmp_path_factory):
+def shipped():
     if not STORE.exists():
         pytest.skip("no shipped store in this checkout")
-    store = str(tmp_path_factory.mktemp("steps") / "ledger-steps.rl")
-    built = routes.build(store, DATA)
-    assert built["steps"]["runs"] == len(routes.record_ids(DATA)) and routes.holds_steps(store, DATA)
+    # the local store beside the shipped one, built from the records when it is missing, behind the records on
+    # file, or was loaded by other code than this checkout's (the same store the commands and the page export use)
+    store = routes.ensure(str(STORE), DATA)
+    assert store != str(STORE) and routes.holds_steps(store, DATA)
+    loaded = cli.rows(store, "MATCH (r:Run) RETURN count(r) AS runs, sum(r.steps) AS steps")[0]
+    assert loaded["runs"] == len(routes.record_ids(DATA)) and loaded["steps"] > 60000
     return store
 
 
