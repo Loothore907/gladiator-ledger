@@ -805,13 +805,15 @@ RETURN m.name AS model, count(x) AS attempts, sum(CASE WHEN x.passed THEN 1 ELSE
 // as before: the answer, then the graph, then the race and the reports. So the graph pane sits in the middle of
 // the markup, and only a wide window lifts it out to the right (styles.css, .panes).
 function panes(top, graphs, bottom) {
+  // (the two parts are named pane-first and pane-rest, never "top": that is the page header's class, and its
+  // width, margin and padding would come with it)
   const part = (cls, title, children) => el('div', { class: `pane pane-answer ${cls}` }, title ? el('p', { class: 'pane-title' }, title) : null, children);
   return el(
     'div',
     { class: 'panes', id: 'panes' },
-    part('top', 'The answer, the race and the reports', top),
+    part('pane-first', 'The answer, the race and the reports', top),
     el('aside', { class: 'pane pane-graph', id: 'pane-graph', 'aria-label': 'The evidence, in the Relate graph' }, el('p', { class: 'pane-title' }, 'The evidence, in the graph'), graphs),
-    part('bottom', null, bottom),
+    part('pane-rest', null, bottom),
   );
 }
 

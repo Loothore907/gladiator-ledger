@@ -571,16 +571,27 @@ async function main() {
               const r = document.querySelector(q).getBoundingClientRect();
               return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
             };
-            return { top: box('.pane-answer.top'), graph: box('#pane-graph'), bottom: box('.pane-answer.bottom'), window: [window.innerWidth, window.innerHeight], wide: document.documentElement.scrollWidth - window.innerWidth };
+            // how far the first thing shown in a part of the answer is set in from that part's own left edge
+            const setIn = (q) => {
+              const pane = document.querySelector(q);
+              const first = [...pane.children].find((n) => n.getBoundingClientRect().height > 0);
+              return Math.round(first.getBoundingClientRect().left - pane.getBoundingClientRect().left);
+            };
+            const titles = [...document.querySelectorAll('.pane-title')].map((n) => Math.round(n.getBoundingClientRect().top));
+            return { top: box('.pane-first'), graph: box('#pane-graph'), bottom: box('.pane-rest'), setIn: [setIn('.pane-first'), setIn('.pane-rest')], titles, window: [window.innerWidth, window.innerHeight], wide: document.documentElement.scrollWidth - window.innerWidth };
           });
         const side = await boxes();
         if (!(side.graph.left >= side.top.right && side.bottom.right <= side.graph.left && side.top.left < 100)) problems.push(`on a wide window the graph is not beside the answer: ${JSON.stringify(side)}`);
         if (side.wide > 1) problems.push(`step 3 is ${side.wide} px wider than a wide window`);
+        // The two panes start level and the answer fills its own: the first version named a part "top", the page
+        // header's class, and the answer came out 40 px lower than the graph and set in at both sides.
+        if (side.titles.length !== 2 || Math.abs(side.titles[0] - side.titles[1]) > 1) problems.push(`on a wide window the two panes do not start level: their headings are at ${JSON.stringify(side.titles)}`);
+        if (side.setIn.some((x) => Math.abs(x) > 1)) problems.push(`on a wide window the answer is set in from its pane by ${JSON.stringify(side.setIn)} px`);
         for (const id of ['pair-graph', 'worked']) if (!(await page.locator(`#pane-graph #${id}, #pane-graph .${id}`).count())) problems.push(`the graph pane does not hold ${id}`);
         for (const id of ['live', 'race', 'download-spec', 'verdict-band']) if (await page.locator(`#pane-graph #${id}`).count()) problems.push(`${id} is in the graph pane, not with the answer`);
         // (asked in the middle of the left side: at its very end the two panes end together, and the graph
         // leaves the window with the last of the reports, as it should)
-        await page.evaluate(() => document.querySelector('.pane-answer.bottom h3').scrollIntoView({ block: 'start' }));
+        await page.evaluate(() => document.querySelector('.pane-rest h3').scrollIntoView({ block: 'start' }));
         await page.waitForTimeout(300);
         const read = await boxes();
         if (!(read.top.bottom < 0)) problems.push('the window was not scrolled past the answer for the check that the graph stays in view');
@@ -590,6 +601,8 @@ async function main() {
         const stacked = await boxes();
         if (!(stacked.top.bottom <= stacked.graph.top + 1 && stacked.graph.bottom <= stacked.bottom.top + 1 && Math.abs(stacked.graph.left - stacked.top.left) < 2)) problems.push(`on a narrow window the three parts do not read top to bottom: ${JSON.stringify(stacked)}`);
         if (stacked.wide > 1) problems.push(`step 3 is ${stacked.wide} px wider than a narrow window`);
+        if (stacked.setIn.some((x) => Math.abs(x) > 1)) problems.push(`on a narrow window the answer is set in from its pane by ${JSON.stringify(stacked.setIn)} px`);
+        if (Math.abs(stacked.top.right - stacked.top.left - (stacked.bottom.right - stacked.bottom.left)) > 1) problems.push(`on a narrow window the two parts of the answer are not the same width: ${JSON.stringify(stacked)}`);
         await page.setViewportSize({ width: 1280, height: 720 });
         await page.locator('#h-verdict').scrollIntoViewIfNeeded();
         await page.waitForTimeout(300);
