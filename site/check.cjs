@@ -711,7 +711,7 @@ async function main() {
       if (off) problems.push(`${off} live steps are drawn past the end of the track`);
       // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
       await live.waitForSelector('#pair-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
-      const drawn = await live.locator('#pair-graph circle').count();
+      const drawn = await live.locator('#pair-graph circle.gdot').count(); // the scenario dots, not the marks of the world drawn under them
       if (drawn !== pair.pairs + 1) problems.push(`the graph after the live race shows ${drawn} dots, not ${pair.pairs} recorded + 1 live`);
       const after = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
       if (after.pairs !== pair.pairs || after.wins[pair.a] !== pair.wins[pair.a]) problems.push('a live result changed the recorded verdict');
