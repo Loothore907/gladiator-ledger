@@ -150,3 +150,42 @@ def test_tampered_record_is_skipped(tmp_path):
     path.write_text(json.dumps(rec))
     result = load(tmp_path / "runs", str(tmp_path / "s.rl"))
     assert result["loaded"] == 0 and len(result["skipped_bad_seal"]) == 1
+
+
+def test_a_workflows_text_and_tools_do_not_depend_on_which_record_was_loaded_last(tmp_path):
+    """One record shows only part of a workflow: the tools its two models happened to use and one wording of the
+    brief. The graph must hold one account of it, made from every record, so importing another race cannot
+    change what a workflow is said to be."""
+
+    def played(wording, tools):
+        res = attempt("x", True, 0.01)
+        res["grade_details"]["wording"] = wording
+        res["public_packet"] = {"brief": f"brief, wording {wording}", "policy": f"policy, wording {wording}"}
+        res["turns"] = [{"tool_name": tool, "tool_args": {}, "observation": {"ok": True}} for tool in tools]
+        return res
+
+    def account(store):
+        with relate.connect(store, read_only=True) as conn:
+            (row,) = conn.execute(
+                "MATCH (tv:TestVersion) RETURN tv.brief AS brief, tv.policy AS policy, tv.tools AS tools"
+            )
+            return dict(row)
+
+    write_record(tmp_path / "runs", "r1", [played(1, ["list_x", "act_x"])], [played(1, ["list_x"])])
+    write_record(tmp_path / "runs", "r2", [played(0, ["list_x", "check_x"])], [played(0, ["finish"])])
+    two = str(tmp_path / "two.rl")
+    load(tmp_path / "runs", two)
+    want = {
+        "brief": "brief, wording 0",
+        "policy": "policy, wording 0",
+        "tools": ["act_x", "check_x", "finish", "list_x"],
+    }
+    assert account(two) == want
+    # a later race that used fewer tools and another wording changes nothing
+    write_record(tmp_path / "runs", "r3", [played(2, ["list_x"])], [played(2, ["list_x"])])
+    three = str(tmp_path / "three.rl")
+    load(tmp_path / "runs", three)
+    assert account(three) == want
+    # and loading the new record into the store that was already built gives the same account
+    load(tmp_path / "runs", two)
+    assert account(two) == want

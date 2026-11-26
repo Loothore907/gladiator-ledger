@@ -82,15 +82,17 @@ def store(tmp_path_factory):
 
 
 def attempts_under(store: str, model: str, version: str, conditions: str) -> tuple[int, int]:
-    """Counted straight from the graph: a model's attempts, and passes, on a version under one set of conditions."""
-    (row,) = cli.rows(
-        store,
-        "MATCH (:TestVersion {key: $version})<-[:USED]-(mt:Match)<-[:IN]-(x:Attempt)-[:BY]->(:Model {name: $model}) "
+    """Counted straight from the graph: a model's attempts, and passes, on a version under one set of conditions.
+    Its attempts against itself (a self run) are attempts at the task like any other, as they are in fitness."""
+    counted = (
+        "MATCH (:TestVersion {{key: $version}})<-[:USED]-(mt:{world})<-[:IN]-(x:{attempt})-[:BY]->(:Model {{name: $model}}) "
         "WHERE NOT mt.excluded AND mt.conditions = $conditions "
-        "RETURN count(x) AS attempts, sum(CASE WHEN x.passed THEN 1 ELSE 0 END) AS passed",
-        {"version": version, "model": model, "conditions": conditions},
+        "RETURN count(x) AS attempts, sum(CASE WHEN x.passed THEN 1 ELSE 0 END) AS passed"
     )
-    return row["attempts"], row["passed"]
+    asked = {"version": version, "model": model, "conditions": conditions}
+    (played,) = cli.rows(store, counted.format(world="Match", attempt="Attempt"), asked)
+    (alone,) = cli.rows(store, counted.format(world="SelfCheck", attempt="SelfAttempt"), asked)
+    return played["attempts"] + alone["attempts"], (played["passed"] or 0) + (alone["passed"] or 0)
 
 
 def test_every_pair_carries_the_conditions_it_was_played_under(store):

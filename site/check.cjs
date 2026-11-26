@@ -666,6 +666,19 @@ async function main() {
       if (!(await live.locator('#live-banner').innerText()).includes('3 live races left')) problems.push('the sign-in banner does not say how many races are left');
       await pickPair(live);
       await live.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('an invitation link did not open live races'));
+      // a visitor who can race live is brought to the run box once the pair is picked: it comes to rest in the
+      // middle of the window, and stays there (the picture above it is in place before the page moves)
+      const centred = () => {
+        const box = document.getElementById('live').getBoundingClientRect();
+        return Math.abs((box.top + box.bottom) / 2 - window.innerHeight / 2) < window.innerHeight * 0.2;
+      };
+      await live.waitForFunction(centred, null, { timeout: 8000 }).catch(() => problems.push('after picking the pair, a signed-in visitor is not brought to the run box'));
+      await live.waitForTimeout(1200);
+      if (!(await live.evaluate(centred))) problems.push('the run box did not stay in the middle of the window after the page came to rest on it');
+      // what the button will run is said in words beside it, and each dropdown says what it chooses
+      const what = () => live.locator('#live-what').innerText();
+      if (!/This will run: 1 new scenario, .+ against .+\./.test(await what())) problems.push(`the run box says ${JSON.stringify(await what())} before a plain race`);
+      if ((await live.locator('#live .race-controls label.pick').count()) !== 4) problems.push('the dropdowns of the run box are not labelled');
       if (!(await live.locator('#live-jump').count())) problems.push('a signed-in visitor has no way straight to the live race from the top of the result');
       if (live.url().includes('judge-invite')) problems.push('the invite is still in the address bar after signing in');
       if (await live.locator('#live input:not([type="checkbox"])').count()) problems.push('a signed-in visitor is still asked to type something');
@@ -760,6 +773,11 @@ async function main() {
       if (!(await live.locator('#foot-view').innerText()).includes('real money')) problems.push('the small print of a signed-in page does not say live runs spend real money');
       await live.locator('#live-who').selectOption('a');
       if ((await live.locator('#live-runs').inputValue()) !== '10' || !(await live.locator('#live-go').innerText()).includes('batch of 10')) problems.push('choosing one model on both lanes did not switch to a batch');
+      // one model on both lanes is easy to choose by mistake: the button names it, and the line beside it says
+      // in words that this is a steadiness check and not the match
+      if (!(await live.locator('#live-go').innerText()).includes('against itself')) problems.push('the button does not say a batch is one model against itself');
+      const alone = await live.locator('#live-what').innerText();
+      if (!/10 new scenarios, .+ on both lanes/.test(alone) || !/steadiness check/.test(alone) || !(await live.locator('#live-what.alone').count())) problems.push(`the run box does not warn that one model plays both lanes: ${JSON.stringify(alone)}`);
       await live.locator('#live-go').click();
       await live.waitForSelector('#batch-band', { timeout: 10000 }).catch(() => problems.push('the batch never reported a result'));
       if (runner.asked.a !== pair.a || runner.asked.b !== pair.a || runner.asked.runs !== 10) problems.push(`a steadiness batch asked the runner for ${JSON.stringify(runner.asked)}`);
@@ -777,6 +795,8 @@ async function main() {
       if (!(await live.locator('#batch-legend').count())) problems.push('the batch lanes have no legend');
       if (await live.locator('#live-stage .bsq.won, #live-stage .bsq.lost').count()) problems.push('one model on both lanes was given scenario winners');
       if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('# Live batch report')) problems.push('the batch offers no report');
+      // a steadiness check is chosen for one run: once it is done the run box is back on the match
+      if ((await live.locator('#live-who').inputValue()) !== 'pair' || /on both lanes/.test(await live.locator('#live-what').innerText())) problems.push('after a steadiness check the run box still has one model on both lanes');
       await live.locator('#live-who').selectOption('pair');
       await live.locator('#live-go').click();
       await live.waitForFunction(() => /won 5 of 8 scenarios both played/.test(document.getElementById('batch-band')?.innerText || ''), null, { timeout: 10000 }).catch(() => problems.push('a batch between the pair did not name who won more scenarios'));

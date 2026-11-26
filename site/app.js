@@ -621,20 +621,34 @@ async function showVerdict(scroll = false) {
     if (mine !== turn) return;
     drawNoRecord(judged, own);
     shown.v = judged;
-    drawPairGraph(judged);
-    drawLive(judged);
+    const drawn = drawPairGraph(judged);
     $('step-verdict').hidden = false;
-    if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    land(drawLive(judged), drawn, scroll, mine);
     return;
   }
   const spec = await ledger.build({ ...judged, suite: null });
   if (mine !== turn) return;
   drawVerdict(spec, judged);
   shown.v = judged;
-  drawPairGraph(judged);
-  drawLive(judged);
+  const drawn = drawPairGraph(judged);
   $('step-verdict').hidden = false;
-  if (scroll) $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  land(drawLive(judged), drawn, scroll, mine);
+}
+
+// Where the page comes to rest once the second model is picked. A visitor who can race live is brought to the
+// run box, in the middle of the window (owner, 2026-11-26); anyone else, or a pair that cannot race live, to the
+// top of the result. `live` settles once the run box has been drawn, true when it has a button in it; `graph`
+// once the picture above it is in place, which is waited for (briefly) so the run box does not move after the
+// page has come to rest on it.
+async function land(live, graph, scroll, mine) {
+  if (!scroll) return;
+  const top = () => $('step-verdict').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (signInOutcome !== 'signed') return top();
+  const offered = await live.catch(() => false);
+  await Promise.race([graph.catch(() => {}), new Promise((done) => setTimeout(done, 2000))]);
+  if (mine !== turn) return;
+  if (offered && $('live-go')) follow($('live'), 'center');
+  else top();
 }
 
 // What each of two models did on a task on its own account, whoever it played: for a pair that never met.
@@ -1400,9 +1414,11 @@ async function drawPairGraph(v, ring = null) {
       ' in this browser tab.',
     ),
     el('details', { class: 'graph-query' }, el('summary', null, 'Show the query'), el('pre', null, query.trim())),
-    el('div', { id: 'world-graph', class: 'world-graph' }),
+    // the scenario picture under the dots: kept as it is when the box is drawn again (live races join the dots
+    // above it), so the page below does not jump
+    $('world-graph') || el('div', { id: 'world-graph', class: 'world-graph' }),
   );
-  drawWorldGraph(v, ring);
+  await drawWorldGraph(v, ring);
 }
 
 // Under the dots: one of them opened. The scenario just watched, or the first one, as a graph of its own: the
@@ -1410,8 +1426,11 @@ async function drawPairGraph(v, ring = null) {
 async function drawWorldGraph(v, ring = null) {
   const box = $('world-graph');
   const rounds = v.rounds || [];
-  if (!box || !rounds.length) return;
+  if (!box) return;
+  if (!rounds.length) return box.replaceChildren();
   const index = ring ?? 0;
+  const showing = `${rounds[index].match}|${ring === null}`;
+  if (box.dataset.showing === showing && box.firstChild) return; // already drawn, as it should be
   let found;
   try {
     found = await worldOf(rounds[index].match);
@@ -1424,6 +1443,7 @@ async function drawWorldGraph(v, ring = null) {
   const unseen = (model) => world.decided_unseen[sideOf[model]] || 0;
   const picture = worldPicture(world, v);
   picture.update(Infinity);
+  box.dataset.showing = showing;
   box.replaceChildren(
     el('h4', { class: 'world-title' }, `One dot, opened: scenario ${index + 1} of ${rounds.length}`),
     el(
@@ -1809,6 +1829,7 @@ async function drawLive(v) {
   const level = el('select', { id: 'live-level', 'aria-label': 'Difficulty' }, offered.levels.map((x) => el('option', { value: x, selected: x === 'standard' }, `${x} difficulty`)));
   const profile = el('select', { id: 'live-profile', 'aria-label': 'What matters most' }, runner.options.profiles.map((x) => el('option', { value: x, selected: x === 'budget' }, `${x} scoring`)));
   const go = el('button', { type: 'button', id: 'live-go' }, 'Race them live');
+  const pick = (label, select) => el('label', { class: 'pick' }, el('span', null, label), select);
   // Batches, where the runner offers them: the same test many times in one go, by the pair or by one of the two
   // on both lanes. The bigger sizes are shown as what is coming, never as something to press.
   const sizes = runner.options.batches || [];
@@ -1868,13 +1889,24 @@ async function drawLive(v) {
     );
   };
   const filed = el('div', { id: 'live-batches', class: 'live-history', hidden: true });
+  // What pressing the button will run, in words, right beside it: two dropdowns side by side are easy to mix up,
+  // and one model on both lanes is a different thing from the match a visitor usually means to run.
+  const what = el('p', { class: 'live-what', id: 'live-what' });
   const relabel = () => {
     // one model against itself needs a batch: one run cannot show steadiness
     if (whoPick.value !== 'pair' && Number(runsPick.value) === 1 && sizes.length) runsPick.value = String(sizes[0].runs);
-    go.textContent = Number(runsPick.value) > 1 ? `Run the batch of ${runsPick.value}` : 'Race them live';
+    const runs = Number(runsPick.value);
+    const alone = whoPick.value === 'pair' ? null : whoPick.value === 'a' ? v.a : v.b;
+    go.textContent = runs > 1 ? `Run the batch of ${runs}${alone ? `: ${shortName(alone)} against itself` : ''}` : 'Race them live';
+    what.replaceChildren(
+      'This will run: ',
+      el('strong', null, `${runs === 1 ? '1 new scenario' : `${runs} new scenarios`}, ${alone ? `${shortName(alone)} on both lanes` : `${shortName(v.a)} against ${shortName(v.b)}`}`),
+      alone ? '. That is a steadiness check of one model, not a match between the two: nothing in it counts as a win.' : '.',
+    );
+    what.classList.toggle('alone', Boolean(alone));
     showExpect();
   };
-  showExpect();
+  relabel();
   runsPick.addEventListener('change', () => {
     if (Number(runsPick.value) === 1) whoPick.value = 'pair';
     relabel();
@@ -2029,7 +2061,7 @@ async function drawLive(v) {
       batchLegend(ma === mb),
     );
     batchBox.replaceChildren();
-    follow(stage);
+    follow(stage, 'center');
     // a scenario one lane passed and the other did not is decided there and then; the rest wait for the judging
     const ended = { A: new Map(), B: new Map() };
     const clear = (attempt) => {
@@ -2100,6 +2132,11 @@ async function drawLive(v) {
       lanes.B.finish();
       running = false;
       ready();
+      if (ma === mb && whoPick.value !== 'pair') {
+        // one model on both lanes is chosen for one run at a time: the next press is the match again
+        whoPick.value = 'pair';
+        relabel();
+      }
       if (!runnerBusy) watchRunner(); // the runner may still be filing the result: ask before offering the button again
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
@@ -2120,7 +2157,7 @@ async function drawLive(v) {
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
     stage.replaceChildren(el('p', { class: 'note' }, 'A new world is being generated and handed to both models. Nothing below is a replay.'), laneLegend(), lanes.A.node, lanes.B.node);
-    follow(stage);
+    follow(stage, 'center');
     try {
       const response = await fetch(`${runner.base}/race`, {
         method: 'POST',
@@ -2211,7 +2248,8 @@ async function drawLive(v) {
     title,
     el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
     prior,
-    el('div', { class: 'race-controls' }, sizes.length ? [whoPick, runsPick] : null, level, profile, go),
+    el('div', { class: 'race-controls' }, sizes.length ? [pick('Who plays', whoPick), pick('How many', runsPick)] : null, pick('Difficulty', level), pick('Scoring', profile), go),
+    what,
     busyNote,
     early,
     expect,
@@ -2224,6 +2262,7 @@ async function drawLive(v) {
     filed,
   );
   watchRunner();
+  return true; // there is a run box with a button in it
 }
 const spec_task = (test) => test.split('/').pop();
 

@@ -49,8 +49,12 @@ def test_a_self_run_is_kept_apart_from_every_question_about_pairs(stores):
     count = "MATCH (n:{}) RETURN count(n) AS n"
     assert cli.rows(with_self, count.format("Match")) == cli.rows(plain, count.format("Match"))
     assert cli.rows(with_self, count.format("Attempt")) == cli.rows(plain, count.format("Attempt"))
-    assert cli.rows(with_self, count.format("SelfCheck"))[0]["n"] == scenarios
-    assert cli.rows(with_self, count.format("SelfAttempt"))[0]["n"] == 2 * scenarios
+    # the made-up self run adds its scenarios, each played twice, to whatever self runs the record already holds
+    added = {
+        label: cli.rows(with_self, count.format(label))[0]["n"] - cli.rows(plain, count.format(label))[0]["n"]
+        for label in ("SelfCheck", "SelfAttempt")
+    }
+    assert added == {"SelfCheck": scenarios, "SelfAttempt": 2 * scenarios}
     # loading again creates nothing
     before = cli.rows(with_self, "MATCH (n) RETURN count(n) AS n")
     load.load(Path(with_self).parent / "records", with_self)
@@ -66,9 +70,9 @@ def test_it_counts_in_the_models_own_fitness_and_never_head_to_head(stores):
         assert after[key] == before[key], key
     # the model's own count on the task grew by the attempts it made against itself; the other model's did not
     assert "live-race" in {r["suite"] for r in after["evidence"]}  # the live evidence that brings live batches in
-    played = sum(
-        1 for x in cli.rows(with_self, "MATCH (a:SelfAttempt)-[:IN]->(sc:SelfCheck) WHERE NOT sc.excluded RETURN a")
-    )
+    own = "MATCH (a:SelfAttempt)-[:IN]->(sc:SelfCheck), (a)-[:BY]->(:Model {name: $m}) WHERE NOT sc.excluded RETURN count(a) AS n"
+    played = cli.rows(with_self, own, {"m": DEEPSEEK})[0]["n"] - cli.rows(plain, own, {"m": DEEPSEEK})[0]["n"]
+    assert played == 2 * scenarios
     assert after["fit"][DEEPSEEK]["attempts"] == before["fit"][DEEPSEEK]["attempts"] + played
     assert after["fit"][LUNA] == before["fit"][LUNA]
     # consistency: the same scenario twice, the same ending in all but the one that was flipped
