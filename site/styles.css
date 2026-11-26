@@ -62,7 +62,7 @@ h1 em { font-style: normal; text-decoration: underline; text-decoration-color: v
 @media (min-width: 1280px) {
   #step-verdict { --wide: min(1400px, calc(100vw - 48px)); width: var(--wide); margin-left: calc((100% - var(--wide)) / 2); }
   .panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr); column-gap: 28px; align-items: start; }
-  .pane-answer.top { grid-column: 1; grid-row: 1; } .pane-answer.bottom { grid-column: 1; grid-row: 2; }
+  .pane-first { grid-column: 1; grid-row: 1; } .pane-rest { grid-column: 1; grid-row: 2; }
   .pane-graph { grid-column: 2; grid-row: 1 / span 2; position: sticky; top: 62px; max-height: calc(100vh - 74px); overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 12px 0; scrollbar-width: thin; }
   .pane-title { display: block; }
   .pane-graph .pair-graph { margin-top: 0; }
