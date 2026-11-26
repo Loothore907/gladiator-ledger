@@ -10,9 +10,11 @@ because each one follows connections across runs: models, matches, test versions
   stale_results      Q5  Which results were earned on a version that has since been replaced or forked?
 
   pair_on_task           One task, two models: every pair where they met, with both sides' facts.
+  pair_conditions        The sets of conditions those two met under, and how many pairs under each.
+  task_conditions        The sets of conditions a task's suite matches were played under.
   pair_hazards           The hazards each of those two models met and tripped on, in those pairs.
   fault_profile          One task: for each model, each fault it could show, in how many attempts it showed it.
-  task_attempts          One task version and its suites: every model's attempts, passes and cost.
+  task_attempts          One task version under one set of conditions: every model's attempts, passes and cost.
   task_faults            The same scope: the faults each model made (what "fit for the task" is judged from).
   find_flow              Describe your flow: the tested workflows whose text matches your words best.
   flows                  Every tested workflow (newest versions).
@@ -93,12 +95,14 @@ RETURN model, fault, kind, kind_of, attempts, attempts_with, times, toFloat(atte
 ORDER BY model, kind, times DESC, fault
 """
 
-# Fit for the task: every model's attempts on one test version under the settings of the given suites (fitness is
-# about the model and the task, so every opponent it faced counts), and the faults it made in those attempts.
+# Fit for the task: every model's attempts on one test version under one set of conditions (Match.conditions:
+# the same settings, difficulty and scoring), and the faults it made in those attempts. Fitness is about the model
+# and the task, so every opponent it faced counts and so does every suite and live race played under those
+# conditions. $suite, when given, keeps it to one suite's matches (a fixed set that live races never join).
 TASK_ATTEMPTS = """
 MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
       (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
-WHERE NOT mt.excluded AND r.suite IN $suites
+WHERE NOT mt.excluded AND ($conditions IS NULL OR mt.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
 RETURN m.name AS model, m.display_name AS display_name, count(a) AS attempts,
        sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed, avg(a.cost_usd) AS cost_per_attempt
 ORDER BY cost_per_attempt, model
@@ -107,7 +111,7 @@ ORDER BY cost_per_attempt, model
 TASK_FAULTS = """
 MATCH (tv:TestVersion {key: $version_key})-[:CAN_SHOW]->(f:Fault),
       (tv)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run), (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
-WHERE NOT mt.excluded AND r.suite IN $suites
+WHERE NOT mt.excluded AND ($conditions IS NULL OR mt.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
 OPTIONAL MATCH (a)-[x:MADE]->(f)
 OPTIONAL MATCH (f)-[:KIND_OF]->(parent:Fault)
 WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
@@ -117,12 +121,12 @@ ORDER BY model, fault
 """
 
 # Self runs: one model on both sides of the same scenarios. They are attempts at the task like any other, so they
-# count toward that model's fitness (same suites rule; $live also takes the runner's live batches when the evidence
-# already includes live runs), and they are never part of a head-to-head.
+# count toward that model's fitness under the same rule (the same conditions, and $suite when given), and they
+# are never part of a head-to-head.
 SELF_ATTEMPTS = """
 MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(sc:SelfCheck)-[:PART_OF]->(r:Run),
       (sc)<-[:IN]-(a:SelfAttempt)-[:BY]->(m:Model)
-WHERE NOT sc.excluded AND (r.suite IN $suites OR ($live AND r.suite STARTS WITH 'live-'))
+WHERE NOT sc.excluded AND ($conditions IS NULL OR sc.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
 RETURN m.name AS model, m.display_name AS display_name, count(a) AS attempts,
        sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed, sum(a.cost_usd) AS spent
 ORDER BY model
@@ -130,7 +134,7 @@ ORDER BY model
 SELF_FAULTS = """
 MATCH (tv:TestVersion {key: $version_key})-[:CAN_SHOW]->(f:Fault),
       (tv)<-[:USED]-(sc:SelfCheck)-[:PART_OF]->(r:Run), (sc)<-[:IN]-(a:SelfAttempt)-[:BY]->(m:Model)
-WHERE NOT sc.excluded AND (r.suite IN $suites OR ($live AND r.suite STARTS WITH 'live-'))
+WHERE NOT sc.excluded AND ($conditions IS NULL OR sc.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
 OPTIONAL MATCH (a)-[x:MADE]->(f)
 OPTIONAL MATCH (f)-[:KIND_OF]->(parent:Fault)
 WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
@@ -141,8 +145,9 @@ ORDER BY model, fault
 # Consistency: given the same scenario twice, how often did a model end the same way (both passed, or both did
 # not)? It says how much one race on this task can be trusted, for the model and for the test.
 SELF_CONSISTENCY = """
-MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(sc:SelfCheck)-[:BY]->(m:Model)
+MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(sc:SelfCheck)-[:BY]->(m:Model), (sc)-[:PART_OF]->(r:Run)
 WHERE NOT sc.excluded AND m.name IN $models
+  AND ($conditions IS NULL OR sc.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
 OPTIONAL MATCH (sc)<-[:IN]-(a:SelfAttempt)
 WITH m.name AS model, sc, sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS ok
 RETURN model, count(sc) AS scenarios, sum(CASE WHEN sc.same THEN 1 ELSE 0 END) AS same,
@@ -220,9 +225,34 @@ RETURN old.key AS version, matches, newer_versions, forks
 ORDER BY version
 """
 
-# One task, two models: every judged pair where exactly these two met on this task, with both sides' facts.
-# This is the unit Ledger's claims are made of: a task claim ("A does this task better than B"), never a
-# general claim about a model.
+# Which conditions two models have met under on a task: per set of conditions, how many judged pairs they have
+# and how many of those were suite matches (not live races). A verdict is read under one of them (cli.verdict).
+PAIR_CONDITIONS = """
+MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
+      (mt)<-[:IN]-(:Attempt)-[:BY]->(:Model {name: $a}),
+      (mt)<-[:IN]-(:Attempt)-[:BY]->(:Model {name: $b})
+WHERE NOT mt.excluded
+  AND ($suite IS NULL OR r.suite = $suite)
+  AND ($version_key IS NULL OR tv.key = $version_key)
+RETURN mt.conditions AS conditions, count(mt) AS pairs,
+       sum(CASE WHEN coalesce(r.suite, '') STARTS WITH 'live-' THEN 0 ELSE 1 END) AS suite_pairs
+ORDER BY conditions
+"""
+
+# The conditions a task's own suite record was played under: per set of conditions, the judged pairs from suite
+# matches between any two models. It anchors a verdict for two models that have only met in live races.
+TASK_CONDITIONS = """
+MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run)
+WHERE NOT mt.excluded AND NOT coalesce(r.suite, '') STARTS WITH 'live-'
+  AND ($suite IS NULL OR r.suite = $suite)
+  AND ($version_key IS NULL OR tv.key = $version_key)
+RETURN mt.conditions AS conditions, count(mt) AS pairs
+ORDER BY conditions
+"""
+
+# One task, two models: every judged pair where exactly these two met on this task under one set of conditions
+# ($conditions; NULL takes them all), with both sides' facts. This is the unit Ledger's claims are made of: a
+# task claim ("A does this task better than B"), never a general claim about a model.
 PAIR_ON_TASK = """
 MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
       (mt)<-[:IN]-(xa:Attempt)-[:BY]->(:Model {name: $a}),
@@ -230,6 +260,7 @@ MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match
 WHERE NOT mt.excluded
   AND ($suite IS NULL OR r.suite = $suite)
   AND ($version_key IS NULL OR tv.key = $version_key)
+  AND ($conditions IS NULL OR mt.conditions = $conditions)
 OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
 RETURN mt.key AS match, r.run_id AS run, r.seal_sha256 AS seal, r.engine_commit AS engine, r.suite AS suite,
        tv.key AS version, mt.difficulty AS difficulty, mt.rule AS rule, coalesce(w.name, 'tie') AS winner,
@@ -249,6 +280,7 @@ MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match
 WHERE NOT mt.excluded AND m.name IN [$a, $b] AND o.name IN [$a, $b] AND m.name <> o.name
   AND ($suite IS NULL OR r.suite = $suite)
   AND ($version_key IS NULL OR tv.key = $version_key)
+  AND ($conditions IS NULL OR mt.conditions = $conditions)
 MATCH (tv)-[:INCLUDES]->(h:Hazard)
 OPTIONAL MATCH (x)-[tr:TRIPPED_ON]->(h)
 WITH m.name AS model, h.name AS hazard, count(x) AS exposed, count(tr) AS tripped
@@ -340,6 +372,8 @@ ALL = {
     "flows": FLOWS,
     "flow_as_tested": FLOW_AS_TESTED,
     "pair_on_task": PAIR_ON_TASK,
+    "pair_conditions": PAIR_CONDITIONS,
+    "task_conditions": TASK_CONDITIONS,
     "pair_hazards": PAIR_HAZARDS,
     "fault_profile": FAULT_PROFILE,
     "task_attempts": TASK_ATTEMPTS,

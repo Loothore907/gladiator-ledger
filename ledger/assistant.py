@@ -65,7 +65,8 @@ ORDER BY pairs_against_it DESC, model
 
 GRAPH = """\
 Nodes: Source{name}, Run{run_id, suite, effort, attempt_budget_usd, engine_commit, seal_sha256},
-Match{key, rule (success|progress|efficiency|tie|excluded), excluded, difficulty},
+Match{key, rule (success|progress|efficiency|tie|excluded), excluded, difficulty, conditions (the settings,
+difficulty and scoring it was played under: only pairs with equal conditions are comparable)},
 Attempt{key, passed, mistakes, progress, cost_usd, wall_s, tokens, effort}, Model{name, display_name, weights,
 organization}, Test{id}, TestVersion{key, version, version_rank, title, brief, policy, tools, emulates},
 Hazard{name}, Fault{key, name, kind (trap|decision|mix-up|ending), test_id}, ValidationRun{key, level, player, ok},

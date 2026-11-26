@@ -26,7 +26,11 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   and shown beside the record at once. **Live races are real evidence (owner, 2026-11-25: a report that never
   moves however many races are run is a static report):** they are sealed by the same engine on the same locked
   tests, so they join the record through `ledger import --runner <address>` (public halves only), and from then
-  on verdicts, costs and reports count them like any other match. A batch of one model against itself is imported too (owner,
+  on verdicts, costs and reports count them like any other match. **One verdict, one set of conditions (owner,
+  2026-11-26):** a race counts in a verdict only when it was played under that record's conditions (the same
+  settings, difficulty and scoring); one played under others stays on file, and the verdict says so and leaves it
+  out. A model's fitness for a task counts every attempt it made under those conditions, whoever the opponent was,
+  so it reads the same in every verdict. A batch of one model against itself is imported too (owner,
   2026-11-25), as a consistency check kept apart from matches (`SelfCheck`, `SelfAttempt`): its attempts count in
   that model's own fitness for the task and it reports how often the model ended the same way given the same
   scenario twice. It is never part of a head-to-head. Budgets live in the operations repo

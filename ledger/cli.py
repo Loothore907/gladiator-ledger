@@ -58,7 +58,25 @@ def current_version(store: str, test: str) -> str | None:
     return found[0]["key"] if found else None
 
 
-SCOPE_DEFAULTS = {"test_id": None, "suite": None, "version_key": None, "current_only": False, "open_only": False}
+SCOPE_DEFAULTS = {
+    "test_id": None,
+    "suite": None,
+    "version_key": None,
+    "conditions": None,
+    "current_only": False,
+    "open_only": False,
+}
+# How a setting reads in a sentence, when a note says which conditions some pairs were played under ("{}" is the
+# value). The page reads the same words from rules.json.
+CONDITION_WORDS = {
+    "difficulty": "{} difficulty",
+    "profile": "{} scoring",
+    "effort": "{} effort",
+    "attempt_budget_usd": "a ${} limit per attempt",
+    "max_output_tokens": "an output limit of {} tokens",
+    "timeout_s": "a {}-second limit per call",
+    "per_model": "different settings for each model",
+}
 
 
 def recommend(
@@ -314,17 +332,62 @@ def print_opponents(o: dict) -> None:
     print("Scores: Epoch AI, 'Capabilities & benchmarking', epoch.ai/benchmarks (CC BY 4.0). See data/epoch/README.md.")
 
 
-def fitness(store: str, test: str, version: str, suites: list[str], profile: str, overrides=None, bar=None) -> dict:
+def reference_conditions(found: list[dict], record: dict[str, int]) -> str:
+    """The one set of conditions a verdict between two models is read under. In order: the conditions of the suite
+    matches between the two (most pairs); if they never met in a suite, those most of the task's own suite record
+    was played under; if they have no pair under those either, the conditions they met under most. So a live race
+    joins the record it was played to test, and one played under other conditions (an easier level, another
+    scoring profile) never moves that record's verdict. `found` is PAIR_CONDITIONS, `record` TASK_CONDITIONS."""
+    best = None
+    for c in sorted(found, key=lambda c: c["conditions"]):  # a full tie goes to the first in code-point order
+        rank = (c["suite_pairs"], record.get(c["conditions"], 0), c["pairs"])
+        if best is None or rank > best[0]:
+            best = (rank, c["conditions"])
+    return best[1]
+
+
+def conditions_apart(reference: str, other: str) -> str:
+    """How one set of conditions differs from the reference, in words: only the settings that differ."""
+
+    def read(text: str) -> dict:
+        return dict(part.split("=", 1) for part in text.split("; ") if "=" in part)
+
+    ref, oth = read(reference), read(other)
+    words = []
+    for key in sorted(set(ref) | set(oth)):
+        if ref.get(key) == oth.get(key):
+            continue
+        if key not in oth:
+            words.append(f"no {key} set")
+        else:
+            words.append(CONDITION_WORDS.get(key, key + " {}").replace("{}", oth[key]))
+    return ", ".join(words) or "other conditions"
+
+
+def not_counted_note(not_counted: list[dict]) -> str:
+    """The sentence a verdict carries when the two models also met under conditions it does not count."""
+    left_out = sum(c["pairs"] for c in not_counted)
+    return (
+        f"Not counted here: {left_out} judged {'pair' if left_out == 1 else 'pairs'} these two played under other "
+        f"conditions ({'; '.join(c['what'] + ': ' + str(c['pairs']) for c in not_counted)}). "
+        "A result holds for the conditions it was played under."
+    )
+
+
+def fitness(
+    store: str, test: str, version: str, conditions: str, suite: str | None, profile: str, overrides=None, bar=None
+) -> dict:
     """Every model's fitness for one task version, by model id, under a profile (ledger/policy.py). Counts every
-    attempt the model made on the task under those suites' settings, whoever the opponent was."""
-    scope = {"version_key": version, "suites": suites}
+    attempt the model made on the task under one set of conditions, whoever the opponent was and whether the match
+    was a suite match or a live race, so a model's fitness for a task is the same number in every verdict read
+    under those conditions. `suite` keeps it to one suite's matches (a fixed set)."""
+    scope = {"version_key": version, "conditions": conditions, "suite": suite}
     faults: dict[str, list[dict]] = {}
     for f in rows(store, questions.TASK_FAULTS, scope):
         faults.setdefault(f.pop("model"), []).append(f)
     attempts = {r["model"]: r for r in rows(store, questions.TASK_ATTEMPTS, scope)}
     # self runs (one model on both sides) are attempts at the task too: added to that model's own count
-    own = {**scope, "live": any(str(x).startswith("live-") for x in suites)}
-    for extra in rows(store, questions.SELF_ATTEMPTS, own):
+    for extra in rows(store, questions.SELF_ATTEMPTS, scope):
         r = attempts.get(extra["model"])
         if r is None:
             continue  # a model with no match on this task has no row to add to
@@ -332,7 +395,7 @@ def fitness(store: str, test: str, version: str, suites: list[str], profile: str
         r["attempts"] += extra["attempts"]
         r["passed"] += extra["passed"]
         r["cost_per_attempt"] = spent / r["attempts"]
-    for f in rows(store, questions.SELF_FAULTS, own):
+    for f in rows(store, questions.SELF_FAULTS, scope):
         mine = {x["fault"]: x for x in faults.get(f["model"], [])}
         if f["fault"] in mine:
             mine[f["fault"]]["attempts_with"] += f["attempts_with"]
@@ -413,10 +476,21 @@ def verdict(
     test = test_id(workflow)
     version = None if all_versions else current_version(store, test)
     params = {"test_id": test, "a": a, "b": b, "suite": suite, "version_key": version}
-    pairs = rows(store, questions.PAIR_ON_TASK, params)
     out = {"task": test, "version": version or "all versions", "suite": suite, "a": a, "b": b, "bar": bar}
-    if not pairs:
+    met_under = rows(store, questions.PAIR_CONDITIONS, params)
+    if not met_under:
         return dict(out, verdict="no data", better=None, pairs=0, notes=[f"{a} and {b} never met on {test}."])
+    # One verdict, one set of conditions: pairs played under any other are on file and said so, never pooled.
+    task_scope = {"test_id": test, "suite": suite, "version_key": version}
+    record = {r["conditions"]: r["pairs"] for r in rows(store, questions.TASK_CONDITIONS, task_scope)}
+    conditions = reference_conditions(met_under, record)
+    params["conditions"] = conditions
+    not_counted = [
+        {"conditions": c["conditions"], "pairs": c["pairs"], "what": conditions_apart(conditions, c["conditions"])}
+        for c in sorted(met_under, key=lambda c: c["conditions"])
+        if c["conditions"] != conditions
+    ]
+    pairs = rows(store, questions.PAIR_ON_TASK, params)
     wins_a = sum(1 for p in pairs if p["winner"] == a)
     wins_b = sum(1 for p in pairs if p["winner"] == b)
     ties = len(pairs) - wins_a - wins_b
@@ -454,15 +528,16 @@ def verdict(
     efforts = {tuple(s["effort"]) for s in stats.values()}
     if len(efforts) > 1 or any(len(e) > 1 for e in efforts):
         notes.append("The two models did not play under one identical effort setting in every pair.")
+    if not_counted:
+        notes.append(not_counted_note(not_counted))
     hazards = rows(store, questions.PAIR_HAZARDS, params)
     runs = {}
     for p in pairs:
         runs[p["run"]] = {"run": p["run"], "seal_sha256": p["seal"], "engine_commit": p["engine"], "suite": p["suite"]}
     if profile:
         # Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
-        suites = sorted({p["suite"] for p in pairs})
         version_key = max(p["version"] for p in pairs)
-        everyone = fitness(store, test, version_key, suites, profile, overrides)
+        everyone = fitness(store, test, version_key, conditions, suite, profile, overrides)
         out["profile"] = profile
         out["fit"] = {m: everyone[m] for m in (a, b)}
         head = {"a": a, "b": b, "better": better, "verdict": kind}
@@ -482,7 +557,8 @@ def verdict(
             for p in pairs
         ]
         # consistency: what each of the two did when given the same scenario twice (self runs), if it was
-        out["consistency"] = rows(store, questions.SELF_CONSISTENCY, {"version_key": version_key, "models": [a, b]})
+        own = {"version_key": version_key, "models": [a, b], "conditions": conditions, "suite": suite}
+        out["consistency"] = rows(store, questions.SELF_CONSISTENCY, own)
         # who else is fit on this task, cheapest first: where to look when neither of these two is
         out["fit_on_task"] = [
             {
@@ -506,6 +582,8 @@ def verdict(
         models=stats,
         hazards=[h for h in hazards if h["tripped"]],
         evidence=sorted(runs.values(), key=lambda r: r["run"]),
+        conditions=conditions,
+        not_counted=not_counted,
         notes=notes,
     )
 

@@ -347,15 +347,47 @@ export function createLedger(ask, questions, rules) {
     };
   }
 
-  // Every model's fitness for one task version, counting every attempt it made under those suites' settings.
-  async function fitness(test, version, suites, profile, overrides = null, bar = null) {
-    const scope = { version_key: version, suites };
+  // The one set of conditions a verdict between two models is read under (cli.reference_conditions): those of the
+  // suite matches between the two; if they never met in a suite, those most of the task's own suite record was
+  // played under; if they have no pair under those either, the conditions they met under most.
+  function referenceConditions(found, record) {
+    // the first place two ranks differ decides; a full tie goes to the first in code-point order
+    const higher = (x, y) => {
+      for (let i = 0; i < x.length; i += 1) if (x[i] !== y[i]) return x[i] > y[i];
+      return false;
+    };
+    let best = null;
+    for (const c of [...found].sort((x, y) => byCodePoint(x.conditions, y.conditions))) {
+      const rank = [c.suite_pairs, record.get(c.conditions) || 0, c.pairs];
+      if (!best || higher(rank, best.rank)) best = { rank, conditions: c.conditions };
+    }
+    return best.conditions;
+  }
+
+  // How one set of conditions differs from the reference, in words: only the settings that differ.
+  function conditionsApart(reference, other) {
+    const read = (text) =>
+      new Map(text.split('; ').filter((part) => part.includes('=')).map((part) => [part.slice(0, part.indexOf('=')), part.slice(part.indexOf('=') + 1)]));
+    const [ref, oth] = [read(reference), read(other)];
+    const words = [];
+    for (const key of [...new Set([...ref.keys(), ...oth.keys()])].sort(byCodePoint)) {
+      if (ref.get(key) === oth.get(key)) continue;
+      if (!oth.has(key)) words.push(`no ${key} set`);
+      else words.push((rules.condition_words[key] ?? `${key} {}`).split('{}').join(oth.get(key)));
+    }
+    return words.join(', ') || 'other conditions';
+  }
+
+  // Every model's fitness for one task version, counting every attempt it made under one set of conditions,
+  // whoever the opponent was and whether the match was a suite match or a live race. `suite` keeps it to one
+  // suite's matches (a fixed set).
+  async function fitness(test, version, conditions, suite, profile, overrides = null, bar = null) {
+    const scope = { version_key: version, conditions, suite };
     const faults = {};
     for (const { model, ...f } of await ask(questions.task_faults, scope)) (faults[model] ||= []).push(f);
     const attempts = new Map((await ask(questions.task_attempts, scope)).map((r) => [r.model, { ...r }]));
     // self runs (one model on both sides) are attempts at the task too: added to that model's own count
-    const own = { ...scope, live: suites.some((x) => String(x).startsWith('live-')) };
-    for (const extra of await ask(questions.self_attempts, own)) {
+    for (const extra of await ask(questions.self_attempts, scope)) {
       const r = attempts.get(extra.model);
       if (!r) continue;
       const spent = (r.cost_per_attempt || 0) * r.attempts + (extra.spent || 0);
@@ -363,7 +395,7 @@ export function createLedger(ask, questions, rules) {
       r.passed += extra.passed;
       r.cost_per_attempt = spent / r.attempts;
     }
-    for (const f of await ask(questions.self_faults, own)) {
+    for (const f of await ask(questions.self_faults, scope)) {
       const mine = (faults[f.model] || []).find((x) => x.fault === f.fault);
       if (mine) {
         mine.attempts_with += f.attempts_with;
@@ -424,11 +456,22 @@ export function createLedger(ask, questions, rules) {
     const test = testId(workflow);
     const version = await currentVersion(test);
     const params = { test_id: test, a, b, suite, version_key: version };
-    const pairs = await ask(questions.pair_on_task, params);
     const out = { task: test, version: version || 'all versions', suite, a, b, bar };
-    if (!pairs.length) {
+    const metUnder = await ask(questions.pair_conditions, params);
+    if (!metUnder.length) {
       return { ...out, verdict: 'no data', better: null, pairs: 0, notes: [`${a} and ${b} never met on ${test}.`] };
     }
+    // One verdict, one set of conditions: pairs played under any other are on file and said so, never pooled.
+    const record = new Map(
+      (await ask(questions.task_conditions, { test_id: test, suite, version_key: version })).map((r) => [r.conditions, r.pairs]),
+    );
+    const conditions = referenceConditions(metUnder, record);
+    params.conditions = conditions;
+    const notCounted = [...metUnder]
+      .sort((x, y) => byCodePoint(x.conditions, y.conditions))
+      .filter((c) => c.conditions !== conditions)
+      .map((c) => ({ conditions: c.conditions, pairs: c.pairs, what: conditionsApart(conditions, c.conditions) }));
+    const pairs = await ask(questions.pair_on_task, params);
     const winsA = pairs.filter((p) => p.winner === a).length;
     const winsB = pairs.filter((p) => p.winner === b).length;
     const ties = pairs.length - winsA - winsB;
@@ -471,14 +514,22 @@ export function createLedger(ask, questions, rules) {
     if (efforts.size > 1 || each.some((s) => s.effort.length > 1)) {
       notes.push('The two models did not play under one identical effort setting in every pair.');
     }
+    if (notCounted.length) {
+      // cli.not_counted_note
+      const leftOut = notCounted.reduce((n, c) => n + c.pairs, 0);
+      notes.push(
+        `Not counted here: ${leftOut} judged ${leftOut === 1 ? 'pair' : 'pairs'} these two played under other ` +
+          `conditions (${notCounted.map((c) => `${c.what}: ${c.pairs}`).join('; ')}). ` +
+          'A result holds for the conditions it was played under.',
+      );
+    }
     const hazards = await ask(questions.pair_hazards, params);
     const runs = {};
     for (const p of pairs) runs[p.run] = { run: p.run, seal_sha256: p.seal, engine_commit: p.engine, suite: p.suite };
     if (profile) {
       // Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
-      const suites = [...new Set(pairs.map((p) => p.suite))].sort(byCodePoint);
       const versionKey = pairs.map((p) => p.version).sort(byCodePoint).at(-1);
-      const everyone = await fitness(test, versionKey, suites, profile, overrides);
+      const everyone = await fitness(test, versionKey, conditions, suite, profile, overrides);
       out.profile = profile;
       out.fit = { [a]: everyone[a], [b]: everyone[b] };
       [out.outcome, out.headline, out.use] = outcome({ a, b, better, verdict: kind }, out.fit);
@@ -492,7 +543,7 @@ export function createLedger(ask, questions, rules) {
         run: p.run,
         match: p.match,
       }));
-      out.consistency = await ask(questions.self_consistency, { version_key: versionKey, models: [a, b] });
+      out.consistency = await ask(questions.self_consistency, { version_key: versionKey, models: [a, b], conditions, suite });
       out.fit_on_task = Object.entries(everyone)
         .filter(([, f]) => f.fit)
         .map(([model, f]) => ({ model, pass_rate: f.pass_rate, attempts: f.attempts, cost_per_attempt: f.cost_per_attempt }));
@@ -509,6 +560,8 @@ export function createLedger(ask, questions, rules) {
       models: stats,
       hazards: hazards.filter((h) => h.tripped),
       evidence: Object.values(runs).sort((x, y) => byCodePoint(x.run, y.run)),
+      conditions,
+      not_counted: notCounted,
       notes,
     };
   }
@@ -562,6 +615,7 @@ export function createLedger(ask, questions, rules) {
       b: v.b,
       suite: v.suite ?? null,
       version_key: v.version,
+      conditions: v.conditions ?? null,
     });
     const guards = [];
     for (const model of chosen ? [chosen] : [v.a, v.b]) {
@@ -784,6 +838,8 @@ export function createLedger(ask, questions, rules) {
     partnersOnFlow,
     flowFaults,
     scoresOf,
+    referenceConditions,
+    conditionsApart,
   };
 }
 

@@ -34,8 +34,8 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 | Node | Key | Properties | From |
 |---|---|---|---|
 | `Run` | `run_id` | suite, started_unix, record_version, engine_commit, cap_usd, spent_usd, repeats, effort, max_output_tokens, attempt_budget_usd, timeout_s, model_a, model_b, recorded_winner, seal_sha256 | one run record |
-| `Match` | `run_id/node/attempt` | difficulty, seed, profile, **rule** (`success`, `progress`, `efficiency`, `tie`, `excluded`), excluded | one *pair*: both models on the same generated world |
-| `SelfCheck` | `run_id/node/attempt` | difficulty, seed, excluded, **same** (did the model end the same way both times), model | one scenario played twice by ONE model (a self run). Never a `Match`: nothing about pairs or wins sees it |
+| `Match` | `run_id/node/attempt` | difficulty, seed, profile, **conditions** (below), **rule** (`success`, `progress`, `efficiency`, `tie`, `excluded`), excluded | one *pair*: both models on the same generated world |
+| `SelfCheck` | `run_id/node/attempt` | difficulty, seed, conditions, excluded, **same** (did the model end the same way both times), model | one scenario played twice by ONE model (a self run). Never a `Match`: nothing about pairs or wins sees it |
 | `SelfAttempt` | `run_id/node/attempt/side` | the same facts as `Attempt` | one of the two times. `(SelfAttempt)-[:IN]->(SelfCheck)`, `-[:BY]->(Model)`, `-[:MADE]->(Fault)`; `(SelfCheck)-[:USED]->(TestVersion)`, `-[:PART_OF]->(Run)`, `-[:BY]->(Model)`. Counted in the model's fitness for the task |
 | `Attempt` | `match/side` | side, effort, passed, first_pass, mistakes, model_errors, progress, cost_usd, tokens_in, tokens_cached (the part of the input the provider served from its cache), tokens_out, **cost_basis** (`billed`, `repriced`, `list`, `mixed`: where the cost came from, `ledger/costs.py`), tokens, wall_s, calls, termination, items, efficiency | one side of a match |
 | `Model` | `name` (exact model id, e.g. `anthropic:claude-haiku-5-5`) | provider | contestants |
@@ -118,7 +118,7 @@ each fault it could show and in how many attempts it showed it.
 A live race is evidence once it is imported. The hosted runner's sealed public records are brought in with
 `ledger import --runner <address>` (the `Import live races` workflow does it after a race and on a schedule), and
 from then on a live race between two models is a `Run` with `Match` and `Attempt` nodes like any other, counted
-in verdicts, costs and reports. A batch of one model against itself is loaded as `SelfCheck` and `SelfAttempt`
+in verdicts, costs and reports that are read under the conditions it was played under (above). A batch of one model against itself is loaded as `SelfCheck` and `SelfAttempt`
 (above) and is never a `Match`.
 
 Until then, in the browser session that ran it: the result joins the in-browser graph as its own kind of node,
@@ -126,9 +126,26 @@ so it can be drawn beside the recorded matches at once without being counted twi
 `(LiveMatch {run_id, winner, seal})-[:RAN_ON]->(TestVersion)` and `-[:PLAYED_BY]->(Model)`. No question that
 answers a verdict matches `LiveMatch`, and it is never in the shipped store.
 
+## Conditions: what a verdict counts
+Every `Match` and `SelfCheck` carries `conditions`: one string that is equal exactly when two pairs are comparable.
+It is built by the bridge from the record (`conditions_of` in `ledger/bridges/gladiator.py`): every setting the
+engine applied to the test, the difficulty of the generated world and the scoring profile the pair was judged with,
+for example `attempt_budget_usd=0.12; difficulty=standard; effort=low; max_output_tokens=4096; profile=budget;
+timeout_s=180`.
+
+A verdict is read under one set of conditions (`reference_conditions` in `ledger/cli.py`), chosen in this order:
+the conditions of the suite matches between the two models; if they never met in a suite, those most of the
+task's own suite record was played under; if they have no pair under those either, the conditions they met under
+most. Pairs the two played under any other conditions stay on file, are listed in the verdict (`not_counted`,
+and a note) and are never pooled. So a live race counts when it was played under the record's conditions, and a
+race at an easier level or under another scoring profile never moves that record's verdict. `--suite` narrows a
+verdict further to one suite's matches, a fixed set that live races never join.
+
 ## Fit for the task (`ledger/policy.py`)
 Whether a model is fit for a task is read from the graph by `task_attempts` and `task_faults` (every attempt the
-model made on the test version under the same suite's settings) and judged by a policy: each fault has a level
+model made on the test version under the verdict's conditions, whoever the opponent was and whether the match was
+a suite match or a live race, so a model's fitness for a task is the same in every verdict read under those
+conditions) and judged by a policy: each fault has a level
 (`unforgivable`, `serious`, `minor`), set per fault with per-task exceptions, under a profile (`enterprise`,
 `personal`) that sets the pass bar and how often a serious fault may show. A mix-up takes the level of the fault
 it is a `KIND_OF`. The reader's own levels overrule all of it. The verdict leads with fitness and then gives the

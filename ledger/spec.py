@@ -84,6 +84,7 @@ def build(rows, verdict: dict) -> dict:
             "b": verdict["b"],
             "suite": verdict.get("suite"),
             "version_key": verdict["version"],
+            "conditions": verdict.get("conditions"),
         },
     )
     guards = []

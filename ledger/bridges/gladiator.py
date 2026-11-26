@@ -121,6 +121,33 @@ def effort_for(settings: dict, side: str):
     return ((settings.get("per_contestant") or {}).get(side) or {}).get("effort", effort)
 
 
+def conditions_of(settings: dict, node: str, difficulty, profile: str, sides: dict) -> str:
+    """The conditions one pair was played and judged under, as a single string that is equal exactly when two pairs
+    are comparable: every setting the engine applied to this test (the suite's defaults, the test's own settings,
+    the run's overrides), the difficulty of the world that was generated, and the scoring profile the pair was
+    judged with. Results are only pooled within one set of conditions: a race at easy difficulty says nothing
+    about the standard level, and a suite with a different budget per attempt is a different condition too.
+    When the two models were given different settings, the string names each model's own, so such a pair is
+    only ever pooled with pairs where the same models had the same ones."""
+    shared = {
+        **(settings.get("defaults") or {}),
+        **((settings.get("per_node") or {}).get(node) or {}),
+        **(settings.get("overrides") or {}),
+    }
+    shared.pop("repeats", None)  # how often a test is played is not a condition of any one attempt
+    if difficulty is not None:
+        shared["difficulty"] = difficulty
+    shared["profile"] = profile
+    own = settings.get("per_contestant") or {}
+    a, b = own.get("A") or {}, own.get("B") or {}
+    if a == b:
+        shared.update(a)
+    else:
+        each = {sides["A"]["id"]: a, sides["B"]["id"]: b}
+        shared["per_model"] = json.dumps(each, sort_keys=True, default=str)
+    return "; ".join(f"{k}={shared[k]}" for k in sorted(shared))
+
+
 def attempt_props(res: dict, side: str, effort, efficiency: float | None) -> dict:
     details = res.get("grade_details") or {}
     return {
@@ -259,6 +286,7 @@ def run_rows(body: dict, seal: str) -> dict:
                     "difficulty": instance.get("difficulty"),
                     "seed": instance.get("seed"),
                     "profile": profile,
+                    "conditions": conditions_of(settings, node, instance.get("difficulty"), profile, sides),
                     "rule": rule,
                     "excluded": excluded,
                     "started_unix": body.get("started_unix"),

@@ -66,6 +66,14 @@ window.ledgerDemo = {
   },
   // the verdict now on screen (what the graph picture is drawn from)
   current: async () => shown.v,
+  // which pairs a verdict counts: the rule itself, for site/check.cjs
+  referenceConditions: async (found, record) => (await ledgerReady).ledger.referenceConditions(found, new Map(Object.entries(record))),
+  conditionsApart: async (reference, other) => (await ledgerReady).ledger.conditionsApart(reference, other),
+  // one Cypher statement on the graph in this tab (a copy in memory: nothing here reaches the record)
+  cypher: async (query, params = {}) => {
+    await graphReady;
+    return ask(query, params);
+  },
   // the cost breakdown and the evidence report for one judged pair, as the command line writes them
   reports: async (task, a, b, profile, overrides = null) => {
     const { ledger, rules } = await ledgerReady;
@@ -945,7 +953,7 @@ async function drawPairGraph(v, ring = null) {
   if (!box) return;
   const version = v.version !== 'all versions' ? v.version : await ledger.currentVersion(v.task);
   const query = questionsText.pair_on_task;
-  const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version });
+  const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version, conditions: v.conditions ?? null });
   const figure = await evidenceGraph(v, ring);
   if ($('pair-graph') !== box) return;
   box.replaceChildren(

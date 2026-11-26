@@ -239,6 +239,15 @@ async function main() {
       same(want.flows.map((f) => f.test), got.flows.map((f) => f.test), `${where} test ids in order`);
       same(want.flows, got.flows, `${where}.flows`);
     }
+    // Which pairs a verdict counts: the page's copy of the rule against the command line's, on made-up cases.
+    for (const [i, want] of expected.conditions.reference.entries()) {
+      const got = await page.evaluate(([found, record]) => window.ledgerDemo.referenceConditions(found, record), [want.found, want.record]);
+      same(want.is, got, `conditions.reference[${i}]`);
+    }
+    for (const [i, want] of expected.conditions.apart.entries()) {
+      const got = await page.evaluate(([reference, other]) => window.ledgerDemo.conditionsApart(reference, other), [want.reference, want.other]);
+      same(want.what, got, `conditions.apart[${i}]`);
+    }
     for (const [i, want] of expected.opponents.entries()) {
       const got = await page.evaluate(([m, open]) => window.ledgerDemo.opponents(m, open), [want.asked, want.open_only]);
       const where = `opponents[${i}] (${want.asked}${want.open_only ? ', open only' : ''})`;
@@ -475,6 +484,50 @@ async function main() {
       }
     }
     await page.close();
+
+    // A race played under other conditions (here: one at the easy level, added to the graph in this tab) is on
+    // file and said so, and moves nothing: not the head to head, not either model's fitness, not the picture.
+    {
+      const made = expected.conditions.one_easy_race;
+      const judged = expected.judged.find((j) => !j.overrides && j.verdict.profile === 'personal' && j.verdict.pairs >= 8).verdict;
+      const other = await browser.newPage();
+      other.on('pageerror', (e) => problems.push(`page error: ${e.message}`));
+      await other.goto(`${origin}${BASE}`);
+      await other.evaluate(() => window.ledgerDemo.ready());
+      const ask = [judged.task, judged.a, judged.b, 'personal'];
+      const before = await other.evaluate(([t, a, b, p]) => window.ledgerDemo.verdict(t, a, b, p), ask);
+      const easy = before.conditions.replace(made.from, made.to);
+      if (easy === before.conditions) problems.push('the verdict used for the conditions check is not at the standard level');
+      await other.evaluate(
+        ([version, a, b, conditions]) =>
+          window.ledgerDemo.cypher(
+            `MATCH (tv:TestVersion {key: $version}), (a:Model {name: $a}), (b:Model {name: $b})
+             CREATE (r:Run {run_id: 'check-other-conditions', suite: 'live-race'})
+             CREATE (mt:Match {key: 'check-other-conditions/x/1', excluded: false, conditions: $conditions, difficulty: 'easy', rule: 'success'})
+             CREATE (mt)-[:PART_OF]->(r)
+             CREATE (mt)-[:USED]->(tv)
+             CREATE (mt)-[:WON_BY]->(b)
+             CREATE (xa:Attempt {key: 'check-other-conditions/x/1/A', passed: false, cost_usd: 0.01})
+             CREATE (xa)-[:IN]->(mt)
+             CREATE (xa)-[:BY]->(a)
+             CREATE (xb:Attempt {key: 'check-other-conditions/x/1/B', passed: true, cost_usd: 0.01})
+             CREATE (xb)-[:IN]->(mt)
+             CREATE (xb)-[:BY]->(b)`,
+            { version, a, b, conditions },
+          ),
+        [before.version, judged.a, judged.b, easy],
+      );
+      const after = await other.evaluate(([t, a, b, p]) => window.ledgerDemo.verdict(t, a, b, p), ask);
+      same(judged, before, 'conditions check, the verdict before');
+      for (const key of ['conditions', 'pairs', 'wins', 'ties', 'p_value', 'verdict', 'better', 'rounds', 'fit', 'headline', 'hazards', 'evidence']) {
+        same(before[key], after[key], `a race at the easy level must not move the verdict's ${key}`);
+      }
+      same([{ conditions: easy, pairs: 1, what: made.what }], after.not_counted, 'the race at the easy level, as not counted');
+      if (!after.notes.includes(made.note)) problems.push(`the verdict does not say a race under other conditions was left out: ${JSON.stringify(after.notes)}`);
+      if (before.notes.some((n) => /Not counted here/.test(n))) problems.push('the shipped record already has a pair under other conditions: this check needs a new example');
+      compared += 2;
+      await other.close();
+    }
 
     // With no runner the page says live races are not open, and offers nothing to press.
     // With one (here the stand-in), a race streams into two lanes and ends with a comparison to the record.
