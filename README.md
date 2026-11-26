@@ -98,6 +98,27 @@ the tab.
 python3 -m http.server --directory site 8000    # then open http://localhost:8000
 ```
 
+**The live record: a race counts as it ends.** The page is published with a copy of the record, and an import
+that rebuilds and republishes everything takes about fifteen minutes. `ledger serve` is the same record kept
+alive: one small service that holds the whole graph, every step included, in one Relate store, takes in each
+sealed record the runner files (checked against its seal first), and hands a page the rows of whatever the page's
+own copy lacks. A page that knows of one asks it on load and loads what is newer into the graph in the tab, and
+when a race started from the page ends, the race is in the graph a moment later: the verdict is read again and
+counts it, the race is one more dot in the evidence graph, and its world is drawn under the dots. The service runs
+no match and holds no key; the sealed records stay the master copy, and the import stays as the archive. It is
+not hosted yet, so on the hosted page a live race still joins through the import. To see it on your own machine,
+beside a runner as above:
+
+```bash
+uv run ledger serve --runner http://127.0.0.1:8787 --state live-state --origin http://localhost:8000
+# then open http://localhost:8000/?runner=http://127.0.0.1:8787&record=http://127.0.0.1:8790
+```
+
+A page published before some races, reading a live record that has taken them in, must be exactly the page
+published after them. CI holds it to that with the real service and a real browser (`site/check-live.cjs`): the
+last four records on file are played over again, and the page's graph is compared node by node and link by link,
+and its verdicts, process questions and routes with the command line's.
+
 ### 2. Through your own AI assistant
 Ledger is an MCP server, so an assistant can walk the loop for you in plain language: *"I need a model for handling
 refund requests. I'm using Haiku 5.5. What should I compare it with, and which is better at this?"*
@@ -402,6 +423,12 @@ flowchart LR
   every question. In the browser, the WebAssembly build with an in-memory store, built from the same statements.
   The steps are seven times the size of everything else, so they live in a second single-file store built
   locally from the same records on first use (`data/ledger-steps.rl`, about 75 MB, not committed).
+- **Kept live.** `ledger serve` holds the whole record, steps included, in one Relate store that stays open and is
+  written to as races end. Relate lets one process write a store and a connection belongs to the thread that
+  opened it, so the store is in Relate's directory format (which other processes may read beside the writer) and
+  one thread owns the connection and answers every read and write in turn. Adding one race takes a tenth of a
+  second; a batch of 25 with its 1,771 steps under five. Records added one at a time, in any order, leave exactly
+  the graph that building from all of them leaves (`tests/test_live.py`).
 - **Retrieval.** A full-text index over the workflow text, for "describe your flow".
 - **On show.** Wherever the page reads the graph it says so ("Relate graph") and shows the Cypher it ran, the rows
   that came back and the time it took in your browser: the evidence behind a verdict (one dot per scenario both

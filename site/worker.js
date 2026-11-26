@@ -1,12 +1,14 @@
 // The graph engine, in a dedicated worker: builds an in-memory Relate graph from data/graph.json once, then
 // answers Cypher sent by the page. Steps (data/steps/<run>.json) are loaded into the same graph later, only for
-// the scenarios a question is about. Nothing leaves the browser.
+// the scenarios a question is about, and so is any record the live record holds that this page was published
+// without. Every question is answered here, in the browser.
 
 import init, { RelateDb } from './vendor/relate-wasm/relate.js';
 
 let db = null;
 let stepWrites = null; // the statements that load steps, kept from graph.json for when a question needs them
 let stepSchema = false;
+let shipped = null; // the statements the shipped records were written with, kept for a record that arrives later
 
 function execute(text, params) {
   const result = JSON.parse(db.execute(text, params ? JSON.stringify(params) : null));
@@ -40,6 +42,7 @@ async function build() {
   execute(graph.writes.checks, { checks: graph.rows.checks, source: graph.sources.gladiator });
   execute(graph.writes.scores, { scores: graph.rows.scores, source: graph.sources.epoch });
   stepWrites = graph.steps;
+  shipped = { writes: graph.writes, source: graph.sources.gladiator, link_forks: graph.link_forks };
   const count = (text) => execute(text)[0].n;
   return {
     matches: count('MATCH (r:Run) RETURN count(r) AS n'),
@@ -72,6 +75,25 @@ function loadSteps(rows) {
   return [{ items: rows.items.length, steps }];
 }
 
+// One more record, as Ledger's live record hands it out (ledger/live.py, rows_for): written with the statements
+// the shipped records were written with, in the order the command line uses (ledger/load.py, write_to). Every
+// write is a MERGE on a stable key, so the same record twice changes nothing.
+function addRun(run) {
+  const runs = [run];
+  execute(shipped.writes.runs, { runs, source: shipped.source });
+  if ((run.includes || []).length) execute(shipped.writes.includes, { runs });
+  if ((run.can_show || []).length) {
+    execute(shipped.writes.faults, { runs });
+    execute(shipped.writes.made, { runs });
+  }
+  if ((run.self_checks || []).length) {
+    execute(shipped.writes.self, { runs });
+    execute(shipped.writes.self_made, { runs });
+  }
+  execute(shipped.link_forks);
+  return [{ run: run.run_id }];
+}
+
 const ready = build().then(
   (stats) => {
     postMessage({ type: 'ready', stats });
@@ -84,10 +106,10 @@ const ready = build().then(
 );
 
 onmessage = async (event) => {
-  const { id, query, params, load } = event.data;
+  const { id, query, params, load, add } = event.data;
   if (!(await ready)) return postMessage({ type: 'result', id, error: 'The graph did not build.' });
   try {
-    postMessage({ type: 'result', id, rows: load ? loadSteps(load) : execute(query, params) });
+    postMessage({ type: 'result', id, rows: add ? addRun(add) : load ? loadSteps(load) : execute(query, params) });
   } catch (error) {
     postMessage({ type: 'result', id, error: String((error && error.message) || error) });
   }

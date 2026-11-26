@@ -79,6 +79,99 @@ async function loadSteps(matches) {
   return { missing: matches.filter((m) => worldsMissing.has(m)).length };
 }
 
+// ---- the live record: races that ended after this page was published -------------------------------------------
+//
+// The page ships with a copy of the record (data/graph.json). Ledger's live record (`ledger serve`, ledger/live.py)
+// keeps the same record in one Relate store and takes in each race as the runner files it. Where one is published
+// ("record" in data/live.json, or ?record=<address> for one on your own machine), the page asks it which records
+// it holds and loads the ones its own copy lacks into the graph in this tab, with the statements the shipped ones
+// were written with: the same graph, a few records ahead. The requests are plain reads of public records and
+// carry nothing about the visitor. With no live record, or one that does not answer, the page is its shipped copy.
+
+const inAddress = new URLSearchParams(location.search);
+let publishedPromise;
+// what the page was published with (data/live.json): where the race runner is, and where the live record is
+function published() {
+  publishedPromise ||= fetch(new URL('./data/live.json', import.meta.url))
+    .then((r) => (r.ok ? r.json() : {}))
+    .catch(() => ({}));
+  return publishedPromise;
+}
+const recordAddress = async () => (inAddress.get('record') || (await published()).record || '').replace(/\/+$/, '') || null;
+
+const liveRecord = { address: null, held: 0, added: [], problem: null, looked: false }; // what it has given this tab
+const fromLive = new Set(); // the records in this tab's graph that came from the live record
+
+async function getLive(url, ms = 20000) {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), ms);
+  try {
+    const response = await fetch(url, { signal: stop.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// One look at the live record: every record it holds that this tab's graph lacks is loaded into the graph. One
+// look at a time (a second waits for the first). `fresh` says a race has just ended, so the live record looks at
+// the runner before it answers. It never throws: a live record that cannot be read is said, and nothing changes.
+let catching = Promise.resolve();
+function catchUp(fresh = false) {
+  catching = catching.then(() => look(fresh));
+  return catching;
+}
+async function look(fresh) {
+  const base = await recordAddress();
+  if (!base) return { added: [] };
+  liveRecord.address = base;
+  const added = [];
+  try {
+    const answer = await getLive(`${base}/runs${fresh ? '?fresh=1' : ''}`);
+    const listed = (answer.runs || []).map((x) => x.run_id);
+    const held = new Set((await ask('MATCH (r:Run) RETURN r.run_id AS run', {})).map((x) => x.run));
+    const missing = listed.filter((run) => !held.has(run));
+    const fetched = missing.map((run) => getLive(`${base}/rows/${run}`));
+    for (const waiting of fetched) waiting.catch(() => {}); // each is awaited below; none may fail unheard
+    for (const [i, run] of missing.entries()) {
+      const rows = await fetched[i];
+      await send({ add: rows.run });
+      stepFiles.set(run, Promise.resolve(rows.steps));
+      fromLive.add(run);
+      liveRecord.added.push(run);
+      added.push(run);
+    }
+    liveRecord.held = listed.length;
+    liveRecord.problem = null;
+    return { added };
+  } catch (error) {
+    liveRecord.problem = String((error && error.message) || error);
+    return { added, problem: liveRecord.problem };
+  } finally {
+    liveRecord.looked = true;
+  }
+}
+
+// When a live run joins the record, in words, for the reports written as it ends.
+const joinsWhen = () => (liveRecord.address ? 'as soon as the runner has filed it (Ledger’s live record takes it in)' : 'at the next import of live races');
+
+// A run that has just ended, into the record at once: the live record is asked to look at the runner now, and
+// what it took in is loaded into this tab's graph. The runner may need a moment to file the record, so the
+// question is asked a few times. False when there is no live record, or it did not take the run in: the run
+// then joins with the next import, as before.
+async function joinRecord(run) {
+  if (!(await recordAddress())) return false;
+  const inGraph = async () => (await ask('MATCH (r:Run {run_id: $run}) RETURN count(r) AS n', { run }))[0].n > 0;
+  for (let tries = 0; tries < 8; tries += 1) {
+    const looked = await catchUp(true);
+    if (await inGraph()) return true;
+    if (looked.problem && tries >= 1) return false;
+    await new Promise((done) => setTimeout(done, 2500));
+  }
+  return false;
+}
+
 const ledgerReady = Promise.all([getJson('./data/questions.json'), getJson('./data/rules.json')]).then(
   ([questions, rules]) => ({ rules, questions, ledger: createLedger(ask, questions, rules, loadSteps) }),
 );
@@ -132,6 +225,12 @@ window.ledgerDemo = {
     return ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, null, { levels, kinds: null });
   },
   stepsLoaded: async () => ({ scenarios: worldsLoaded.size, missing: worldsMissing.size }),
+  // what the live record has given this tab, once the look that is under way has ended
+  liveRecord: async () => {
+    await catching;
+    return { ...liveRecord, added: [...liveRecord.added] };
+  },
+  catchUp: async (fresh = false) => catchUp(fresh),
 };
 
 // ---- small DOM helpers --------------------------------------------------------------------------------------
@@ -610,29 +709,38 @@ async function chooseSecond(model) {
 }
 
 // The verdict for the chosen task and pair, read through the visitor's tolerance and their own rules.
-async function showVerdict(scroll = false) {
+// `keep` is the live panel now on screen, when the verdict is read again because a run started there has just
+// joined the record: everything is drawn again from the graph except that panel, which stays as it is, and the
+// scenario of `ringRun` (the race just run) is the one ringed and opened in the picture. Returns the verdict
+// drawn, or null when a newer choice overtook it.
+async function showVerdict(scroll = false, keep = null, ringRun = null) {
   const mine = ++turn;
   const overrides = Object.keys(state.overrides).length ? state.overrides : null;
   const checks = Object.keys(state.checks).length ? { levels: state.checks, kinds: null } : null;
   const judged = await ledger.verdict(state.task, state.a, state.b, null, rules.good_enough, rules.min_pairs, state.profile, overrides, checks);
+  // where the kept panel is in the window, and the picture above it: both are put back so the page does not jump
+  const held = keep && document.body.contains(keep) ? { top: keep.getBoundingClientRect().top, graph: $('pair-graph') } : null;
   if (judged.verdict === 'no data') {
     // the two have never met on this task: no verdict, and no pretending there is one
     const own = await ask(OWN_RECORD, { version: judged.version, a: state.a, b: state.b });
-    if (mine !== turn) return;
+    if (mine !== turn) return null;
     drawNoRecord(judged, own);
-    shown.v = judged;
-    const drawn = drawPairGraph(judged);
-    $('step-verdict').hidden = false;
-    land(drawLive(judged), drawn, scroll, mine);
-    return;
+  } else {
+    const spec = await ledger.build({ ...judged, suite: null });
+    if (mine !== turn) return null;
+    drawVerdict(spec, judged);
   }
-  const spec = await ledger.build({ ...judged, suite: null });
-  if (mine !== turn) return;
-  drawVerdict(spec, judged);
   shown.v = judged;
-  const drawn = drawPairGraph(judged);
+  if (held) {
+    if (held.graph && $('pair-graph')) $('pair-graph').replaceWith(held.graph); // drawn again in place, below
+    $('live').replaceWith(keep);
+    window.scrollBy({ top: keep.getBoundingClientRect().top - held.top, behavior: 'instant' });
+  }
+  const at = ringRun ? (judged.rounds || []).findIndex((x) => x.run === ringRun) : -1;
+  const drawn = drawPairGraph(judged, at < 0 ? null : at, at >= 0);
   $('step-verdict').hidden = false;
-  land(drawLive(judged), drawn, scroll, mine);
+  if (!held) land(drawLive(judged), drawn, scroll, mine);
+  return judged;
 }
 
 // Where the page comes to rest once the second model is picked. A visitor who can race live is brought to the
@@ -762,7 +870,8 @@ const STATE_WORDS = ['', ': timed out, outcome unknown', ': refused'];
 
 async function replayOf(run) {
   if (!replays.has(run)) {
-    const response = await fetch(new URL(`./data/replays/${run}.json`, import.meta.url));
+    // a record that joined after the page was published has no file here: the live record makes the same one
+    const response = await fetch(fromLive.has(run) ? `${liveRecord.address}/replay/${run}` : new URL(`./data/replays/${run}.json`, import.meta.url));
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     replays.set(run, await response.json());
   }
@@ -1350,7 +1459,7 @@ RETURN l.run_id AS run, l.winner AS winner ORDER BY l.at`;
 // The neighbourhood of the graph a verdict is read from: the test version, the two models, and one dot per
 // scenario both played (a Match), each linked to all three. `ring` marks the scenario just watched; live results
 // (asked from the graph) are drawn dashed, off to the side.
-async function evidenceGraph(v, ring = null) {
+async function evidenceGraph(v, ring = null, justRan = false) {
   const live = await ask(LIVE_BETWEEN, { version: v.version, a: v.a, b: v.b });
   const W = 720;
   const H = 230;
@@ -1386,7 +1495,7 @@ async function evidenceGraph(v, ring = null) {
       n
         ? 'Each dot is one scenario both models played, linked to the test version it used and to each model, and coloured by who won it. Click a dot to watch that scenario.'
         : 'The test version and the two models are in the graph, but no recorded scenario links them yet.',
-      ring !== null ? ' The ringed one is the race you just watched.' : '',
+      ring !== null ? (justRan ? ' The ringed one is the race you just ran: it joined the record a moment ago.' : ' The ringed one is the race you just watched.') : '',
       live.length ? ` The dashed ${live.length === 1 ? 'one is the live race' : 'ones are live races'}: now in the graph and linked the same way, but as a different kind of node, so no verdict counts ${live.length === 1 ? 'it' : 'them'}.` : '',
     ),
   );
@@ -1395,13 +1504,13 @@ async function evidenceGraph(v, ring = null) {
 
 // The one home of that picture in step 3, labelled for what it is: a Relate graph, with the question it was read
 // with and what came back. It is drawn again when a scenario is watched (ringed) and when live races join it.
-async function drawPairGraph(v, ring = null) {
+async function drawPairGraph(v, ring = null, justRan = false) {
   const box = $('pair-graph');
   if (!box) return;
   const version = v.version !== 'all versions' ? v.version : await ledger.currentVersion(v.task);
   const query = questionsText.pair_on_task;
   const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version, conditions: v.conditions ?? null, until: null });
-  const figure = await evidenceGraph(v, ring);
+  const figure = await evidenceGraph(v, ring, justRan);
   if ($('pair-graph') !== box) return;
   box.replaceChildren(
     el('h3', { class: 'pair-graph-title' }, el('span', { class: 'relate-badge' }, 'Relate graph'), ' The evidence behind this answer'),
@@ -1418,12 +1527,12 @@ async function drawPairGraph(v, ring = null) {
     // above it), so the page below does not jump
     $('world-graph') || el('div', { id: 'world-graph', class: 'world-graph' }),
   );
-  await drawWorldGraph(v, ring);
+  await drawWorldGraph(v, ring, justRan);
 }
 
 // Under the dots: one of them opened. The scenario just watched, or the first one, as a graph of its own: the
 // records of that world and what each model had read when it decided. It is the same graph, one level down.
-async function drawWorldGraph(v, ring = null) {
+async function drawWorldGraph(v, ring = null, justRan = false) {
   const box = $('world-graph');
   const rounds = v.rounds || [];
   if (!box) return;
@@ -1452,7 +1561,7 @@ async function drawWorldGraph(v, ring = null) {
       'Each scenario is a small world of linked records, and every step either model took in it is in the graph too. ',
       `In this one they decided differently on ${world.decided_differently.length} of ${plural(world.items.length, 'item')}, and decided before reading a record the item depends on: `,
       `${shortName(v.a)} ${unseen(v.a)}, ${shortName(v.b)} ${unseen(v.b)}. `,
-      ring === null ? el('button', { type: 'button', class: 'quiet small', id: 'world-watch', onclick: () => openRace(v, index) }, 'Watch it fill in') : 'It filled in below as the race played.',
+      ring === null ? el('button', { type: 'button', class: 'quiet small', id: 'world-watch', onclick: () => openRace(v, index) }, 'Watch it fill in') : justRan ? 'This is the race you just ran, read from the graph a moment after it ended.' : 'It filled in below as the race played.',
     ),
     picture.node,
   );
@@ -1467,15 +1576,7 @@ let wantsRunner = false; // set when the visitor asks to sign in from the page
 const askedRunner = new URLSearchParams(location.search).get('runner');
 let basePromise;
 function runnerAddress() {
-  basePromise ||= (async () => {
-    if (askedRunner) return askedRunner;
-    try {
-      const response = await fetch(new URL('./data/live.json', import.meta.url));
-      return response.ok ? (await response.json()).runner : null;
-    } catch {
-      return null;
-    }
-  })();
+  basePromise ||= (async () => askedRunner || (await published()).runner || null)();
   return basePromise;
 }
 function findRunner() {
@@ -1667,8 +1768,14 @@ function smallPrint() {
   if (!foot) return;
   foot.textContent =
     signInOutcome === 'signed'
-      ? 'You are signed in for live runs. The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money from the live budgets shown beside the button. What goes to the runner is the task, the two models, the settings and your sign-in; nothing else. Each live result is sealed and shown beside the record at once; it is counted in the verdict once it has been imported into the record, which happens in batches, not instantly. A verdict counts the races played under its own conditions: one you start at another difficulty or scoring is kept on file, and the verdict says so and leaves it out.'
-      : 'Every verdict on this page rests on recorded matches: finished, sealed and replayable here. The page reads them locally in this browser tab, needs no key and sends nothing you type anywhere. This view cannot start a match. Live races run on a separate Gladiator runner and are open to the hackathon judges for now (Judge sign-in, at the top).';
+      ? `You are signed in for live runs. The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money from the live budgets shown beside the button. What goes to the runner is the task, the two models, the settings and your sign-in; nothing else. ${
+          liveRecord.address
+            ? 'Each live result is sealed, and joins the record as soon as the runner has filed it: Ledger’s live record takes it in, this page loads it into its graph, and the verdict is read again.'
+            : 'Each live result is sealed and shown beside the record at once; it is counted in the verdict once it has been imported into the record, which happens in batches, not instantly.'
+        } A verdict counts the races played under its own conditions: one you start at another difficulty or scoring is kept on file, and the verdict says so and leaves it out.`
+      : `Every verdict on this page rests on recorded matches: finished, sealed and replayable here. The page reads them locally in this browser tab, needs no key and sends nothing you type anywhere.${
+          liveRecord.address ? ' Matches newer than the page are fetched from Ledger’s live record, a plain read of public records, and join the same graph in this tab.' : ''
+        } This view cannot start a match. Live races run on a separate Gladiator runner and are open to the hackathon judges for now (Judge sign-in, at the top).`;
 }
 
 async function announceLive() {
@@ -1854,7 +1961,7 @@ async function drawLive(v) {
   // and the same figures give the expected cost of the run about to start.
   const expect = el('p', { class: 'note', id: 'live-expect' });
   const ownVersion = v.version !== 'all versions' ? v.version : await ledger.currentVersion(v.task);
-  const ownRows = await ask(OWN_RECORD, { version: ownVersion, a: v.a, b: v.b });
+  let ownRows = await ask(OWN_RECORD, { version: ownVersion, a: v.a, b: v.b });
   const ownOf = (m) => ownRows.find((x) => x.model === m);
   const showExpect = () => {
     const runs = Number(runsPick.value);
@@ -1979,10 +2086,11 @@ async function drawLive(v) {
   };
   showBudget(runner.options, session.races_left);
 
-  // The live races on file for the two models chosen: each one written up (who passed, what each got wrong), and
-  // together a first draft of how the pair compares. Shown beside the record and never added to it. The runner
-  // lists every signed-in visitor's races; a race just run here is added from its own sealed record, so the
-  // write-up does not wait on the list.
+  // The live races on file for the two models chosen that the record does not hold yet: each one written up (who
+  // passed, what each got wrong), and together a first draft of how the pair compares, shown beside the record.
+  // The runner lists every signed-in visitor's races; a race just run here is added from its own sealed record,
+  // so the write-up does not wait on the list. Where a live record is published a race joins the record as it
+  // ends, and is then a scenario of the verdict above like any other, not a line here.
   const history = el('div', { id: 'live-history', class: 'live-history', hidden: true });
   let liveRaces = [];
   let liveBatches = [];
@@ -2013,8 +2121,8 @@ async function drawLive(v) {
     const listed = filedHere.filter((x) => !inRecord.has(x.run_id));
     const absorbed = filedHere.length - listed.length;
     joined.hidden = !absorbed;
-    joined.textContent = absorbed ? `${plural(absorbed, 'earlier live race')} between these two ${absorbed === 1 ? 'is' : 'are'} now part of the record: counted in the verdict above, and replayable there.` : '';
-    const between = [...listed.map((x) => (x.a_details ? x : mine.get(x.run_id) || x)), ...[...mine.values()].filter((x) => !listed.some((y) => y.run_id === x.run_id))];
+    joined.textContent = absorbed ? `${plural(absorbed, 'live race')} between these two ${absorbed === 1 ? 'is' : 'are'} part of the record now: read by the verdict above like any other match, and replayable there.` : '';
+    const between = [...listed.map((x) => (x.a_details ? x : mine.get(x.run_id) || x)), ...[...mine.values()].filter((x) => !inRecord.has(x.run_id) && !listed.some((y) => y.run_id === x.run_id))];
     history.hidden = !between.length;
     if (!between.length) return;
     history.replaceChildren(...liveHistory(between, a, b, r));
@@ -2031,17 +2139,51 @@ async function drawLive(v) {
   showBatches();
 
   // what the record says about this pair: it may favour one, lean, name no favourite, or not exist at all
-  const r = v;
-  prior.textContent =
-    (r.verdict === 'no data'
-      ? `${shortName(a)} and ${shortName(b)} have never met on this task in the record. This race would be the first evidence, and one race is not a verdict.`
-      : r.verdict === 'better'
-        ? `On this tested workflow the record favours ${shortName(r.better)}: it won ${r.wins[r.better]} of their ${r.pairs} scenarios.`
-        : r.verdict === 'leaning'
-          ? `On this tested workflow the record leans to ${shortName(r.better)} (${r.wins[r.better]} of ${r.pairs}), not settled.`
-          : `On this tested workflow the record names no favourite between them (${r.wins[a]} to ${r.wins[b]} over ${plural(r.pairs, 'scenario')}).`) +
-    ' Now put that to the test: one new scenario, generated this minute, never seen by either model.';
+  let r = v;
+  const showPrior = () => {
+    prior.textContent =
+      (r.verdict === 'no data'
+        ? `${shortName(a)} and ${shortName(b)} have never met on this task in the record. This race would be the first evidence, and one race is not a verdict.`
+        : r.verdict === 'better'
+          ? `On this tested workflow the record favours ${shortName(r.better)}: it won ${r.wins[r.better]} of their ${r.pairs} scenarios.`
+          : r.verdict === 'leaning'
+            ? `On this tested workflow the record leans to ${shortName(r.better)} (${r.wins[r.better]} of ${r.pairs}), not settled.`
+            : `On this tested workflow the record names no favourite between them (${r.wins[a]} to ${r.wins[b]} over ${plural(r.pairs, 'scenario')}).`) +
+      ' Now put that to the test: one new scenario, generated this minute, never seen by either model.';
+  };
+  showPrior();
   await showTally(a, b, r);
+
+  // A run that has just ended joins the record at once where a live record is published: the verdict above is
+  // read again from the graph, with this panel left as it is, and `note` says what became of the run. With no
+  // live record, or one that has not taken the run in, it says the run joins with the next import, as before.
+  const LATER = 'It is not in the verdict yet: live runs join the record at the next import.';
+  const join = async (run, note, alone = null, ring = false) => {
+    const later = alone ? `It joins the record at the next import: counted in ${shortName(alone)}'s own fitness for the task and shown under "Consistency", never head-to-head.` : LATER;
+    if (!(await recordAddress())) return void (note.textContent = later);
+    note.textContent = 'Joining the record…';
+    try {
+      if (!(await joinRecord(run))) return void (note.textContent = `The live record has not taken it in yet. ${later}`);
+      inRecord.add(run);
+      // the visitor may have moved on to another pair while this was asked: then there is nothing here to redraw
+      const judged = document.body.contains(box) ? await showVerdict(false, box, ring ? run : null) : null;
+      if (judged) {
+        r = judged;
+        showPrior();
+        ownRows = await ask(OWN_RECORD, { version: ownVersion, a: v.a, b: v.b });
+        showExpect();
+      }
+      const counted = judged && (judged.evidence || []).some((e) => e.run === run);
+      note.textContent = alone
+        ? `It is in the record now, as a steadiness check of ${shortName(alone)}: its attempts count in that model's own fitness above, and never as a match.`
+        : counted
+          ? 'It is in the record now, and the verdict above counts it: read again from the graph a moment ago.'
+          : 'It is in the record now. The verdict above leaves it out of the head to head, because it was played under other conditions than the verdict; the note there says which.';
+      recordArrived({ added: [] }); // the line at the top counts it too
+    } catch {
+      note.textContent = later; // whatever went wrong here, the run is sealed and filed: it joins with the import
+    }
+  };
 
   // A batch: every attempt is shown as it ends, then the result of the whole batch.
   const runBatch = async (runs) => {
@@ -2124,6 +2266,9 @@ async function drawLive(v) {
         ),
       );
       follow(batchBox.firstElementChild, 'nearest');
+      const became = el('p', { class: 'note', id: 'batch-joined', role: 'status', 'aria-live': 'polite' });
+      batchBox.append(became);
+      await join(batch.run_id, became, ma === mb ? ma : null);
     } catch (error) {
       if (!refusedBusy(error)) say.textContent = `The batch did not run: ${error.message}`;
     } finally {
@@ -2184,7 +2329,8 @@ async function drawLive(v) {
             : winner === r.better
               ? `Live, ${shortName(winner)} took this scenario too: in line with the record.`
               : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${r.wins[r.better]} of ${r.pairs}, but it is now on file.`;
-      say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. It is not in the verdict yet: live races join the record at the next import.'));
+      const became = el('span', { id: 'live-became' }, LATER);
+      say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. ', became));
       // The winner of this race, said plainly: it did this task better than the other, in this test, with these
       // settings. That is the claim one race can carry; how consistently it would win is a different question.
       const loser = winner === a ? b : a;
@@ -2227,6 +2373,7 @@ async function drawLive(v) {
       // written up below from its own sealed record; it joins the graph and the pair's live history there
       const facts = raceFacts(record, task, a, b);
       mine.set(facts.run_id, facts);
+      await join(facts.run_id, became, null, true);
     } catch (error) {
       if (!refusedBusy(error)) say.textContent = `The live race did not run: ${error.message}`;
     } finally {
@@ -2380,7 +2527,7 @@ function batchTable(x, right = null) {
       el('code', null, x.run_id),
       ', seal ',
       el('code', null, String(x.seal).slice(0, 12)),
-      x.same_model ? '. It joins the record at the next import: counted in this model\'s own fitness for the task and shown under "Consistency", never head-to-head.' : '. A live batch is not in the verdict yet: it joins the record at the next import.',
+      '.',
     ),
   ];
 }
@@ -2536,7 +2683,7 @@ function batchReport(x, title, right = null) {
     `**${headline}**`,
     '',
     ...(batchUnplayed(x) ? [batchUnplayed(x), ''] : []),
-    'This is a live batch. It joins the record (and the verdict) at the next import of live races, and it holds for this test with these settings.',
+    `This is a live batch. It joins the record (and the verdict) ${joinsWhen()}, and it holds for this test with these settings.`,
     '',
     '| Side | Attempts passed | Faults (attempts they showed in) | Cost | Time per attempt |',
     '|---|---|---|---|---|',
@@ -2678,7 +2825,7 @@ function liveReport(record, a, b, title, v) {
     '',
     `Task \`${v.task}\`, version \`${v.version}\`. Raced live: \`${a}\` and \`${b}\`.`,
     '',
-    '**This is one live scenario, generated for this race. It joins the record, and the verdict, at the next import of live races.**',
+    `**This is one live scenario, generated for this race. It joins the record, and the verdict, ${joinsWhen()}.**`,
     '',
     `- Result: ${winner ? `\`${winner}\` took this scenario` : 'no winner'}.`,
     v.verdict === 'no data'
@@ -3168,6 +3315,41 @@ async function showExample() {
 
 // ---- start --------------------------------------------------------------------------------------------------
 
+// The visitor's choices, read again from the graph now that it holds more: the same workflow and models, with
+// whatever the new records changed.
+async function showAgain() {
+  const { task, a, b } = state;
+  await searchFlows();
+  const flow = task && state.flows.flows.find((f) => f.test === task);
+  if (!flow) return;
+  await chooseFlow(flow);
+  if (a && state.task === task) await chooseFirst(a);
+  if (b && state.a === a) await chooseSecond(b);
+}
+
+// What the top of the page says once the live record has been looked at: how much it added to the copy the page
+// was published with, or that it could not be read. Nothing chosen yet: the list of workflows is simply drawn
+// again. Otherwise what is on screen was read before the new records arrived, and a button reads it again.
+async function recordArrived(caught) {
+  const note = $('record-note');
+  if (!liveRecord.address || !note) return;
+  smallPrint();
+  const n = liveRecord.added.length;
+  if (caught.problem && !n) {
+    note.textContent = 'The live record could not be reached just now, so this is the record as this page was published.';
+  } else if (!n) {
+    note.textContent = 'Live record: connected. Nothing is newer than this page.';
+  } else {
+    const matches = (await ask('MATCH (r:Run) RETURN count(r) AS n', {}))[0].n;
+    note.replaceChildren(
+      `Live record: ${n === 1 ? '1 record is' : `${n} records are`} newer than this page (races run since it was published). ${n === 1 ? 'It is' : 'They are'} in the graph now, ${matches} in all, and counted like the rest.`,
+    );
+    if (!state.task) await searchFlows();
+    else if (caught.added.length) note.append(' ', el('button', { type: 'button', id: 'record-show', class: 'quiet small', onclick: (event) => (event.target.remove(), showAgain()) }, 'Show this page with them'));
+  }
+  note.hidden = false;
+}
+
 async function start() {
   const status = $('status');
   try {
@@ -3183,6 +3365,15 @@ async function start() {
   }
   announceLive();
   setUpSignIn();
+  // The live record, if one is published: records newer than this page join the graph. One that answers at once
+  // is counted before the first workflow is listed; a slower one (a host waking up) is not waited for.
+  const caught = catchUp();
+  await Promise.race([caught, new Promise((done) => setTimeout(done, 1200))]);
+  caught.then(async (first) => {
+    await recordArrived(first);
+    // a host that was asleep may not answer the first look in time: one more, once it has had time to wake
+    if (first.problem) setTimeout(async () => recordArrived(await catchUp()), 15000);
+  });
   $('flow-text').disabled = false;
   $('flow-go').disabled = false;
   $('example').disabled = false;

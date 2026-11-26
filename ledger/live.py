@@ -36,7 +36,7 @@ from pathlib import Path
 
 import relate
 
-from ledger import costs, load
+from ledger import costs, load, replay
 from ledger.bridges import Evidence, epoch, gladiator, steps
 
 RUN_ID = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{6}")  # the runner's own form for a run id
@@ -64,6 +64,7 @@ class LiveRecord:
         self.flows = gladiator.Flows()
         self.paths: dict[str, Path] = {}  # run id -> its sealed record on disk
         self.seals: dict[str, str] = {}  # run id -> its seal, for every run in the store
+        self.refused: set[str] = set()  # run ids the runner listed whose record was refused: not asked for again
         self.synced = 0.0  # when the runner was last looked at
         self.problem = ""  # why the last look at the runner failed, if it did
         self._syncing = threading.Lock()
@@ -242,10 +243,14 @@ class LiveRecord:
         try:
             listed = self._fetch("/races")
             ids = sorted({str(x.get("run_id")) for x in [*(listed.get("races") or []), *(listed.get("batches") or [])]})
-            new = [i for i in ids if RUN_ID.fullmatch(i) and i not in self.seals][:MAX_NEW_PER_SYNC]
-            for run_id in new:
+            new = [i for i in ids if RUN_ID.fullmatch(i) and i not in self.seals and i not in self.refused]
+            for run_id in new[:MAX_NEW_PER_SYNC]:
                 if self.take_in(self._fetch(f"/records/{run_id}")):
                     took.append(run_id)
+                else:
+                    # refused once is refused until this service is started again: a sealed record does not
+                    # change, so asking the runner for it on every look would only repeat the refusal
+                    self.refused.add(run_id)
             self.problem = ""
         except (urllib.error.URLError, OSError, ValueError, KeyError) as error:
             self.problem = f"{type(error).__name__}: {str(error)[:200]}"
@@ -277,6 +282,19 @@ class LiveRecord:
             self.flows.apply(run)
         return {"run": run, "steps": steps.compact(run_steps), "seal": seal}
 
+    def replay_for(self, run_id: str) -> dict | None:
+        """One record as the page replays it: every scenario as a timeline per model, the same file `ledger site`
+        writes for a shipped record (ledger/replay.py), so a race that joined after the page was published can
+        be watched like any other."""
+        with self._facts:
+            path, seal = self.paths.get(run_id), self.seals.get(run_id)
+        if path is None or seal is None:
+            return None
+        record = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not gladiator.seal_ok(record):
+            return None
+        return replay.run_replays(costs.corrected(record["body"], costs.read_billed(Path(path), record["sha256"])))
+
     def health(self) -> dict:
         counted = self.rows("MATCH (s:Step) RETURN count(s) AS steps")[0]["steps"]
         return {
@@ -284,6 +302,7 @@ class LiveRecord:
             "records": len(self.runs()),
             "steps": counted,
             "runner": self.runner,
+            "refused": sorted(self.refused),
             "synced_unix": round(self.synced),
             "problem": self.problem or None,
             "loader": load.loader_stamp(),
@@ -291,12 +310,14 @@ class LiveRecord:
 
 
 def handler_for(live: LiveRecord, origins: set[str]):
-    """The HTTP face of a live record: four read-only answers and one nudge.
+    """The HTTP face of a live record: five read-only answers and one nudge.
 
     GET /health            is it up, how much it holds, when it last looked at the runner
     GET /runs[?fresh=1]    every record in the store (id and seal), after a look at the runner if one is due
+                           (fresh=1: the page says a race has just ended, so look now)
     GET /rows/<run_id>     one record as rows for the page's own graph
-    POST /sync             look at the runner now (the page sends this when a race ends)
+    GET /replay/<run_id>   one record as the page replays it, scenario by scenario
+    POST /sync             look at the runner now
     Nothing in a request is ever fetched, run or written: a request can only make the service look at the runner
     it was started with. Only a body's size is read, and nothing a request carries is logged."""
 
@@ -344,6 +365,12 @@ def handler_for(live: LiveRecord, origins: set[str]):
                         return self._json(404, {"error": "No such record."})
                     # a sealed record never changes, but the account of its workflow can grow: a short life
                     return self._json(200, found, cache="public, max-age=60")
+                if path.startswith("/replay/"):
+                    run_id = path[len("/replay/") :]
+                    found = live.replay_for(run_id) if RUN_ID.fullmatch(run_id) else None
+                    if found is None:
+                        return self._json(404, {"error": "No such record."})
+                    return self._json(200, found, cache="public, max-age=3600")
                 return self._json(404, {"error": "Nothing here."})
             except Exception as error:  # noqa: BLE001  an answer, never a dropped connection
                 return self._json(500, {"error": f"{type(error).__name__}"})

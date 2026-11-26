@@ -85,6 +85,22 @@ leaves exactly the graph that building from all of them leaves (`tests/test_live
 what a `TestVersion` says of its workflow (text, tools, package facts) is one account made from every record on
 file (`Flows` in `ledger/bridges/gladiator.py`), not what the last record happened to say.
 
+What it answers, all of it read-only: `GET /health`; `GET /runs` (every record it holds, by id and seal, after a
+look at the runner when one is due; `?fresh=1` when a race has just ended); `GET /rows/<run_id>` (one record as
+the rows of this schema: the run, and its steps in the small form of `ledger/bridges/steps.py`);
+`GET /replay/<run_id>` (the same record as the page replays it); and `POST /sync` (look at the runner now). For a
+given set of records these are the very rows, step file and replay file `ledger site` ships to the page.
+
+**The page reads it.** A page that knows of a live record (`record` in `site/data/live.json`, or `?record=` in
+its address) asks for `/runs` when it loads and loads every record its own copy lacks into the graph in the tab,
+with the statements the shipped ones were written with (`addRun` in `site/worker.js`, the order of `write_to`).
+Steps of such a record come from the same answer, loaded for the scenarios a question is about, as for a shipped
+one. When a race started from the page ends, the page asks again (`?fresh=1`) until the record is there, loads
+it and reads the verdict again. A page published before some records, reading a live record that holds them, is
+then the page published after them: the same graph, node for node and link for link, and the command line's
+answers (`site/check-live.cjs`, with the real service). With no live record, or one that does not answer, the page
+is its shipped copy and says so.
+
 ## Steps: how an attempt got to its result
 
 A run record also keeps every step of every attempt (`turns`: the tool called, its arguments, what the simulated
@@ -185,7 +201,8 @@ from then on a live race between two models is a `Run` with `Match` and `Attempt
 in verdicts, costs and reports that are read under the conditions it was played under (above). A batch of one model against itself is loaded as `SelfCheck` and `SelfAttempt`
 (above) and is never a `Match`.
 
-Until then, in the browser session that ran it: the result joins the in-browser graph as its own kind of node,
+Where the page reads a live record (above), a race is a `Run` in the page's graph as soon as it ends. Where it
+does not, then until the import, in the browser session that ran it: the result joins the in-browser graph as its own kind of node,
 so it can be drawn beside the recorded matches at once without being counted twice later:
 `(LiveMatch {run_id, winner, seal})-[:RAN_ON]->(TestVersion)` and `-[:PLAYED_BY]->(Model)`. No question that
 answers a verdict matches `LiveMatch`, and it is never in the shipped store.
