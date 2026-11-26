@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { costMarkdown, createLedger, evidenceMarkdown, expandSteps } from './ledger.js';
+import { costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -231,6 +231,12 @@ window.ledgerDemo = {
     return { ...liveRecord, added: [...liveRecord.added] };
   },
   catchUp: async (fresh = false) => catchUp(fresh),
+  // what one race showed, and why a scenario went to its winner: the wording rules, for site/check.cjs
+  raceOutcome: async (facts) => {
+    await ledgerReady;
+    return raceOutcome(facts);
+  },
+  whyTaken: async (round, a) => whyTaken(round, a),
 };
 
 // ---- small DOM helpers --------------------------------------------------------------------------------------
@@ -279,6 +285,33 @@ let searchTurn = 0;
 const shortName = (id) => (id ? names.get(id) || id.split(':').pop().split('/').pop() : '');
 const modelLabel = (id) => [el('span', { class: 'name' }, shortName(id)), el('span', { class: 'id' }, id)];
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// ---- how an attempt ended, in the page's three words ---------------------------------------------------------
+//
+// A test passes an attempt only when the result is right and the process it sets was followed. The page calls that
+// a clean run and keeps the two apart everywhere, because an attempt that got every decision right and skipped a
+// step has not failed the job: how serious the skipped step is, is the reader's call (the fault levels).
+//   clean    the right result and every step the test asks for (what the test itself calls a pass)
+//   skipped  the right result, with a step skipped
+//   wrong    a decision wrong or left undone
+const endOf = (right, clean) => (clean ? 'clean' : right ? 'skipped' : 'wrong');
+const END_LABEL = { clean: '✓ Clean run', skipped: 'Right result, a step skipped', wrong: '✕ Wrong result', none: '✕ No result' };
+const endMark = (state) => el('strong', { class: `end ${state}` }, END_LABEL[state]);
+
+// Why a scenario went to its winner, from how both attempts ended and the engine's rule. `r` is a round of a
+// verdict (winner, rule, a_right, a_passed, b_right, b_passed) and `a` the model on the first side. A scenario
+// can go to a model on a tie-break when neither ran it clean, and the words must not call that a win on the job.
+function whyTaken(r, a) {
+  if (r.winner === 'tie' || !r.winner) return { kind: 'tie', text: 'nothing between them' };
+  const [wr, wc, lr, lc] = r.winner === a ? [r.a_right, r.a_passed, r.b_right, r.b_passed] : [r.b_right, r.b_passed, r.a_right, r.a_passed];
+  if (wc && lc) return { kind: 'efficiency', text: 'both ran it clean, and its run was the more efficient' };
+  if (wc && lr) return { kind: 'process', text: 'both got the right result, and only it ran clean: the other skipped a step' };
+  if (wc) return { kind: 'result', text: 'only it got the right result' };
+  if (wr && lr) return { kind: 'unclean', text: 'both got the right result and neither ran clean, so it went on efficiency' };
+  if (wr) return { kind: 'result', text: 'only it got the right result, though it skipped a step' };
+  if (lr) return { kind: 'split', text: 'neither ran clean, and the tie-break went to it though only the other got every decision right' };
+  return { kind: 'neither', text: r.rule === 'progress' ? 'neither got the right result, and it got further' : 'neither got the right result, so it went on efficiency' };
+}
 
 // ---- step 1: flows ----------------------------------------------------------------------------------------
 
@@ -793,7 +826,7 @@ function drawNoRecord(v, own) {
       'table',
       { class: 'own' },
       el('caption', null, 'Each model\'s own record on this task, against other opponents'),
-      el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Model'), el('th', { scope: 'col' }, 'Attempts with the right result'), el('th', { scope: 'col' }, 'Right process too'), el('th', { scope: 'col' }, 'Cost per attempt'))),
+      el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Model'), el('th', { scope: 'col' }, 'Attempts with the right result'), el('th', { scope: 'col' }, 'Of those, clean runs'), el('th', { scope: 'col' }, 'Cost per attempt'))),
       el('tbody', null, row(v.a), row(v.b)),
     ),
     el('div', { id: 'pair-graph', class: 'pair-graph' }),
@@ -948,8 +981,10 @@ function raceLane(id, cls, line, tools, span) {
   const [gTokens, vTokens] = gauge('tokens');
   const result = el('p', { class: 'outcome', hidden: true });
   const faults = Object.entries(line.faults);
+  // a replay made before `right` was written (one read from an older live record) says it by its counts
+  const right = line.right ?? (line.items ? line.correct === line.items : line.passed);
   result.append(
-    el('strong', { class: line.passed ? 'pass' : 'fail' }, line.passed ? '✓ Passed' : '✕ Did not pass'),
+    endMark(endOf(right, line.passed)),
     line.items ? ` · ${line.correct} of ${line.items} items right` : '',
     faults.length ? ` · ${faults.map(([name, n]) => `${name}${n > 1 ? ` ×${n}` : ''}`).join(', ')}` : ' · no faults',
   );
@@ -1009,10 +1044,7 @@ async function openRace(v, index) {
   let clock = 0;
   let playing = false;
   let before = 0;
-  const how = { both: 'both passed, and its run was cheaper and faster', sole: 'it was the only one to pass', neither: round.rule === 'progress' ? 'neither passed, and it got further' : 'neither passed, and its run cost less' }[
-    round.a_passed && round.b_passed ? 'both' : round.a_passed || round.b_passed ? 'sole' : 'neither'
-  ];
-  const finish = el('p', { class: 'finish', id: 'race-finish', hidden: true }, round.winner === 'tie' ? 'This scenario was a tie.' : `${shortName(round.winner)} took this scenario: ${how}.`);
+  const finish = el('p', { class: 'finish', id: 'race-finish', hidden: true }, round.winner === 'tie' ? 'This scenario was a tie.' : `${shortName(round.winner)} took this scenario: ${whyTaken(round, a).text}.`);
   const play = el('button', { type: 'button', id: 'race-play' }, 'Play');
   racePicture = null;
   raceClock = () => clock;
@@ -1362,7 +1394,7 @@ function workedPanel(v) {
         { class: m.model === v.a ? 'a' : 'b' },
         el('strong', null, shortName(m.model)),
         `: in ${m.attempts_with} of ${plural(m.attempts, 'attempt')}`,
-        m.attempts_with ? ` (${plural(m.times, 'time')}). ${m.right_with} of those still got every decision right, and ${m.passed_with} passed the test's own check.` : '.',
+        m.attempts_with ? ` (${plural(m.times, 'time')}). ${m.right_with} of those still got every decision right, and ${m.passed_with} were counted as clean runs by the test.` : '.',
         c.grader_counts ? ` The grader counted ${m.grader_attempts_with || 0}.` : '',
       );
     box.replaceChildren(
@@ -1665,7 +1697,7 @@ function liveLane(id, cls) {
       now.textContent = e.error ? `Stopped: ${e.error}` : 'Finished.';
       result.hidden = false;
       result.replaceChildren(
-        el('strong', { class: e.passed ? 'pass' : 'fail' }, e.passed ? '✓ Passed' : '✕ Did not pass'),
+        endMark(details.items || e.passed ? endOf(rightResult(details), e.passed) : 'none'),
         details.items ? ` · ${details.correct} of ${details.items} items right` : '',
         faults.length ? ` · ${faults.join(', ')}` : e.error ? '' : ' · no faults',
       );
@@ -1977,11 +2009,11 @@ async function drawLive(v) {
       return el(
         'span',
         weak ? { class: 'expect-weak' } : null,
-        `${shortName(m)} got the right result in ${o.right} of ${o.attempts} recorded attempts on this task (${percent(rate)}) and followed the test's process too in ${o.passed}, at about $${fixed(o.cost_per_attempt, 4)} an attempt`,
+        `${shortName(m)} got the right result in ${o.right} of ${o.attempts} recorded attempts on this task (${percent(rate)}) and ran it clean in ${o.passed}, at about $${fixed(o.cost_per_attempt, 4)} an attempt`,
         weak
           ? `: well short of the ${percent(rules.good_enough)} this page asks of a model, so expect wrong results in most scenarios. `
           : stops
-            ? `. The test passes an attempt only when the process is right too, so with the early stop on, this batch is likely to end before its last scenario. `
+            ? `. The early stop counts clean runs (the right result and every step the test asks for), so with it on, this batch is likely to end before its last scenario. `
             : '. ',
       );
     });
@@ -2191,7 +2223,7 @@ async function drawLive(v) {
     running = true;
     ready();
     say.textContent = '';
-    box.querySelector('#live-winner')?.remove();
+    box.querySelector('#live-outcome')?.remove();
     const lanes = batchLanes(ma, mb, runs);
     const clock = el('strong', null, '0 s');
     const began = Date.now();
@@ -2297,6 +2329,7 @@ async function drawLive(v) {
   go.addEventListener('click', async () => {
     if (Number(runsPick.value) > 1) return runBatch(Number(runsPick.value));
     batchBox.replaceChildren();
+    const before = r; // the record as it stood before this race: what each model usually does
     running = true;
     ready();
     say.textContent = '';
@@ -2331,26 +2364,13 @@ async function drawLive(v) {
               : `Live, ${shortName(winner)} took this scenario: against the record. One upset does not overturn ${r.wins[r.better]} of ${r.pairs}, but it is now on file.`;
       const became = el('span', { id: 'live-became' }, LATER);
       say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. ', became));
-      // The winner of this race, said plainly: it did this task better than the other, in this test, with these
-      // settings. That is the claim one race can carry; how consistently it would win is a different question.
-      const loser = winner === a ? b : a;
-      const res = (side) => ((record.body.contestants[side] || {}).results || [])[0] || {};
-      const [pa, pb] = [Boolean(res('A').passed), Boolean(res('B').passed)];
-      const how = pa && pb ? 'Both passed; it did the job for less money and time.' : pa || pb ? 'It passed the test and the other did not.' : 'Neither passed; it got further through the job.';
-      box.querySelector('#live-winner')?.remove();
-      say.before(
-        winner
-          ? el(
-              'div',
-              { class: 'band win', id: 'live-winner' },
-              el('p', { class: 'band-kind' }, 'Winner of this live race'),
-              el('p', { class: 'headline' }, `${shortName(winner)} won`),
-              el('p', null, `It did this task better than ${shortName(loser)} in this test, with these settings: ${offered.name || task}, ${level.value} difficulty, ${profile.value} scoring, the same fresh scenario for both. ${how}`),
-              el('p', { class: 'small' }, 'That is what one race shows. How consistently it would win takes more races.'),
-            )
-          : el('div', { class: 'band even', id: 'live-winner' }, el('p', { class: 'band-kind' }, 'This live race'), el('p', { class: 'headline' }, 'No winner'), el('p', { class: 'small' }, 'Neither model did this scenario better than the other.')),
-      );
-      follow($('live-winner'), 'nearest');
+      // What this race showed, said from what happened: a winner's box only when the winner did the job, and
+      // beside each model's result how usual that is for it in the record as it stood before the race.
+      const facts = raceFacts(record, task, a, b);
+      const usual = (m) => (before.fit && before.fit[m]) || ownOf(m) || null;
+      box.querySelector('#live-outcome')?.remove();
+      say.before(outcomeBox(facts, a, b, usual, `${offered.name || task}, ${level.value} difficulty, ${profile.value} scoring`));
+      follow($('live-outcome'), 'nearest');
       const liveText = liveReport(record, a, b, task, r);
       window.ledgerDemo.lastLiveReport = liveText;
       unsavedLive = true;
@@ -2371,7 +2391,6 @@ async function drawLive(v) {
         ),
       );
       // written up below from its own sealed record; it joins the graph and the pair's live history there
-      const facts = raceFacts(record, task, a, b);
       mine.set(facts.run_id, facts);
       await join(facts.run_id, became, null, true);
     } catch (error) {
@@ -2443,7 +2462,7 @@ function batchUnplayed(x) {
   if (!missing) return null;
   if (x.early_stop) {
     const e = x.early_stop;
-    return `Stopped early: ${shortName(e.model)} did not pass ${e.failed} of the ${e.runs} scenarios asked for, so it could no longer pass ${percent(e.pass_rate)} of them. No further scenario was started, which saved the rest of the money. ${plural(x.pairs, 'scenario')} ${x.pairs === 1 ? 'was' : 'were'} played by both lanes, and every count here is over those.`;
+    return `Stopped early: ${shortName(e.model)} did not run ${e.failed} of the ${e.runs} scenarios asked for clean, so it could no longer run ${percent(e.pass_rate)} of them clean. No further scenario was started, which saved the rest of the money. ${plural(x.pairs, 'scenario')} ${x.pairs === 1 ? 'was' : 'were'} played by both lanes, and every count here is over those.`;
   }
   const who = [x.a_not_run ? `${shortName(x.a)}${x.same_model ? ' (lane 1)' : ''} did not play ${x.a_not_run}` : '', x.b_not_run ? `${shortName(x.b)}${x.same_model ? ' (lane 2)' : ''} did not play ${x.b_not_run}` : ''].filter(Boolean).join('; ');
   return `Only ${x.pairs} of the ${x.runs} scenarios were played by both lanes: ${who}. The batch reached its spending cap, or a provider stopped answering. Those scenarios are left out of every count here.`;
@@ -2453,7 +2472,7 @@ function batchSettings(x) {
   return `${plural(x.pairs, 'fresh scenario')}${x.pairs < x.runs ? ` (of ${x.runs} asked for)` : ''}, ${x.difficulty} difficulty, ${x.profile} scoring`;
 }
 
-// The headline of a batch: a winner for two models, a pass rate for one model against itself.
+// The headline of a batch: a winner for two models, a share of clean runs for one model against itself.
 function batchBand(x) {
   const unplayed = batchUnplayed(x);
   const warn = unplayed ? el('p', { class: 'band-warn', id: 'batch-unplayed' }, unplayed) : null;
@@ -2465,7 +2484,7 @@ function batchBand(x) {
       'div',
       { class: `band ${attempts && passed === attempts ? 'win' : 'even'}`, id: 'batch-band' },
       el('p', { class: 'band-kind' }, 'Steadiness check'),
-      el('p', { class: 'headline' }, attempts ? `${shortName(x.a)} passed ${passed} of ${attempts} attempts (${percent(passed / attempts)})` : `${shortName(x.a)} completed no attempts`),
+      el('p', { class: 'headline' }, attempts ? `${shortName(x.a)} ran ${passed} of ${attempts} attempts clean (${percent(passed / attempts)})` : `${shortName(x.a)} completed no attempts`),
       el('p', null, `One model on both lanes, in this test, with these settings: ${batchSettings(x)}. Given the same scenario twice, it ended the same way in ${x.same_result} of ${x.pairs}.`),
       warn,
       attempts ? el('p', { class: 'small' }, `What ${plural(attempts, 'attempt')} can show: its real failure rate on this test is unlikely to be above ${percent(ceiling)}. More runs narrow that.`) : null,
@@ -2494,7 +2513,7 @@ function batchBand(x) {
   );
 }
 
-// Both sides of a batch as a small table: attempts passed, the faults that showed, money and time.
+// Both sides of a batch as a small table: clean runs, the faults that showed, money and time.
 function batchTable(x, right = null) {
   const soft = batchRight(x, right);
   const row = (s, label) => {
@@ -2515,7 +2534,7 @@ function batchTable(x, right = null) {
     el(
       'table',
       { class: 'own batch-table' },
-      el('thead', null, el('tr', null, ['', 'Attempts passed', 'Cost per attempt', 'Faults (attempts they showed in)', 'Cost in all', 'Time per attempt'].map((h) => el('th', { scope: 'col' }, h)))),
+      el('thead', null, el('tr', null, ['', 'Clean runs', 'Cost per attempt', 'Faults (attempts they showed in)', 'Cost in all', 'Time per attempt'].map((h) => el('th', { scope: 'col' }, h)))),
       el('tbody', null, row('a', x.same_model ? `${shortName(x.a)}, lane 1` : shortName(x.a)), row('b', x.same_model ? `${shortName(x.b)}, lane 2` : shortName(x.b))),
     ),
     soft ? el('p', { class: 'note', id: 'batch-right' }, soft) : null,
@@ -2532,7 +2551,7 @@ function batchTable(x, right = null) {
   ];
 }
 
-// In words: how many of each lane's attempts that did not pass had every decision right. `right` is counted from
+// In words: how many of each lane's attempts that were not clean runs had every decision right. `right` is counted from
 // the attempts as they ended in this browser ({a, b}); a batch read from the runner's list has no such count.
 function batchRight(x, right) {
   if (!right) return null;
@@ -2541,9 +2560,9 @@ function batchRight(x, right) {
     ['b', x.same_model ? `${shortName(x.b)}, lane 2` : shortName(x.b)],
   ]
     .filter(([s]) => right[s])
-    .map(([s, label]) => `${label}: ${right[s]} of the ${x[`${s}_attempts`] - x[`${s}_passed`]} that did not pass`);
+    .map(([s, label]) => `${label}: ${right[s]} of the ${x[`${s}_attempts`] - x[`${s}_passed`]} that were not clean runs`);
   if (!lanes.length) return null;
-  return `Every decision right, and still not passed (a required step was skipped, such as deciding before looking a record up): ${lanes.join('; ')}. To pass, an attempt needs the right result and the right process.`;
+  return `Right result, with a step skipped (such as deciding before looking a record up): ${lanes.join('; ')}. A clean run needs the right result and every step the test asks for; a skipped step is a fault with a level, not a wrong answer.`;
 }
 
 // The squares of a batch in progress: one per scenario on each lane. A square counts the steps of its attempt
@@ -2570,16 +2589,16 @@ function batchLegend(same) {
     'p',
     { class: 'note small', id: 'batch-legend' },
     el('span', { class: 'bkey pass' }, '✓'),
-    ' passed · ',
-    el('span', { class: 'bkey fail' }, '✕'),
-    ' did not pass: a decision was wrong or left undone · ',
+    ' clean run · ',
     el('span', { class: 'bkey soft' }, '!'),
-    ' did not pass, though every decision was right: a required step was skipped, such as deciding before looking a record up · ',
+    ' right result, a step skipped (such as deciding before looking a record up) · ',
+    el('span', { class: 'bkey fail' }, '✕'),
+    ' wrong result: a decision was wrong or left undone · ',
     el('span', { class: 'bkey skip' }, '–'),
     ' not played.',
     same
       ? ''
-      : ' A ring marks the lane that won that scenario. A scenario is won by passing where the other did not. When both passed, or neither did, it goes to the one that got further, and then to the one that did it with fewer mistakes, less money, fewer tokens and less time. So a model can win a scenario it did not pass.',
+      : ' A ring marks the lane that took that scenario. A scenario goes to the lane that ran it clean where the other did not. When both did, or neither did, it goes to the one that got further, and then to the one that did it with fewer mistakes, less money, fewer tokens and less time. So a scenario can be taken by a run that was not clean, and lost by one with every decision right.',
   );
 }
 
@@ -2592,14 +2611,14 @@ function batchLanes(a, b, runs) {
     const steps = new Map(); // attempt -> steps so far
     let done = 0;
     let passed = 0;
-    let soft = 0; // did not pass with every decision right
+    let soft = 0; // the right result, with a step skipped
     let wins = null; // scenarios won, once the batch has been judged
     let all = 0;
     const say = () =>
       (count.textContent =
-        `${done} of ${runs} done · ${passed} passed` +
-        (soft ? ` · ${soft} more had every decision right` : '') +
-        (wins === null ? '' : ` · won ${plural(wins, 'scenario')}`) +
+        `${done} of ${runs} done · ${plural(passed, 'clean run')}` +
+        (soft ? ` · ${soft} more right with a step skipped` : '') +
+        (wins === null ? '' : ` · took ${plural(wins, 'scenario')}`) +
         ` · ${plural(all, 'step')} so far`);
     return {
       node: el('div', { class: `batch-lane ${cls}` }, el('p', { class: 'batch-lane-name' }, el('strong', null, label), ' ', count), el('div', { class: 'bsqs' }, squares), latest),
@@ -2624,7 +2643,7 @@ function batchLanes(a, b, runs) {
         sq.className = `bsq ${what}${right ? ' soft' : ''}`;
         sq.textContent = right ? '!' : { pass: '✓', fail: '✕', skip: '–' }[what];
         sq.title = `Scenario ${e.attempt}: ${
-          right ? `did not pass, though every decision was right (${stepsSkipped(e.grade_details)})` : { pass: 'passed', fail: 'did not pass: a decision was wrong or left undone', skip: 'not played' }[what]
+          right ? `right result, a step skipped (${stepsSkipped(e.grade_details)})` : { pass: 'a clean run', fail: 'wrong result: a decision was wrong or left undone', skip: 'not played' }[what]
         }`;
         done += 1;
         passed += what === 'pass' ? 1 : 0;
@@ -2656,8 +2675,8 @@ function batchLanes(a, b, runs) {
 // One line for a batch already on file.
 function batchLine(x) {
   const text = x.same_model
-    ? `${shortName(x.a)} against itself: passed ${x.a_passed + x.b_passed} of ${x.a_attempts + x.b_attempts} attempts, same ending in ${x.same_result} of ${x.pairs} scenarios`
-    : `${shortName(x.a)} ${x.a_wins}, ${shortName(x.b)} ${x.b_wins}${x.ties ? `, ${x.ties} level` : ''} over ${plural(x.pairs, 'scenario')} (passed ${x.a_passed} of ${x.a_attempts} and ${x.b_passed} of ${x.b_attempts})`;
+    ? `${shortName(x.a)} against itself: ${x.a_passed + x.b_passed} clean runs in ${x.a_attempts + x.b_attempts} attempts, same ending in ${x.same_result} of ${x.pairs} scenarios`
+    : `${shortName(x.a)} ${x.a_wins}, ${shortName(x.b)} ${x.b_wins}${x.ties ? `, ${x.ties} level` : ''} over ${plural(x.pairs, 'scenario')} (clean runs: ${x.a_passed} of ${x.a_attempts} and ${x.b_passed} of ${x.b_attempts})`;
   return el('li', null, text, el('span', { class: 'note' }, ` · ${x.difficulty}, ${x.profile} · $${fixed(x.spent_usd, 4)} · `, el('code', null, x.run_id)));
 }
 
@@ -2671,7 +2690,7 @@ function batchReport(x, title, right = null) {
   const attempts = x.a_attempts + x.b_attempts;
   const passed = x.a_passed + x.b_passed;
   const headline = x.same_model
-    ? `\`${x.a}\` on both lanes passed ${passed} of ${attempts} attempts and ended the same way in ${x.same_result} of ${x.pairs} scenarios. With ${attempts} attempts, its real failure rate on this test is unlikely to be above ${percent(failureCeiling(attempts - passed, attempts))}.`
+    ? `\`${x.a}\` on both lanes ran ${passed} of ${attempts} attempts clean and ended the same way in ${x.same_result} of ${x.pairs} scenarios. With ${attempts} attempts, its real failure rate on this test is unlikely to be above ${percent(failureCeiling(attempts - passed, attempts))}.`
     : x.a_wins === x.b_wins
       ? `Level: \`${x.a}\` and \`${x.b}\` won ${x.a_wins} scenarios each${x.ties ? `, ${x.ties} had no winner` : ''}.`
       : `\`${x.a_wins > x.b_wins ? x.a : x.b}\` won ${Math.max(x.a_wins, x.b_wins)} of ${x.pairs} scenarios against \`${x.a_wins > x.b_wins ? x.b : x.a}\` (${Math.min(x.a_wins, x.b_wins)} won${x.ties ? `, ${x.ties} level` : ''}). Between two equally good models a split this lopsided would happen ${chance(x.p_value)} of the time.`;
@@ -2685,7 +2704,7 @@ function batchReport(x, title, right = null) {
     ...(batchUnplayed(x) ? [batchUnplayed(x), ''] : []),
     `This is a live batch. It joins the record (and the verdict) ${joinsWhen()}, and it holds for this test with these settings.`,
     '',
-    '| Side | Attempts passed | Faults (attempts they showed in) | Cost | Time per attempt |',
+    '| Side | Clean runs | Faults (attempts they showed in) | Cost | Time per attempt |',
     '|---|---|---|---|---|',
     side('a', x.same_model ? `${x.a}, lane 1` : x.a),
     side('b', x.same_model ? `${x.b}, lane 2` : x.b),
@@ -2722,6 +2741,115 @@ function sideOf(x, model) {
   return { passed: x[`${s}_passed`], cost: x[`${s}_cost_usd`] || 0, details: x[`${s}_details`] || null, termination: x[`${s}_termination`], seconds: x[`${s}_seconds`] || 0 };
 }
 
+// One side of a race as the facts its outcome is read from: did it get the right result, did it run clean, and
+// which steps it skipped (the faults that are about process, not about a decision).
+function endingOf(side) {
+  const d = side.details || {};
+  const graded = Boolean(side.details && d.items);
+  const slips = Object.entries(rules.fault_counters)
+    .filter(([counter]) => d[counter] && !DECISION_COUNTERS.has(counter))
+    .map(([counter, name]) => `${name}${d[counter] > 1 ? ` ×${d[counter]}` : ''}`);
+  if (rules.ending_faults[side.termination]) slips.push(rules.ending_faults[side.termination]);
+  const clean = Boolean(side.passed);
+  return { graded, clean, right: clean || (graded && rightResult(d)), items: d.items || 0, correct: d.correct || 0, slips, cost: side.cost || 0, seconds: side.seconds || 0 };
+}
+
+// What one race showed, said from what actually happened. A scenario always goes to somebody in the engine's
+// count (success, then how far each got, then efficiency), but that is only a win on the job when the winner did
+// the job: got the right result, cleanly or more cleanly than the other. Two runs that both cut a corner, or two
+// wrong results, are said as that, with who is ahead on the tie-break and no winner's box (owner, 2026-11-26).
+//   kind: efficiency | process | result | unclean | split | neither | tie      tone: win | mixed | stop | even
+function raceOutcome({ a, b, winner, A, B }) {
+  const [w, l, W, L] = winner === a ? [a, b, A, B] : winner === b ? [b, a, B, A] : [null, null, null, null];
+  const n = shortName;
+  const got = (x) => (x.graded ? `${x.correct} of ${x.items} items right` : 'no result on file');
+  const slips = (x) => (x.slips.length ? x.slips.join(', ') : 'a step the test asks for');
+  const spent = (x) => `$${fixed(x.cost, 4)} in ${fixed(x.seconds, 0)} s`;
+  const ahead = w ? `${n(w)} is ahead on efficiency (${spent(W)}, against ${spent(L)}).` : 'There was nothing between them on efficiency either.';
+  if (A.right && B.right) {
+    if (A.clean && B.clean) {
+      if (!w) return { kind: 'tie', tone: 'even', headline: 'No winner', body: 'Both got every decision right and followed every step the test asks for, with nothing between them on cost and time.' };
+      return { kind: 'efficiency', tone: 'win', headline: `${n(w)} won on efficiency`, body: `Both got every decision right and followed every step the test asks for. ${n(w)} did it for ${spent(W)}, against ${spent(L)}.` };
+    }
+    if (W && W.clean) return { kind: 'process', tone: 'win', headline: `${n(w)} won on process`, body: `Both got every decision right. ${n(l)} skipped a step the test asks for (${slips(L)}), so only ${n(w)} ran it clean.` };
+    return {
+      kind: 'unclean',
+      tone: 'mixed',
+      headline: 'Both right, neither clean',
+      body: `Both got every decision right, and both skipped a step the test asks for (${n(a)}: ${slips(A)}; ${n(b)}: ${slips(B)}), so neither passed the test as written. ${ahead}${w ? ' That is a tie-break between two runs that both cut a corner, not a win on the job.' : ''}`,
+    };
+  }
+  if (A.right !== B.right) {
+    const [r, o, R, O] = A.right ? [a, b, A, B] : [b, a, B, A];
+    if (w === r) return { kind: 'result', tone: 'win', headline: `${n(w)} won: it got the right result`, body: `${n(o)} did not (${got(O)}).${R.clean ? '' : ` ${n(r)} skipped a step on the way (${slips(R)}), so the test as written did not pass it either.`}` };
+    return { kind: 'split', tone: 'mixed', headline: 'No clear winner', body: `Only ${n(r)} got every decision right, and it skipped a step (${slips(R)}), so neither passed the test as written.${w ? ` The tie-break went to ${n(w)}.` : ''}` };
+  }
+  const further = w && W.graded && L.graded && W.items && L.items && W.correct / W.items > L.correct / L.items;
+  return {
+    kind: 'neither',
+    tone: 'stop',
+    headline: 'Neither got the right result',
+    body: `${n(a)}: ${got(A)}. ${n(b)}: ${got(B)}.${w ? ` ${n(w)} ${further ? 'got further' : 'is ahead on efficiency'}, which settles the scenario in the count, but nobody did the job.` : ''}`,
+  };
+}
+
+// The box under a live race: what happened, how usual that is for each model, and under which settings.
+// `usual(model)` gives what the record said of that model on this task before the race ({attempts, right,
+// passed}), or null. A result is "as usual" when the record shows the same in at least half of the model's
+// attempts and "unusual for it" in a fifth or fewer, so a visitor can tell a surprise from the expected.
+function outcomeBox(x, a, b, usual, settings) {
+  const ends = { [a]: endingOf(sideOf(x, a)), [b]: endingOf(sideOf(x, b)) };
+  const out = raceOutcome({ a, b, winner: x.winner, A: ends[a], B: ends[b] });
+  const tag = (share) => (share >= 0.5 ? 'as usual' : share <= 0.2 ? 'unusual for it' : 'on record');
+  const row = (m, cls) => {
+    const e = ends[m];
+    const u = usual(m);
+    const known = u && u.attempts > 0;
+    const rightShare = known ? u.right / u.attempts : 0;
+    const cleanShare = known ? u.passed / u.attempts : 0;
+    const skippedShare = known ? (u.right - u.passed) / u.attempts : 0;
+    return el(
+      'tr',
+      null,
+      el('th', { scope: 'row', class: cls }, shortName(m)),
+      el(
+        'td',
+        null,
+        e.graded ? `${e.correct} of ${e.items} right` : e.right ? 'right' : 'no result',
+        el('small', null, known ? `${tag(e.right ? rightShare : 1 - rightShare)}: right in ${u.right} of ${u.attempts}` : 'no record on this task yet'),
+      ),
+      el(
+        'td',
+        null,
+        !e.right ? 'not judged: the result was wrong' : e.clean ? 'every step followed' : `skipped: ${e.slips.length ? e.slips.join(', ') : 'a step the test asks for'}`,
+        e.right
+          ? el('small', null, !known ? 'no record on this task yet' : e.clean ? `${tag(cleanShare)}: clean in ${u.passed} of ${u.attempts}` : `${tag(skippedShare)}: a step skipped in ${u.right - u.passed} of ${u.attempts}`)
+          : null,
+      ),
+      el('td', null, `$${fixed(e.cost, 4)} · ${fixed(e.seconds, 0)} s`),
+    );
+  };
+  return el(
+    'div',
+    { class: `band ${out.tone}`, id: 'live-outcome', 'data-kind': out.kind },
+    el('p', { class: 'band-kind' }, 'This live race'),
+    el('p', { class: 'headline' }, out.headline),
+    el('p', null, out.body),
+    el(
+      'table',
+      { class: 'what-happened' },
+      el('thead', null, el('tr', null, ['', 'Result', 'Process', 'Cost · time'].map((h) => el('th', { scope: 'col' }, h)))),
+      el('tbody', null, row(a, 'a'), row(b, 'b')),
+    ),
+    el(
+      'p',
+      { class: 'small' },
+      `One fresh scenario, the same for both, in this test with these settings: ${settings}. `,
+      out.tone === 'win' ? 'That is what one race shows. How consistently it would win takes more races.' : 'One race is one scenario: the record above is what says how each model usually does.',
+    ),
+  );
+}
+
 // The faults the grader counted for one side, in the page's own names.
 function faultsOf(side) {
   if (!side.details) return null; // an older race, listed without its grade
@@ -2752,7 +2880,7 @@ function raceSide(x, model, cls) {
     'div',
     { class: `race-side ${cls}` },
     el('p', { class: 'race-side-name' }, shortName(model)),
-    el('p', { class: 'race-side-result' }, el('strong', { class: side.passed ? 'pass' : 'fail' }, side.passed ? '✓ Passed' : '✕ Did not pass'), d.items ? ` · ${d.correct} of ${d.items} items right` : ''),
+    el('p', { class: 'race-side-result' }, endMark(side.details || side.passed ? endOf(endingOf(side).right, side.passed) : 'none'), d.items ? ` · ${d.correct} of ${d.items} items right` : ''),
     faults === null
       ? el('p', { class: 'note' }, 'The grade of this earlier race is not listed.')
       : faults.length
@@ -2766,9 +2894,7 @@ function raceSide(x, model, cls) {
 
 // One race as a card: the headline, both sides, and the sealed record it is filed under.
 function raceCard(x, a, b, number, open) {
-  const both = sideOf(x, a).passed && sideOf(x, b).passed;
-  const neither = !sideOf(x, a).passed && !sideOf(x, b).passed;
-  const how = !x.winner ? 'no winner' : both ? `${shortName(x.winner)} won on efficiency (both passed)` : neither ? `${shortName(x.winner)} got further (neither passed)` : `${shortName(x.winner)} won: the only one to pass`;
+  const how = raceOutcome({ a, b, winner: x.winner, A: endingOf(sideOf(x, a)), B: endingOf(sideOf(x, b)) }).headline;
   return el(
     'details',
     { class: 'race-card', open },
@@ -2783,7 +2909,8 @@ function liveHistory(races, a, b, r) {
   const n = races.length;
   const won = (m) => races.filter((x) => x.winner === m).length;
   const none = races.filter((x) => !x.winner).length;
-  const passed = (m) => races.filter((x) => sideOf(x, m).passed).length;
+  const clean = (m) => races.filter((x) => sideOf(x, m).passed).length;
+  const right = (m) => races.filter((x) => endingOf(sideOf(x, m)).right).length;
   const tallyOf = (m) => {
     const counts = new Map();
     let graded = 0;
@@ -2802,8 +2929,8 @@ function liveHistory(races, a, b, r) {
     el(
       'p',
       { class: 'live-draft', id: 'live-draft' },
-      el('strong', null, `First draft from ${plural(n, 'live race')}: ${shortName(a)} won ${won(a)}, ${shortName(b)} won ${won(b)}${none ? `, ${none} with no winner` : ''}.`),
-      ` ${shortName(a)} passed ${passed(a)} of ${n}; ${shortName(b)} passed ${passed(b)} of ${n}.`,
+      el('strong', null, `First draft from ${plural(n, 'live race')}: ${shortName(a)} took ${won(a)}, ${shortName(b)} took ${won(b)}${none ? `, ${none} with no winner` : ''}.`),
+      ` Right result: ${shortName(a)} ${right(a)} of ${n}, ${shortName(b)} ${right(b)} of ${n}. Clean runs: ${shortName(a)} ${clean(a)}, ${shortName(b)} ${clean(b)}.`,
     ),
     el('ul', { class: 'live-faults' }, el('li', null, el('strong', null, shortName(a)), `: ${tallyOf(a)}`), el('li', null, el('strong', null, shortName(b)), `: ${tallyOf(b)}`)),
     el('p', { class: 'note' }, `A draft, not a verdict: each race is one fresh scenario, and a verdict needs ${rules.min_pairs} scenarios both models played. ${recorded} Every signed-in visitor's races are counted.`),
@@ -2820,6 +2947,8 @@ function liveHistory(races, a, b, r) {
 function liveReport(record, a, b, title, v) {
   const body = record.body;
   const winner = { A: a, B: b }[(body.verdict || {}).winner] || null;
+  const facts = raceFacts(record, v.task, a, b);
+  const outcome = raceOutcome({ a, b, winner, A: endingOf(sideOf(facts, a)), B: endingOf(sideOf(facts, b)) });
   const lines = [
     `# Live race report: ${title}`,
     '',
@@ -2827,13 +2956,17 @@ function liveReport(record, a, b, title, v) {
     '',
     `**This is one live scenario, generated for this race. It joins the record, and the verdict, ${joinsWhen()}.**`,
     '',
-    `- Result: ${winner ? `\`${winner}\` took this scenario` : 'no winner'}.`,
+    `- What happened: **${outcome.headline}.** ${outcome.body}`,
+    `- In the count: ${winner ? `\`${winner}\` took this scenario` : 'no winner'}.`,
     v.verdict === 'no data'
       ? '- The record holds no match between these two on this task: this is the first evidence.'
       : `- On this tested workflow the record ${v.better ? `${v.verdict === 'better' ? 'favours' : 'leans to'} \`${v.better}\` (${v.wins[v.better]} of ${v.pairs} scenarios)` : `names no favourite (${v.wins[a]} to ${v.wins[b]})`}.`,
     `- Sealed record \`${body.run_id}\`, seal \`${str(record.sha256).slice(0, 16)}\`${body.engine_commit ? `, engine commit \`${str(body.engine_commit).slice(0, 7)}\`` : ''}.`,
     '',
     '## What each model did and what it cost',
+    '',
+    'An attempt ends one of three ways: a clean run (the right result and every step the test asks for, which is ' +
+      'what the test itself calls a pass), the right result with a step skipped, or a wrong result.',
     '',
     '| Model | Result | Cost | Calls | Tokens read | Tokens written | Seconds | How it ended |',
     '|---|---|---|---|---|---|---|---|',
@@ -2847,7 +2980,7 @@ function liveReport(record, a, b, title, v) {
     }
     spent += r.cost_usd || 0;
     lines.push(
-      `| \`${name}\` | ${r.passed ? 'passed' : 'failed'} | $${fixed(r.cost_usd || 0, 4)} | ${r.calls ?? '-'} | ${r.input_tokens ?? '-'} | ` +
+      `| \`${name}\` | ${ended(r.passed || rightResult(r.grade_details), r.passed)} | $${fixed(r.cost_usd || 0, 4)} | ${r.calls ?? '-'} | ${r.input_tokens ?? '-'} | ` +
         `${r.output_tokens ?? '-'} | ${fixed(r.wall_s || 0, 0)} | ${r.termination || '-'} |`,
     );
   }
@@ -2864,7 +2997,7 @@ function liveReport(record, a, b, title, v) {
 // (with the visitor's own say on how serious each fault is), then one verdict, then how to check it.
 // Consistency: what each model did when it was given the same scenario twice (a batch of one model on both lanes).
 // Not a comparison between the two: it says how steady each is on this task, and so how far one race can be
-// trusted. Those attempts are already counted in "Attempts passed" above. Nothing is shown until a self run exists.
+// trusted. Those attempts are already counted in the fit rows above. Nothing is shown until a self run exists.
 function consistencyRows(v, a, b) {
   const rows = v.consistency || [];
   if (!rows.length) return [];
@@ -2876,11 +3009,11 @@ function consistencyRows(v, a, b) {
   const said = [a, b]
     .map(of)
     .filter(Boolean)
-    .map((x) => `${shortName(x.model)} passed ${x.passed} of ${x.attempts} of those attempts`)
+    .map((x) => `${shortName(x.model)} ran ${x.passed} of ${x.attempts} of those attempts clean`)
     .join('; ');
   return [
     el('div', { class: 'tape-head', id: 'consistency-head' }, 'Consistency: each model against itself, the same scenario twice (not a comparison)'),
-    tapeRow(cell(a), 'Same ending both times', `${said}. They are counted in "Attempts passed" above, never in the head-to-head.`, cell(b)),
+    tapeRow(cell(a), 'Same ending both times', `${said}. They are counted in the fit rows above, never in the head-to-head.`, cell(b)),
   ];
 }
 
@@ -2936,8 +3069,8 @@ function fightCard(spec, v) {
     ),
   ];
 
-  // Each square says who won the scenario and what state both were in: both passed (plain), only the winner
-  // passed (dashed outline), or neither passed (faded: the one that got further, or spent less, took it).
+  // Each square says who took the scenario and how both ended: both ran it clean (plain), only the winner ran it
+  // clean (dashed outline), or neither did (faded: it went on a tie-break, which is not a win on the job).
   const stateOf = (r) => (r.a_passed && r.b_passed ? 'both' : r.a_passed || r.b_passed ? 'sole' : 'neither');
   const tally = { both: 0, sole: 0, neither: 0 };
   for (const r of v.rounds) tally[stateOf(r)] += 1;
@@ -2949,7 +3082,7 @@ function fightCard(spec, v) {
       'p',
       { class: 'note center' },
       'Each scenario is a freshly generated world with its own records and traps. Both models are handed the same one. ' +
-        'One scenario played by both is a pair, and each pair has a winner.',
+        'A square says who took it, not who failed: a model can get every decision right and still lose the scenario to a cleaner or cheaper run.',
     ),
     el(
       'ol',
@@ -2957,12 +3090,7 @@ function fightCard(spec, v) {
       v.rounds.map((r, i) => {
         const who = r.winner === a ? 'a' : r.winner === b ? 'b' : 'tie';
         const what = stateOf(r);
-        const how = {
-          both: 'both passed; the cheaper, faster run won',
-          sole: 'only the winner passed',
-          neither: r.rule === 'progress' ? 'neither passed; the one that got further won' : 'neither passed; the cheaper, faster run won',
-        }[what];
-        const label = who === 'tie' ? `Scenario ${i + 1}: a tie` : `Scenario ${i + 1}: won by ${shortName(r.winner)} (${how})`;
+        const label = who === 'tie' ? `Scenario ${i + 1}: a tie` : `Scenario ${i + 1}: taken by ${shortName(r.winner)} (${whyTaken(r, a).text})`;
         return el(
           'li',
           null,
@@ -2975,9 +3103,9 @@ function fightCard(spec, v) {
       { class: 'legend' },
       el('span', { class: 'key a' }), `won by ${shortName(a)}`,
       el('span', { class: 'key b' }), `won by ${shortName(b)}`,
-      tally.both ? [el('span', { class: 'key both' }), `both passed, the cheaper and faster run won (${tally.both})`] : null,
-      tally.sole ? [el('span', { class: 'key sole' }), `only the winner passed (${tally.sole})`] : null,
-      tally.neither ? [el('span', { class: 'key neither' }), `neither passed, the one that got further or spent less won (${tally.neither})`] : null,
+      tally.both ? [el('span', { class: 'key both' }), `both ran it clean, the more efficient run won (${tally.both})`] : null,
+      tally.sole ? [el('span', { class: 'key sole' }), `only the winner ran it clean (${tally.sole})`] : null,
+      tally.neither ? [el('span', { class: 'key neither' }), `neither ran it clean, so it went on a tie-break: who got further, then efficiency (${tally.neither})`] : null,
     ),
     el('p', { class: 'note center' }, 'Pick a scenario to watch both models work it, step by step.'),
     el('div', { id: 'race', class: 'race', hidden: true }),
@@ -2985,22 +3113,29 @@ function fightCard(spec, v) {
   ];
 
   const num = (text, cls = '') => el('span', { class: `fig ${cls}` }, text);
+  const beyondPair = [fa.attempts - A.attempts, fb.attempts - B.attempts]; // attempts in other matches (and against itself)
   const tape = [
-    tapeRow(num(String(v.wins[a])), 'Scenarios won', `of ${v.pairs} played against each other`, num(String(v.wins[b]))),
-    tapeRow(num(`${A.right} of ${A.attempts}`), 'Right result', 'in those same pairs: every decision right, nothing left undone', num(`${B.right} of ${B.attempts}`)),
-    tapeRow(num(`${A.passed} of ${A.attempts}`), 'Right result and right process', 'what the test itself calls a pass', num(`${B.passed} of ${B.attempts}`)),
+    el('div', { class: 'tape-head' }, `Head to head: the ${plural(v.pairs, 'scenario')} these two played against each other`),
+    tapeRow(num(String(v.wins[a])), 'Scenarios won', 'who took each one: a scenario can be lost with every decision right', num(String(v.wins[b]))),
+    tapeRow(num(`${A.right} of ${A.attempts}`), 'Right result', 'every decision right, nothing left undone', num(`${B.right} of ${B.attempts}`)),
+    tapeRow(num(`${A.passed} of ${A.attempts}`), 'Clean runs', 'the right result and every step the test asks for: what the test itself calls a pass', num(`${B.passed} of ${B.attempts}`)),
     tapeRow(num(`$${fixed(A.cost_per_attempt, 4)}`), 'Cost per attempt', 'lower is better', num(`$${fixed(B.cost_per_attempt, 4)}`)),
     tapeRow(num(`${fixed(A.seconds_per_attempt, 0)}s`), 'Seconds per attempt', 'lower is better', num(`${fixed(B.seconds_per_attempt, 0)}s`)),
-    el('div', { class: 'tape-head' }, `Fit for this task: every attempt each model made on it, against any opponent`),
+    el(
+      'div',
+      { class: 'tape-head', id: 'tape-fit-head' },
+      `Fit for this task: every attempt each model made on it, against anyone. That is the ${v.pairs} above` +
+        (beyondPair[0] > 0 || beyondPair[1] > 0 ? ` and ${beyondPair[0]} and ${beyondPair[1]} more, in other matches` : ''),
+    ),
     tapeRow(
       num(`${fa.right} of ${fa.attempts}`, fa.right_rate < fa.bar ? 'bad' : ''),
-      'Attempts with the right result',
+      'Right result, against anyone',
       `${percent(fa.right_rate)} and ${percent(fb.right_rate)}; ${percent(fa.bar)} needed`,
       num(`${fb.right} of ${fb.attempts}`, fb.right_rate < fb.bar ? 'bad' : ''),
     ),
     tapeRow(
       num(`${fa.passed} of ${fa.attempts}`),
-      'Of those, right process too',
+      'Of those, clean runs',
       'how it got there is judged below, fault by fault, at the level you set',
       num(`${fb.passed} of ${fb.attempts}`),
     ),

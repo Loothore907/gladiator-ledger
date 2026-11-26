@@ -308,7 +308,15 @@ async function main() {
     check(second.pairs === first.pairs + 1, `the verdict on screen went from ${first.pairs} judged pairs to ${second.pairs} after one race, not ${first.pairs + 1}`);
     check(second.evidence.some((e) => e.run === RACE), 'the verdict on screen does not list the race just run among its sealed records');
     check((await page.locator('#verdict-body').innerText()).includes(`The arena: ${second.pairs} scenarios`), 'the verdict was not drawn again with the race in it');
-    check((await page.locator('#live-winner').count()) === 1 && (await page.locator('#live-stage .lane').count()) === 2, 'the race just run is no longer on screen after the verdict was read again');
+    check((await page.locator('#live-outcome').count()) === 1 && (await page.locator('#live-stage .lane').count()) === 2, 'the race just run is no longer on screen after the verdict was read again');
+    // that race, as it really went: both got every refund right, DeepSeek skipped lookups and Haiku ran it clean.
+    // So it is said as a win on process, each lane ends in the page's own words, and each result is set beside
+    // what the record said of that model before the race.
+    const outcome = await page.locator('#live-outcome').innerText().catch(() => '');
+    check((await page.locator('#live-outcome.win[data-kind="process"]').count()) === 1 && outcome.includes('won on process') && outcome.includes('Both got every decision right'), `the race just run is said as: ${outcome.slice(0, 300)}`);
+    check(/as usual: right in \d+ of \d+/.test(outcome) && /clean in \d+ of \d+/.test(outcome), `the box under the race does not set each result beside the record: ${outcome.slice(0, 400)}`);
+    const ends = await page.locator('#live-stage .outcome .end').allInnerTexts();
+    check(ends.join(' | ') === 'Right result, a step skipped | ✓ Clean run', `the lanes of the race just run end with ${JSON.stringify(ends)}`);
     await page.waitForFunction((n) => document.querySelectorAll('#pair-graph circle.gdot:not(.live)').length === n, second.pairs, { timeout: 20000 }).catch(() => problems.push('the evidence graph does not show the race as one more scenario'));
     check((await page.locator('#pair-graph circle.gdot.live').count()) === 0, 'the race is still drawn as a live result beside the record');
     check((await page.locator('#pair-graph circle.gdot.ring').count()) === 1, 'the scenario of the race just run is not ringed in the evidence graph');
@@ -316,11 +324,11 @@ async function main() {
     await page.waitForFunction(() => document.getElementById('world-graph').innerText.includes('This is the race you just ran'), null, { timeout: 30000 }).catch(() => problems.push('the world of the race just run is not drawn under the evidence graph'));
     check((await page.locator('#record-note').innerText()).includes('3 records are newer than this page'), `after the race the line about the live record reads: ${await page.locator('#record-note').innerText()}`);
     check((await page.evaluate(() => window.ledgerDemo.cypher('MATCH (l:LiveMatch) RETURN count(l) AS n')))[0].n === 0, 'the race is in the graph twice: as a match and as a live result');
-    const inView = await page.evaluate(() => { const node = document.getElementById('live-winner'); const box = node && node.getBoundingClientRect(); return Boolean(box) && box.bottom > 0 && box.top < window.innerHeight; });
+    const inView = await page.evaluate(() => { const node = document.getElementById('live-outcome'); const box = node && node.getBoundingClientRect(); return Boolean(box) && box.bottom > 0 && box.top < window.innerHeight; });
     check(inView, 'the page moved away from the race when the verdict was read again');
     await shot(page, '2-race-joined-live-panel');
     await shot(page, '3-race-joined-evidence-graph', '#pair-graph');
-    await page.locator('#live-winner').scrollIntoViewIfNeeded();
+    await page.locator('#live-outcome').scrollIntoViewIfNeeded();
     check((await page.locator('#live-prior').innerText()).includes(String(second.pairs)), 'the run box still describes the record as it was before the race');
     check((await page.locator('#live-history').isHidden()) || !(await page.locator('#live-history').innerText()).includes(RACE), 'the race is still listed as a live race waiting to join');
 

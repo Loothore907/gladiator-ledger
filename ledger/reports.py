@@ -14,6 +14,12 @@ BASIS = {
 }
 
 
+def ended(right, clean) -> str:
+    """How an attempt ended, in the three words the page uses. A clean run is what the test itself calls a pass:
+    the right result and every step it asks for."""
+    return "clean run" if clean else "right, a step skipped" if right else "wrong result"
+
+
 def _usd(x, places=4) -> str:
     return "none passed" if x is None else f"${x:.{places}f}"
 
@@ -134,12 +140,21 @@ def evidence_markdown(v: dict, title: str) -> str:
     ]
     lines += [f"- {n}" for n in v["notes"]] + ([""] if v["notes"] else [])
     if v.get("rounds"):
-        lines += [f"| # | Winner | Decided on | `{a}` | `{b}` | Sealed record |", "|---|---|---|---|---|---|"]
+        lines += [
+            (
+                "Each attempt ended one of three ways: a clean run (the right result and every step the test asks "
+                "for, which is what the test itself calls a pass), the right result with a step skipped, or a wrong "
+                "result."
+            ),
+            "",
+            f"| # | Winner | Decided on | `{a}` | `{b}` | Sealed record |",
+            "|---|---|---|---|---|---|",
+        ]
         for i, r in enumerate(v["rounds"], 1):
             winner = "tie" if r["winner"] == "tie" else f"`{r['winner']}`"
             lines.append(
-                f"| {i} | {winner} | {r['rule']} | {'passed' if r['a_passed'] else 'failed'} | "
-                f"{'passed' if r['b_passed'] else 'failed'} | `{r['run']}` |"
+                f"| {i} | {winner} | {r['rule']} | {ended(r['a_right'], r['a_passed'])} | "
+                f"{ended(r['b_right'], r['b_passed'])} | `{r['run']}` |"
             )
         lines.append("")
     lines += ["## Sealed records", ""]
