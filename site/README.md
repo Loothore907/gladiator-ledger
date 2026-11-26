@@ -28,6 +28,15 @@ the hackathon judges for now. A live result is shown with its sealed record at o
 evidence. It counts in the verdict once its record has been imported (`ledger import --runner`, which the
 `Import live races` workflow runs) and this folder's data has been rebuilt from it.
 
+**The live record.** Or at once, where the page reads a live record: Ledger's own small service (`ledger serve`,
+`ledger/live.py`) that keeps the whole record in one Relate store and takes in each race as the runner files it.
+Open the page with `?record=<address>` for one on your own machine, or set `record` in `data/live.json`. On load
+the page asks it which records it holds and loads the ones this folder's data lacks into the graph in the tab
+(`addRun` in `worker.js`); their steps and replays come from the service too. When a race started from the page
+ends, the page asks again, loads the race and reads the verdict again, leaving the race on screen. These are plain
+reads of public records, and every question is still answered in the tab. With no live record, or one that does
+not answer, the page is this folder's copy, and it says which.
+
 ## Files
 
 | File | What it is |
@@ -39,6 +48,7 @@ evidence. It counts in the verdict once its record has been imported (`ledger im
 | `data/` | generated: rows and Cypher (`graph.json`, `questions.json`), shared constants (`rules.json`), the answers the Python computed (`expected.json`), one replay file per match record (`replays/`), the same steps as rows for the graph (`steps/`), and the runner's address (`live.json`) |
 | `vendor/relate-wasm/` | the engine, `@relate/relate-wasm` (see `VERSION.txt` there) |
 | `check.cjs` | compares the page's answers with `data/expected.json` |
+| `check-live.cjs` | starts the real `ledger serve` beside a stand-in runner, serves the page as it was before the last four records, plays them over again, and compares the page with one built from all the data and with `data/expected.json` (needs `uv`) |
 
 ## Rebuild the data
 

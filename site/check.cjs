@@ -305,6 +305,12 @@ async function main() {
     // The comparisons above call the page's functions; this proves the buttons lead to a drawn verdict, including
     // for pairs where no winner is named.
     let clicked = 0;
+    // The page answers one question at a time, so a verdict asked for here waits behind whatever the pair before
+    // it was still drawing (its evidence graph, one scenario's steps). On a slow machine the pair with the most
+    // matches took over 5 seconds that way, on a page that was working. The limit is for a page that never
+    // draws; how long the slowest one took is printed, so a page that is getting slow is seen and not guessed.
+    const DRAW_LIMIT_MS = 20000;
+    const slowest = { ms: 0, what: '' };
     const flowCount = await page.locator('#flow-cards button').count();
     if (!flowCount) problems.push('the page lists no flows to click');
     const values = (list) => page.locator(`#${list} input:not([disabled])`).evaluateAll((inputs) => inputs.map((x) => x.value));
@@ -330,15 +336,17 @@ async function main() {
         }
         for (const b of await page.locator('#second-model input[name="second"]').evaluateAll((all) => all.map((x) => x.value))) {
           await page.evaluate(() => document.getElementById('verdict-body').replaceChildren());
+          const asked = Date.now();
           await pickSecond(page, b);
           const drawn = await page
             .waitForFunction(
               () => !document.getElementById('step-verdict').hidden && document.getElementById('verdict-body').innerText.trim().length > 200,
               null,
-              { timeout: 5000 },
+              { timeout: DRAW_LIMIT_MS },
             )
             .then(() => true, () => false);
-          if (!drawn) problems.push(`clicking flow ${f}, ${a} vs ${b}: no verdict was drawn`);
+          if (!drawn) problems.push(`clicking flow ${f}, ${a} vs ${b}: no verdict was drawn within ${DRAW_LIMIT_MS / 1000} seconds`);
+          else if (Date.now() - asked > slowest.ms) Object.assign(slowest, { ms: Date.now() - asked, what: `flow ${f}, ${a} vs ${b}` });
           // a broken page fails every pair the same way: stop early instead of waiting out each one
           if (problems.length >= 5) throw new Error(`stopped after ${problems.length} problems:\n  - ${problems.join('\n  - ')}`);
           clicked += 1;
@@ -959,7 +967,7 @@ async function main() {
     } finally {
       runner.close();
     }
-    return { stats, requests, clicked };
+    return { stats, requests, clicked, slowest };
   } finally {
     await browser.close();
     server.close();
@@ -967,7 +975,7 @@ async function main() {
 }
 
 main().then(
-  ({ stats, requests, clicked }) => {
+  ({ stats, requests, clicked, slowest }) => {
     if (!compared) problems.push('nothing was compared');
     if (problems.length) {
       console.error(`FAILED: ${problems.length} problem(s)`);
@@ -981,7 +989,8 @@ main().then(
     console.log(
       `Graph: ${stats.matches} matches, ${stats.pairs} judged pairs, ${stats.models} models; ready in ` +
         `${Math.round(stats.total_ms)} ms (fetch and start ${Math.round(stats.fetch_ms)} ms, build ${Math.round(stats.build_ms)} ms). ` +
-        `${requests} requests, all to this folder. Clicked through ${clicked} pairs of models; each drew a verdict.`,
+        `${requests} requests, all to this folder. Clicked through ${clicked} pairs of models; each drew a verdict, ` +
+        `the slowest in ${slowest.ms} ms (${slowest.what}).`,
     );
   },
   (error) => {

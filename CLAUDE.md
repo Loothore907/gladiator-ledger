@@ -71,8 +71,13 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   and hands a page the rows of what its own copy lacks. It runs no match, holds no key, and only ever reads the
   one runner it was started with. A record added to the store must leave exactly the graph that building from
   all records leaves, which is the graph the command line builds (`tests/test_live.py`). The sealed records stay
-  the master copy and the git import stays, as the archive. Host: a second small one, approved in principle by
-  the owner; Claude still asks before anything is created there, and the owner runs the deploy.
+  the master copy and the git import stays, as the archive. **The page reads it** where one is published (`record`
+  in `site/data/live.json`, or `?record=`): what its own copy lacks is loaded into the graph in the tab on load,
+  and a race run from the page joins as it ends and the verdict is read again. A page published before some
+  records, reading a live record that holds them, must be exactly the page published after them
+  (`site/check-live.cjs`, with the real service); with no live record the page is its shipped copy and says so.
+  Host: a second small one, approved in principle by the owner; Claude still asks before anything is created
+  there, and the owner runs the deploy. Until it is deployed `live.json` names no record.
 - **A workflow has one account, whatever order its records came in.** Its text, tools and package facts are made
   from every record on file (`Flows` in `ledger/bridges/gladiator.py`), never from whichever was loaded last.
 - **Quoted figures carry their date.** A figure printed in the README or the submission is the record as it stood

@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 import relate
 
-from ledger import cli, live, load, routes
+from ledger import cli, live, load, replay, routes
 from ledger.bridges import Evidence, gladiator, steps
 
 DATA = Path(__file__).resolve().parent.parent / "data"
@@ -226,6 +226,21 @@ def test_the_service_takes_in_what_the_runner_files_and_hands_a_page_what_it_lac
         routes.build(whole, data_folder(tmp_path / "whole", [*SUITE, new]))
         assert graph(lambda q: cli.rows(shipped, q)) == graph(lambda q: cli.rows(whole, q)) == graph(rec.rows)
 
+        # and they are the very rows, step file and replay file that `ledger site` would ship for that record with
+        # a page published after it: the page loads one or the other and cannot tell which
+        def plain(value):
+            return json.loads(json.dumps(value, default=str))
+
+        records = tmp_path / "whole" / "records"
+        assert rows["run"] == plain(next(r for r in gladiator.read_records(records).runs if r["run_id"] == new))
+        steps.export(records, tmp_path / "steps")
+        assert rows["steps"] == json.loads((tmp_path / "steps" / f"{new}.json").read_text(encoding="utf-8"))
+        replay.export(records, tmp_path / "replays")
+        status, played, headers = get(f"{at}/replay/{new}", origin=page)
+        assert status == 200 and headers["Access-Control-Allow-Origin"] == page
+        assert played == json.loads((tmp_path / "replays" / f"{new}.json").read_text(encoding="utf-8"))
+        assert get(f"{at}/replay/20990101-000000-abcdef")[0] == 404
+
         # the rest of the surface: an address that is not allowed gets no permission to read it from a browser,
         # and nothing but a run id is looked up
         assert "Access-Control-Allow-Origin" not in get(f"{at}/rows/{new}", origin="https://elsewhere.example")[2]
@@ -239,6 +254,16 @@ def test_the_service_takes_in_what_the_runner_files_and_hands_a_page_what_it_lac
         for t in readers:
             t.join()
         assert answers == [200] * 12
+
+        # a record the runner files that does not match its seal is refused, said, and not asked for again
+        bad = "20990101-000000-abcdef"
+        forged = record(LIVE[0])
+        forged["body"]["run_id"] = bad
+        runner.filed[bad] = forged
+        assert get(f"{at}/sync", method="POST")[1] == {"took_in": [], "problem": None}
+        assert get(f"{at}/sync", method="POST")[1]["took_in"] == []
+        assert get(f"{at}/health")[1]["refused"] == [bad] and runner.asked.count(f"/records/{bad}") == 1
+        assert len(get(f"{at}/runs")[1]["runs"]) == 3 and get(f"{at}/rows/{bad}")[0] == 404
 
         # a runner that cannot be reached is said, not hidden, and the store answers as before
         runner.close()
