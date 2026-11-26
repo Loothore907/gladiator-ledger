@@ -7,8 +7,8 @@ instructions, a demo, and a statement of the Product capabilities, third-party t
 Gladiator Ledger: which of these two models does *this* task better?
 
 ## Tagline
-Two models, one task, a prediction put at risk: head-to-head evidence in a Relate graph, a verdict you can check,
-a race you can watch, and a spec you can build from.
+Two models, one task, a prediction put at risk: head-to-head evidence in a Relate graph down to every step, a
+verdict you can check, a live race that joins the graph as it ends, and a spec you can build from.
 
 ## What it does
 Two AI models that sit side by side on a leaderboard can behave very differently on your workflow. Ledger answers
@@ -32,7 +32,8 @@ and walks it:
    they really ran, with the faults where they happened.
 5. **Race them live.** The graph states what the record expects, a runner plays one brand-new scenario (or a
    batch of 10 or 25), and the page says whether the result was in line with the record or against it. The sealed
-   result then joins the record, so the verdict moves as races are run. (Open to judges: "Judge sign-in" on the
+   result joins the record as the race ends: seconds later it is one more dot in the evidence graph, its world is
+   drawn under the dots, and the verdict has been read again with it. (Open to judges: "Judge sign-in" on the
    page, with the access code.)
 6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every hazard,
    and the sealed records behind it.
@@ -47,8 +48,8 @@ and cost about the same. Over 166 head-to-head scenarios on four workflows (the 
 2026) the answer changes with the task and with who is asking. Haiku is the settled choice on two workflows.
 DeepSeek gets the right result more often on all four, and on access reviews it is the only one of the two a
 business could run unattended: Haiku made one wrong access decision in 81 attempts. On a refund queue both decide
-every refund correctly, and Haiku wins on process: in two attempts of three DeepSeek decides a request before
-looking up a record it was told to read. Ledger does not decide whether that matters. It counts it, gives it a
+every refund correctly, and Haiku wins on process: in 65 of its 95 attempts DeepSeek decided a request without
+ever looking up a record it was told to read. Ledger does not decide whether that matters. It counts it, gives it a
 level you can change, and shows the answer for one person (minor: both are fit) and for a business (serious:
 neither is). When the evidence is thin or level it says "leaning" or names no winner, and when neither model is
 fit it says so and lists the tested models that are.
@@ -69,10 +70,19 @@ fit it says so and lists the tested models that are.
   of them a level and the verdict follows. No new match is played for any of it. The page does the same in the
   browser: it loads the steps of a scenario, or of a whole task, into its own graph, runs the same patterns, and
   draws a scenario as a graph of its records with both models' routes on it, filling in as the race plays.
+- **One live store, written to as races end.** A small service of Ledger's own (`ledger serve`) keeps the whole
+  record, every step included, in one Relate store that stays open. It takes in each sealed record the race
+  runner files, checked against its seal, and hands the page what the page's own copy lacks. Relate lets one
+  process write a store and ties a connection to the thread that opened it, so the store is in Relate's
+  directory format and one thread owns the connection. Adding a race takes a tenth of a second. Records added
+  one at a time, in any order, must leave exactly the graph that building from all of them leaves, and a test
+  holds it node for node.
 - **Full-text index** over each workflow's text for step 1.
 - **The WebAssembly build, in memory, in a browser worker.** The demo page builds the whole graph client-side
-  with the same statements as the command line, and a CI check compares more than 8,000 values between the two,
-  including the downloadable spec character for character.
+  with the same statements as the command line, and a CI check compares more than 20,000 values between the
+  two, including the downloadable spec character for character. A second check runs the real live service
+  beside a real browser: a page published before four races, reading the live store, must end up as the page
+  published after them, the same graph node by node and link by link.
 - **Read-only access for agents over MCP**, including free-form read-only Cypher.
 - **Idempotent loading** (`MERGE` on stable keys behind uniqueness constraints) through two bridges: match records
   and a published benchmark index. 11 kinds of node and 17 relationships in the shipped store; with the steps
@@ -84,6 +94,7 @@ git clone https://github.com/Loothore907/gladiator-ledger
 cd gladiator-ledger
 uv sync
 uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1
+uv run ledger process refund-queue --a "haiku 5.5" --b deepseek-v4.1   # how each got there, from the steps
 python3 -m http.server --directory site 8000     # the browser page
 ```
 No API keys and no cost. Linux, macOS and Windows. The record grows as live races are run; add
@@ -95,7 +106,7 @@ No API keys and no cost. Linux, macOS and Windows. The record grows as live race
 | October 2026 | The idea for Gladiator, a head-to-head model evaluation engine. No code. |
 | Nov 18–20 | Gladiator's first code: a pilot runner and ten fixed test cases. Ledger does not use them. |
 | Nov 20–22 | The Gladiator engine as Ledger's data uses it (match engine, tool-workflow tests, validation, suites, all matches), public as github.com/Loothore907/gladiator-core. |
-| Nov 21 onward | All of Ledger: bridges and loader, graph schema, Cypher questions, the fit policy, commands, MCP server, browser demo page with its race view, tests and the shipped store. Also, in Gladiator, for this entry: live step reporting and the race runner. |
+| Nov 21 onward | All of Ledger: bridges and loader, graph schema, Cypher questions, the fit policy, commands, MCP server, browser demo page with its race view, the steps in the graph and the questions asked of them, the live record service and its container, tests and the shipped store. Also, in Gladiator, for this entry: live step reporting and the race runner. |
 
 No code in either project predates the contest. Ledger imports no Gladiator code; it reads Gladiator's output files
 and copies one small scoring file, marked in the source. The full statement is `docs/DISCLOSURE.md`.
@@ -103,8 +114,9 @@ and copies one small scoring file, marked in the source. The full statement is `
 ## Capabilities, tools and AI use
 - Product capabilities used: listed under "How Relate is used" above.
 - Third-party tools and data: Python, uv, pytest, ruff, the MCP Python SDK, Node.js and Playwright (to check the
-  page), GitHub Actions and GitHub Pages; Epoch AI's Capabilities Index (CC BY 4.0); model APIs from Anthropic,
-  OpenAI, Google and OpenRouter to play the matches.
+  page), GitHub Actions and GitHub Pages, Docker and GitHub's container registry (the live record's image) and
+  Fly.io (hosting for the race runner and the live record); Epoch AI's Capabilities Index (CC BY 4.0); model
+  APIs from Anthropic, OpenAI, Google and OpenRouter to play the matches.
 - AI tools: the code, tests and documentation were written by Claude (Anthropic) working as a coding agent under
   the author's direction. The author set the goals and made the product, budget and publishing decisions.
 - Ledger is independent: not affiliated with or endorsed by any model provider.

@@ -76,9 +76,9 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   and a race run from the page joins as it ends and the verdict is read again. A page published before some
   records, reading a live record that holds them, must be exactly the page published after them
   (`site/check-live.cjs`, with the real service); with no live record the page is its shipped copy and says so.
-  Host: a second small one, approved in principle by the owner; Claude still asks before anything is created
-  there. It is deployed (2026-11-26; 1 GB, kept on through the judging days) and `live.json` names it, so the
-  hosted page reads it. The service ships as a
+  Host: a second small one (owner, 2026-11-26), deployed that day (1 GB, kept on through the judging days);
+  `live.json` names it, so the hosted page reads it. Who may deploy it, and what is asked first, is in the
+  operations repo's `CLAUDE.md` ("Who deploys"). The service ships as a
   container (`Dockerfile`; it carries the sealed records it starts from and no secret): CI builds and runs it,
   and publishes the image of every green commit on `main`, which is the only thing the deploy workflow in the
   operations repo will deploy.
