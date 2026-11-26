@@ -8,7 +8,7 @@ The contest opened on 2026-11-11.
 | October 2026 | The idea for Gladiator: head-to-head tests of two models on the same task. No code. | Not in any repository |
 | Nov 18–20 | Gladiator's first code: a pilot runner and ten fixed test cases. Its first commit is dated 2026-11-18. Ledger does not use this version or its tests. | The author's private repository |
 | Nov 20–22 | The Gladiator engine as Ledger's data uses it: the rebuilt match engine, the tool-workflow test type, the four workflow tests, automatic validation and validation records, the small-tier and mid-tier suites, and every match in `data/`. | Public since 2026-11-22 as [gladiator-core](https://github.com/Loothore907/gladiator-core), with a fresh history; the earlier history is in the author's private repository |
-| Nov 21 onward | All of Gladiator Ledger: the bridges and loader, the graph schema, the Cypher questions, the commands, the MCP server, the browser demo page, the tests, the documentation and the shipped store. | This repository |
+| Nov 21 onward | All of Gladiator Ledger: the bridges and loader, the graph schema, the Cypher questions, the commands, the MCP server, the browser demo page, the steps in the graph and the questions asked of them, the live record service (`ledger serve`) and its container, the tests, the documentation and the shipped store. | This repository |
 
 So no code in either project predates the contest; only the idea does. Gladiator is still disclosed here as
 separate, earlier work, because Ledger was started after it and builds on its output.
@@ -30,13 +30,16 @@ In the Gladiator repositories, during the contest:
 - a fix to the engine's workflow tools (the check tool's missing argument, described under "The data"), found
   while preparing this entry;
 - a fix so each record names the engine's own commit;
+- the race runner (`gladiator serve`), for the live races on the page: one brand-new scenario, or a batch,
+  played on request and reported step by step, with a cap per race, a budget per provider, invitations and one
+  race at a time. It files the sealed record that Ledger then takes in;
 - the public release of the engine as gladiator-core.
 
 ## The data
 `data/` holds 37 sealed public match records from the Nov 22 suite matches, plus the live races and batches run
-since on the hosted race runner (12 as of Nov 26, $1.35 in API usage; imported with `ledger import --runner`, public
-halves only, and counted in verdicts like any other match played under the same conditions; more join as they are
-run). The 37 cover 12 models ( Anthropic, OpenAI and Google models through their APIs,
+since on the hosted race runner (12 as of 05:00 UTC on Nov 26, $1.35 in API usage; public halves only, and counted
+in verdicts like any other match played under the same conditions; more join as they are run: the page reads each
+one from Ledger's live record as it ends, and `ledger import --runner` archives it in this repository). The 37 cover 12 models ( Anthropic, OpenAI and Google models through their APIs,
 and open-weights models through OpenRouter) and come with 20 validation records. Those suite matches were played on Nov 22, 2026 and
 cost $24.90 in API usage in total (corrected figures, see below), paid from the author's provider
 accounts and plan credits. Each record includes its exact model ids, prices and costs, and the commit of the public Gladiator engine
@@ -117,16 +120,24 @@ matching; it makes no claim from it.
 
 ## Relate capabilities used
 - **Embedded Python library** `relate-db` 1.2.0, imported as `relate`, with no server.
-- **Single-file store** (`data/ledger.rl`), opened read-only for every question.
+- **Single-file store** (`data/ledger.rl`), opened read-only for every question, and a second one built locally
+  for the steps (`data/ledger-steps.rl`).
+- **Directory store, kept open by one writer:** `ledger serve` holds the whole record, steps included, in Relate's
+  directory format and writes each new sealed record into it as a race ends. One thread owns the connection (a
+  connection belongs to the thread that opened it), and the store is rebuilt from the sealed records whenever
+  it was built by other code.
 - **Schema:** uniqueness constraints on every node key (`CREATE CONSTRAINT ... IF NOT EXISTS`).
 - **Writes:** `UNWIND` batch loads with `MERGE` on stable keys (safe re-loading), `SET +=` property maps, and
   `FOREACH` with `CASE` for conditional relationships.
 - **Reads:** multi-hop `MATCH` patterns, `OPTIONAL MATCH`, aggregation (`count`, `sum`, `avg`, `collect`),
   `EXISTS { MATCH ... }` subqueries, list construction and indexing, and parameters on every query.
+- **Paths:** quantified path patterns over the steps of an attempt (`(first)-[:NEXT]->+(again)`), in the Python
+  library and the WebAssembly build alike.
 - **Full-text index** (`CREATE FULLTEXT INDEX`, `SEARCH ... IN (FULLTEXT INDEX ...) SCORE AS`) over each workflow's
   title, brief and rules, for "describe your flow".
 - **WebAssembly build** (`@relate/relate-wasm`), in-memory, in a browser worker: the demo page in `site/` builds the
-  whole graph client-side with the same Cypher as the command line.
+  whole graph client-side with the same Cypher as the command line, loads the steps of the scenarios it is asked
+  about, and adds the records the live store holds that it was published without.
 - **Read-only access for agents:** `ledger mcp` opens the single-file store read-only and serves it to AI
   assistants over the Model Context Protocol, including a tool for free-form read-only Cypher.
 - **Python API:** `relate.connect`, the cursor `stats` counters (used in tests to prove re-loading creates nothing),
@@ -136,7 +147,9 @@ matching; it makes no claim from it.
 - Python 3.12+, [uv](https://github.com/astral-sh/uv) (environment and lock file), pytest, ruff.
 - The [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp`), for the assistant server.
 - Node.js and Playwright, only to check the browser demo page in CI.
-- GitHub Actions for CI (Linux and Windows).
+- GitHub Actions for CI (Linux and Windows), and GitHub Pages for the demo page.
+- Docker, for the live record's container image (built in CI and published to GitHub's container registry), and
+  Fly.io, which hosts the race runner and the live record.
 - The match data was produced by calling commercial and open-weights model APIs (Anthropic, OpenAI, Google, and
   OpenRouter) from the Gladiator engine.
 
@@ -148,4 +161,5 @@ match transcripts in `data/records/` are AI-generated: they are the models' own 
 ## AI tools
 The code, tests and documentation in this repository were written by **Claude** (Anthropic), working as a coding
 agent under the author's direction. The author set the goals and made the product, budget and publishing decisions.
-Claude ran the calibration matches within budgets the author set, and the author reviewed the results.
+Claude ran the calibration matches within budgets the author set, and the author reviewed the results. Claude
+also deployed the live record, to a host and at a cost the author approved.

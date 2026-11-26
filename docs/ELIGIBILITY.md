@@ -21,7 +21,7 @@ own earlier project could be entered.
 | Condition | Where it is met |
 |---|---|
 | Clearly disclose what existed before the contest and what was built during it | The "Before and during the contest" table in the [README](../README.md) and the full statement in [DISCLOSURE.md](DISCLOSURE.md) |
-| Make Relate's role in the project clear | "Where Relate comes in" at the top of the [README](../README.md), "How and why Relate is used" further down, and [SCHEMA.md](SCHEMA.md) |
+| Make Relate's role in the project clear | "What Relate does here" near the top of the [README](../README.md), "How and why Relate is used" further down, and [SCHEMA.md](SCHEMA.md) |
 
 ## Two things to read this with
 - The reply says the entry "could be" eligible. It is guidance on the question as asked, not a ruling on the

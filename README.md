@@ -2,37 +2,72 @@
 
 **Of these two AI models, which does *this* task better, how sure is that, and what should I build?**
 
-Two models that look alike on a leaderboard can behave very differently on your workflow. Ledger holds head-to-head
-matches in a [Relate](https://relatedb.ai) graph, where two models played the same freshly generated worlds of a
-tool-using task, and answers with a **task claim** in two parts: is each model **fit for this task** under your
-tolerance for mistakes, and which one **did it better** head to head. Then it writes a **spec** you can build
-from. It never ranks models in general, and when the evidence is thin or level it names no winner.
+Two models that tie on a leaderboard can behave very differently on your workflow. Ledger keeps head-to-head
+matches in a [Relate](https://relatedb.ai) graph: two models, the same freshly generated worlds of a tool-using
+task, every step recorded. It answers with a claim about **one task**, in two parts: is each model **fit for it**
+under your tolerance for mistakes, and which one **did it better** head to head. Then it writes a **spec** you can
+build from. It never ranks models in general, and when the evidence is thin or level it names no winner.
+
+## Try it in a minute
+**In your browser, nothing to install.** Open **https://ledger.gladiatorbench.com/** and press **Show me an
+example**. The page builds the graph in your tab with Relate's WebAssembly build and walks to the verdict for two
+models that tie on a published index.
+
+**From a clone, with no API keys and no cost.**
+```bash
+git clone https://github.com/Loothore907/gladiator-ledger && cd gladiator-ledger && uv sync
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1    # is each fit, and which did it better
+uv run ledger process refund-queue --a "haiku 5.5" --b deepseek-v4.1    # how each got there (first run: a minute)
+uv run ledger verify                                                    # every sealed record, checked
+```
+
+**Through your own AI assistant.** `uv run ledger mcp` serves the same graph, read-only
+([docs/ASSISTANT.md](docs/ASSISTANT.md)).
+
+### Five things worth a look
+1. **The answer depends on who is asking.** On the page, switch the tolerance from one person to a business, or
+   change one fault's level. The same record gives a different answer, with the count behind it.
+2. **The graph behind the answer.** The box marked "Relate graph" shows the Cypher it ran and what came back. Each
+   dot is a scenario both models played. Click one: it replays as a race, and that scenario's world is drawn as a
+   graph of linked records with each model's route on it.
+3. **A new question, with no new match.** "How they got there" asks a pattern of every step on file, such as
+   "decided a refund before it had seen the customer". Give one a level and the verdict is judged with it.
+4. **A live race that joins the record as it ends** (hackathon judges for now: "Judge sign-in" on the page). The
+   record says what it expects, a brand-new scenario is raced, and seconds later the race is one more dot in the
+   graph and the verdict has been read again with it.
+5. **Check it.** `uv run ledger verify` checks every sealed record, and every figure in this README reproduces
+   with the `--until` printed next to it.
+
+## What Relate does here
+[Relate](https://relatedb.ai) is the store and the query engine, not an export target. Every answer is a Cypher
+query over one graph.
+
+- **Connected down to the step.** An attempt is a route through a small world of linked records (a refund request,
+  its order, the order's customer), and both models walked the same world. So a question about *how* a model
+  works is a pattern in the graph, and a new one can be asked of every attempt on file without playing a match:
+  [How they got there](#how-they-got-there-ask-the-record-a-new-question).
+- **One graph, four places.** The embedded Python library with a single-file store (`data/ledger.rl`) for the
+  command line; Relate's WebAssembly build, in memory, in your browser tab; an MCP server for AI assistants; and
+  one live store that a small service keeps open and writes to as races end, which the page reads to catch up.
+- **Found by its words.** A Relate full-text index finds the tested workflow closest to the one you describe.
+
+More: [How and why Relate is used](#how-and-why-relate-is-used) and [docs/SCHEMA.md](docs/SCHEMA.md).
 
 **There is no leaderboard here, and there cannot be one.** A result belongs to a task. What Ledger holds is a record
 for each tested workflow; for your own flow, that record is a starting point (the nearest thing already tested, and
 which two models are worth racing), and the match on your task is the evidence.
 
-**Where Relate comes in.** [Relate](https://relatedb.ai) is the store and the query engine, not an export target.
-The match records are loaded into one Relate graph, and every answer is a Cypher query over it. A Relate full-text
-index finds the workflow you describe. Storage mode: the embedded Python library with a single-file store
-(`data/ledger.rl`), opened read-only; the browser demo runs Relate's WebAssembly build with an in-memory store
-built from the same statements; and an MCP server gives AI assistants the same graph, read-only.
-
-**The graph goes down to the step.** Every attempt is a route through a small world of connected records (a refund
-request, its order, the order's customer), and both models walked the same world. So a question about *how* a
-model works is a pattern in the graph, and a new one can be asked of every attempt on file without playing a
-match: [How they got there](#how-they-got-there-ask-the-record-a-new-question).
-
 > Entry for the Relate by Neo4j hackathon (Nov–Dec 2026). The repository ships a Relate store built from **37 real
 > suite matches between 12 models** (closed and open-weights) and every live race run since, so everything below
 > reproduces from a clean clone with **no API keys and no cost**.
 
-> **The record grows.** A live race on the hosted runner is sealed by the same engine on the same tests, imported
-> here and counted like any other match played under the same conditions, so the page and the commands answer from
-> more matches as races are run. The figures printed in this README are the record as it stood at 05:00 UTC on
-> Nov 26, 2026 (49 matches). Add `--until 2026-11-26T05:00` to a command and what you run is exactly what you read;
-> leave it off for the record as it is today. Corrections to the data, and one change to how fitness is judged,
-> are described under [Corrections](#corrections).
+> **The record grows.** A live race on the hosted runner is sealed by the same engine on the same tests. It joins
+> the record as it ends (the page reads it from Ledger's live Relate store) and is archived in this repository by
+> an import, and from then on it counts like any other match played under the same conditions. The figures printed
+> in this README are the record as it stood at 05:00 UTC on Nov 26, 2026 (49 matches). Add
+> `--until 2026-11-26T05:00` to a command and what you run is exactly what you read; leave it off for the record as
+> it is today. Corrections to the data, and one change to how fitness is judged, are described under
+> [Corrections](#corrections).
 
 ## The idea in one table
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index: a tie on paper.
@@ -53,8 +88,8 @@ business could run unattended: Haiku made one wrong access decision in 81 attemp
 
 The two columns disagree because they measure different things. **The right result** asks whether every decision
 was right. **Scenarios won** also counts how a model got there. On the refund queue both models decide the
-refunds correctly, and 28 of Haiku's 37 wins are on process alone: in two attempts of three, DeepSeek decides a
-request before looking up a record the brief tells it to read. Whether that matters is not Ledger's call. It is a
+refunds correctly, and 28 of Haiku's 37 wins are on process alone: in 65 of its 95 attempts DeepSeek decided a
+request without ever looking up a record the brief tells it to read. Whether that matters is not Ledger's call. It is a
 fault with a level, and **the right answer depends on who is asking**: for one person it is minor and both models
 are fit; for a business it is serious and neither is. Ledger makes both calls, shows the count behind each, says
 "leaning" when a lead could still be chance, and lets you change the rule.
@@ -82,9 +117,9 @@ process questions of them. Give one a level and the verdict is judged with it
 ask a [Gladiator race runner](https://github.com/Loothore907/gladiator-core/blob/main/docs/DEPLOYMENT.md) for one
 fresh scenario between the two models chosen in step 2 (each model's card says whether it can race live). It first states
 what the record expects, or that the two have never met on this task, then streams the race as it happens, then
-says whether the result was in line with the record or against it. The sealed result is then imported into the
-record (the runner starts the import when a race ends, and a scheduled job picks up anything missed), and from then
-on the verdict counts it, provided it was played under the record's conditions: the same settings, difficulty and
+says whether the result was in line with the record or against it. The sealed result joins the record as the
+race ends (through the live record, below; an import also archives it in this repository), and the verdict is read
+again with it, provided it was played under the record's conditions: the same settings, difficulty and
 scoring. A race at another level is kept on file, and the verdict says so and leaves it out. A batch plays 10 or 25
 scenarios in one go, and one model on both lanes is a consistency
 check that is never counted as a head-to-head. Judges sign in once, with the "Judge sign-in"
