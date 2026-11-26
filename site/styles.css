@@ -79,7 +79,14 @@ h1 em { font-style: normal; text-decoration: underline; text-decoration-color: v
 .race-faults li { color: var(--stop); font-weight: 600; }
 .race-mistakes li { overflow-wrap: anywhere; }
 .live-tally { margin: 0 0 10px; padding: 8px 12px; border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; }
-.start-over { margin: 0 0 10px; }
+/* What is chosen so far and the way back to the start: stays at the top of the window while the page scrolls. */
+.trail { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 2px 8px rgb(0 0 0 / 10%); }
+.trail[hidden] { display: none; }
+#trail-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.trail button { flex: none; }
+/* so the strip never covers what the page scrolls to */
+.step, #live, #live-stage, #live-batch, #race { scroll-margin-top: 64px; }
+#live-stage:focus, #live-batch:focus { outline: none; }
 .live-pair { margin: 0 0 6px; font-size: 17px; }
 table.own { border-collapse: collapse; margin: 16px 0; width: 100%; max-width: 640px; }
 table.own caption { text-align: left; font-weight: 600; margin-bottom: 6px; }
@@ -389,6 +396,19 @@ figure.graph figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted
 .bsq.pass { border: 1.5px solid var(--win); background: var(--win); color: var(--win-ink); }
 .bsq.fail { border: 1.5px solid var(--stop); background: var(--stop-soft); color: var(--stop); }
 .bsq.skip { border-style: solid; color: var(--muted); }
+/* did not pass, though every decision was right: a step of the process was skipped */
+.bsq.fail.soft { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+/* the lane that won the scenario is ringed in its own colour; a level scenario is ringed in grey on both */
+.batch-lane.a .bsq.won { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4.5px var(--side-a); }
+.batch-lane.b .bsq.won { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4.5px var(--side-b); }
+.bsq.level { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--muted); }
+.bsqs { padding: 5px; gap: 9px; }
+/* the same marks, small, in the legend under the lanes */
+.bkey { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; border: 1.5px solid var(--line); font-size: 11px; font-weight: 700; vertical-align: middle; }
+.bkey.pass { border-color: var(--win); background: var(--win); color: var(--win-ink); }
+.bkey.fail { border-color: var(--stop); background: var(--stop-soft); color: var(--stop); }
+.bkey.soft { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+.bkey.skip { color: var(--muted); }
 .batch-table { margin-top: 6px; }
 .batch-list { margin: 0; padding-left: 20px; font-size: 14.5px; }
 .race-controls select { max-width: 100%; }

@@ -35,6 +35,10 @@
 </header>
 
 <main>
+  <div id="trail" class="trail" hidden>
+    <span id="trail-text"></span>
+    <button type="button" id="start-over" class="small">Start over</button>
+  </div>
   <section id="step-flow" class="step" aria-labelledby="h-flow">
     <h2 id="h-flow"><span class="num">1</span> Pick the workflow closest to yours</h2>
     <p id="flow-intro" class="note"></p>
@@ -47,7 +51,6 @@
     </form>
     <p class="note example-row">New here? <button type="button" id="example" class="quiet small" disabled>Show me an example</button> walks all three steps for two models that tie on a published index, on a task that tells them apart.</p>
     <p id="flow-note" class="note" role="status" aria-live="polite"></p>
-    <p class="start-over"><button type="button" id="start-over" class="quiet small" hidden>Start over</button></p>
     <div id="flow-cards" class="cards"></div>
   </section>
 
