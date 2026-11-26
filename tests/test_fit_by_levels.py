@@ -16,6 +16,9 @@ STORE = str(Path(__file__).resolve().parent.parent / "data" / "ledger.rl")
 HAIKU = "anthropic:claude-haiku-5-5"
 DEEPSEEK = "openrouter:deepseek/deepseek-v4.1-flash-1017"
 SKIPPED = "acted without reading"
+# What the record said at one moment (the moment the README's figures are read at). The record grows with every
+# live race, so a claim about what it holds is made of the record as it stood then.
+UNTIL = cli.parse_until("2026-11-26T05:00")
 
 
 def fault(name, attempts_with, kind="trap"):
@@ -49,9 +52,9 @@ def test_a_wrong_result_still_costs_the_bar_whatever_the_levels_say():
 
 def test_on_the_refund_queue_the_readers_level_for_one_fault_decides():
     ask = ("refund-queue", HAIKU, DEEPSEEK)
-    v = cli.verdict(STORE, *ask, profile="personal")
+    v = cli.verdict(STORE, *ask, profile="personal", until=UNTIL)
     deepseek, haiku = v["fit"][DEEPSEEK], v["fit"][HAIKU]
-    # every refund decision right in every attempt, and most of them with a lookup skipped
+    # at that moment: every refund decision right in every attempt, and most of them with a lookup skipped
     assert deepseek["right"] == deepseek["attempts"] and deepseek["passed"] < 0.5 * deepseek["attempts"]
     skipped = next(f for f in deepseek["faults"] if f["fault"] == SKIPPED)
     assert skipped["attempts_with"] == deepseek["attempts"] - deepseek["passed"] and skipped["level"] == "minor"
@@ -61,11 +64,11 @@ def test_on_the_refund_queue_the_readers_level_for_one_fault_decides():
     won_on_process = [n for n in v["notes"] if "it won them on process" in n and n.startswith("In ")]
     assert len(won_on_process) == 1 and HAIKU in won_on_process[0]
     # a reader who will not accept a skipped lookup gets the opposite answer, for both
-    strict = cli.verdict(STORE, *ask, profile="personal", overrides={SKIPPED: "unforgivable"})
+    strict = cli.verdict(STORE, *ask, profile="personal", overrides={SKIPPED: "unforgivable"}, until=UNTIL)
     assert strict["fit"][DEEPSEEK]["fit"] is False and strict["fit"][HAIKU]["fit"] is False
     assert strict["outcome"] == "neither fit"
     # and for a business it is serious by default: allowed in 2% of attempts, found in far more
-    business = cli.verdict(STORE, *ask, profile="enterprise")
+    business = cli.verdict(STORE, *ask, profile="enterprise", until=UNTIL)
     assert business["fit"][DEEPSEEK]["fit"] is False
     assert any(r.startswith(f"{SKIPPED} (serious)") for r in business["fit"][DEEPSEEK]["reasons"])
 
@@ -75,14 +78,19 @@ def test_right_results_are_counted_from_the_attempts_themselves():
         v = cli.verdict(STORE, task, HAIKU, DEEPSEEK, profile="personal")
         for model in (HAIKU, DEEPSEEK):
             f = v["fit"][model]
-            (row,) = cli.rows(
-                STORE,
-                "MATCH (:TestVersion {key: $version})<-[:USED]-(mt:Match)<-[:IN]-(x:Attempt)-[:BY]->(:Model {name: $m}) "
+            # every attempt it made at the task under those conditions: against an opponent, and against itself
+            counted = (
+                "MATCH (:TestVersion {{key: $version}})<-[:USED]-(mt:{world})<-[:IN]-(x:{attempt})-[:BY]->(:Model {{name: $m}}) "
                 "WHERE NOT mt.excluded AND mt.conditions = $conditions "
                 "RETURN count(x) AS attempts, sum(CASE WHEN x.task_correct THEN 1 ELSE 0 END) AS right, "
-                "sum(CASE WHEN x.passed THEN 1 ELSE 0 END) AS passed",
-                {"version": v["version"], "m": model, "conditions": v["conditions"]},
+                "sum(CASE WHEN x.passed THEN 1 ELSE 0 END) AS passed"
             )
+            asked = {"version": v["version"], "m": model, "conditions": v["conditions"]}
+            row = {"attempts": 0, "right": 0, "passed": 0}
+            for world, attempt in (("Match", "Attempt"), ("SelfCheck", "SelfAttempt")):
+                (part,) = cli.rows(STORE, counted.format(world=world, attempt=attempt), asked)
+                for key in row:
+                    row[key] += part[key] or 0
             assert (f["attempts"], f["right"], f["passed"]) == (row["attempts"], row["right"], row["passed"]), task
             assert f["right"] >= f["passed"]  # a pass is a right result that also followed the process
             # the head to head keeps the same two counts for the pairs these two played

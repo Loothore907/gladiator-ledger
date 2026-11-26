@@ -180,9 +180,11 @@ def attempt_props(res: dict, side: str, effort, efficiency: float | None) -> dic
 
 def flow_facts(sides: dict) -> dict:
     """What a run's records say about each workflow it played, for search and for the spec: its title, the brief
-    and policy the models were given (the lowest-numbered wording seen, so a rebuild picks the same text), its
+    and policy the models were given (the lowest-numbered wording seen in this run, and which one that is), its
     tags, the benchmark it is modelled on, and every tool a model used on it. Keys with no value are left out,
-    so loading never erases a fact another record supplied."""
+    so loading never erases a fact another record supplied. One run sees only part of a workflow (the tools its
+    two models happened to use, one wording of the brief): `settle_flows` makes one account of each workflow
+    from every run on file."""
     seen: dict[str, dict] = {}
     for side in sides.values():
         for res in side["results"]:
@@ -205,9 +207,32 @@ def flow_facts(sides: dict) -> dict:
     out = {}
     for node, flow in seen.items():
         flow["tools"] = sorted(flow["tools"])
-        flow.pop("wording")
+        if not flow.get("brief"):
+            flow.pop("wording")  # no text was kept, so there is no wording to name
         out[node] = {k: v for k, v in flow.items() if v not in (None, [], "")}
     return out
+
+
+def settle_flows(runs: list[dict]) -> None:
+    """One account of each workflow version from every run on file, written into every row of that version: every
+    tool any model used on it, and the brief and policy of its lowest-numbered wording (from the earliest run
+    that has it). Without this the graph kept whatever the record loaded last happened to say, so the text of a
+    workflow, and the tools listed for it, could change with every race that was imported."""
+    rows: dict[str, list[dict]] = {}
+    for run in sorted(runs, key=lambda r: r["run_id"]):
+        for scenario in [*run["matches"], *run["self_checks"]]:
+            rows.setdefault(scenario["version_key"], []).append(scenario["version"])
+    for versions in rows.values():
+        tools = sorted({tool for v in versions for tool in v.get("tools") or []})
+        worded = [v for v in versions if v.get("brief")]
+        text = min(worded, key=lambda v: v.get("wording", 0)) if worded else {}  # the first of the lowest wording
+        settled = {k: text[k] for k in ("brief", "policy", "wording") if text.get(k) not in (None, "")}
+        if tools:
+            settled["tools"] = tools
+        for v in versions:
+            for key in ("brief", "policy", "wording", "tools"):
+                v.pop(key, None)
+            v.update(settled)
 
 
 def run_rows(body: dict, seal: str) -> dict:
@@ -390,6 +415,7 @@ def read_records(root: Path) -> Evidence:
         # costs are corrected as the record is read (ledger/costs.py); the sealed file itself is never changed
         body = costs.corrected(record["body"], costs.read_billed(path, record["sha256"]))
         out.runs.append(run_rows(body, record["sha256"]))
+    settle_flows(out.runs)
     return out
 
 
