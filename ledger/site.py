@@ -1,7 +1,7 @@
 """Export what the browser demo needs (site/data/): the same rows, the same Cypher and the same rules as the
 command line, so the page builds the same graph in the visitor's browser and gives the same answers.
 
-  graph.json     schema statements, the three write statements, and the rows each bridge produced
+  graph.json     schema statements, the write statements, and the rows each bridge produced
   questions.json every Cypher question by name
   rules.json     constants the page must share with the command line (thresholds, filler words, guardrails)
   expected.json  answers computed here by the command-line code, which the page's own answers are checked against
@@ -23,6 +23,9 @@ CHECKED = [
     ("gladiator/incident-triage", "anthropic:claude-haiku-5-5", "openrouter:minimax/minimax-m3.1-flash"),
     ("gladiator/refund-queue", "openrouter:deepseek/deepseek-v4.1-flash-1017", "openrouter:minimax/minimax-m3.1-flash"),
     ("gladiator/access-review", "openai:gpt-6.1-terra", "anthropic:claude-sonnet-5-5"),
+    # a pair where one model has also been run against itself (a self run): its attempts there count in its own
+    # fitness and its consistency is reported, on the page as on the command line
+    ("gladiator/access-review", "anthropic:claude-haiku-5-5", "openrouter:deepseek/deepseek-v4.1-flash-1017"),
 ]
 # A reader's own rule, to check that overrides move the answer the same way on the page.
 OWN_RULE = {"acted without reading": "unforgivable", "duplicate effect": "minor"}
@@ -89,6 +92,9 @@ def export(data: Path, store: str, out: Path) -> dict:
                     "includes": load.WRITE_INCLUDES,
                     "faults": load.WRITE_FAULTS,
                     "made": load.WRITE_MADE,
+                    # a run of one model on both sides: its own kind of node, written after the runs themselves
+                    "self": load.WRITE_SELF,
+                    "self_made": load.WRITE_SELF_MADE,
                     "checks": load.WRITE_VALIDATIONS,
                     "scores": load.WRITE_SCORES,
                 },
