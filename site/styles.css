@@ -54,6 +54,22 @@ h1 em { font-style: normal; text-decoration: underline; text-decoration-color: v
 .live-banner.refused { border-color: var(--warn); background: var(--warn-soft); }
 .live-jump { margin: 0 0 14px; }
 .relate-badge { display: inline-block; padding: 2px 9px; margin-right: 6px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 1px; }
+/* Step 3 in two panes. On a narrow window the three parts read top to bottom (the answer, the graph, then the
+   race and the reports). On a wide one the section widens past the page's column, the graph pane is lifted to the
+   right of the other two and stays in view while they are read; it scrolls by itself when it is taller than the
+   window. */
+.pane-title { display: none; margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+@media (min-width: 1280px) {
+  #step-verdict { --wide: min(1400px, calc(100vw - 48px)); width: var(--wide); margin-left: calc((100% - var(--wide)) / 2); }
+  .panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr); column-gap: 28px; align-items: start; }
+  .pane-answer.top { grid-column: 1; grid-row: 1; } .pane-answer.bottom { grid-column: 1; grid-row: 2; }
+  .pane-graph { grid-column: 2; grid-row: 1 / span 2; position: sticky; top: 62px; max-height: calc(100vh - 74px); overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 12px 0; scrollbar-width: thin; }
+  .pane-title { display: block; }
+  .pane-graph .pair-graph { margin-top: 0; }
+  /* in the pane a row's label goes above its cells, so a batch of 25 stays on one line */
+  .pane-graph .grow { grid-template-columns: 1fr; gap: 3px; padding: 6px 0; }
+  .pane-graph .grun br { display: none; } .pane-graph .grun .gcount::before { content: " · "; }
+}
 .pair-graph { margin: 22px 0 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 .pair-graph:empty { display: none; }
 .pair-graph-title { margin: 0 0 4px; font-size: 17px; }

@@ -799,6 +799,31 @@ RETURN m.name AS model, count(x) AS attempts, sum(CASE WHEN x.passed THEN 1 ELSE
        sum(CASE WHEN coalesce(x.task_correct, x.passed) THEN 1 ELSE 0 END) AS right,
        avg(x.cost_usd) AS cost_per_attempt`;
 
+// Step 3 in two panes (owner, 2026-11-26): what a visitor decides with (the answer, the race, the reports) and
+// the evidence it rests on (the Relate graph, down to the steps). On a wide window they stand side by side and
+// the graph stays in view while a race plays or a level is changed. On a narrow one the page reads top to bottom
+// as before: the answer, then the graph, then the race and the reports. So the graph pane sits in the middle of
+// the markup, and only a wide window lifts it out to the right (styles.css, .panes).
+function panes(top, graphs, bottom) {
+  const part = (cls, title, children) => el('div', { class: `pane pane-answer ${cls}` }, title ? el('p', { class: 'pane-title' }, title) : null, children);
+  return el(
+    'div',
+    { class: 'panes', id: 'panes' },
+    part('top', 'The answer, the race and the reports', top),
+    el('aside', { class: 'pane pane-graph', id: 'pane-graph', 'aria-label': 'The evidence, in the Relate graph' }, el('p', { class: 'pane-title' }, 'The evidence, in the graph'), graphs),
+    part('bottom', null, bottom),
+  );
+}
+
+// Brings one node of the graph pane into view inside the pane, without moving the page: on a wide window the pane
+// scrolls by itself, and a scenario that has just been ringed may be below what it shows.
+function showInGraphPane(node) {
+  const pane = $('pane-graph');
+  if (!pane || !node || pane.scrollHeight <= pane.clientHeight + 4) return;
+  const top = node.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+  pane.scrollTo({ top: Math.max(0, top - pane.clientHeight / 3), behavior: 'smooth' });
+}
+
 // Two models that have never met on this task: say so, show what each did against others, and leave the
 // head-to-head to a match (a live race, for a signed-in visitor).
 function drawNoRecord(v, own) {
@@ -813,7 +838,7 @@ function drawNoRecord(v, own) {
       el('td', null, r ? `$${fixed(r.cost_per_attempt, 4)}` : '-'),
     );
   };
-  $('verdict-body').replaceChildren(
+  const band = [
     el(
       'div',
       { class: 'band even', id: 'verdict-band' },
@@ -829,9 +854,8 @@ function drawNoRecord(v, own) {
       el('thead', null, el('tr', null, el('th', { scope: 'col' }, 'Model'), el('th', { scope: 'col' }, 'Attempts with the right result'), el('th', { scope: 'col' }, 'Of those, clean runs'), el('th', { scope: 'col' }, 'Cost per attempt'))),
       el('tbody', null, row(v.a), row(v.b)),
     ),
-    el('div', { id: 'pair-graph', class: 'pair-graph' }),
-    el('div', { id: 'live', class: 'race live' }),
-  );
+  ];
+  $('verdict-body').replaceChildren(panes(band, [el('div', { id: 'pair-graph', class: 'pair-graph' })], [el('div', { id: 'live', class: 'race live' })]));
 }
 
 // ---- step 3: verdict and spec ---------------------------------------------------------------------------------
@@ -1539,7 +1563,7 @@ async function evidenceGraph(v, ring = null, justRan = false) {
     el(
       'div',
       { class: 'grow', 'data-run': row.run },
-      el('div', { class: 'grun', title: `Sealed record ${row.run}` }, el('b', null, runWhen(row.run)), ` · ${runKind(row.suite)}`, el('br'), plural(row.cells.length, 'scenario'), row.cells.some((c) => c.index === ring) ? (justRan ? ' · just run' : ' · being watched') : ''),
+      el('div', { class: 'grun', title: `Sealed record ${row.run}` }, el('b', null, runWhen(row.run)), ` · ${runKind(row.suite)}`, el('br'), el('span', { class: 'gcount' }, plural(row.cells.length, 'scenario'), row.cells.some((c) => c.index === ring) ? (justRan ? ' · just run' : ' · being watched') : '')),
       el('div', { class: 'gcells' }, row.cells.map((c) => cell(c, row))),
     );
   const liveRow = live.length
@@ -1612,6 +1636,7 @@ async function drawPairGraph(v, ring = null, justRan = false) {
     $('world-graph') || el('div', { id: 'world-graph', class: 'world-graph' }),
   );
   await drawWorldGraph(v, ring, justRan);
+  if (ring !== null) showInGraphPane(box.querySelector('.gdot.ring'));
 }
 
 // Under the dots: one of them opened. The scenario just watched, or the first one, as a graph of its own: the
@@ -3124,12 +3149,9 @@ function fightCard(spec, v) {
   ];
 
   // The scenarios themselves are in the Relate graph box (evidenceGraph): one cell each, to point at and to open.
-  const arena = [
-    el('div', { id: 'pair-graph', class: 'pair-graph' }),
-    workedPanel(v),
-    el('div', { id: 'race', class: 'race', hidden: true }),
-    el('div', { id: 'live', class: 'race live' }),
-  ];
+  // the evidence (the graph pane), and where a scenario is replayed and a live race is run (under the answer)
+  const graphs = [el('div', { id: 'pair-graph', class: 'pair-graph' }), workedPanel(v)];
+  const stage = [el('div', { id: 'race', class: 'race', hidden: true }), el('div', { id: 'live', class: 'race live' })];
 
   const num = (text, cls = '') => el('span', { class: `fig ${cls}` }, text);
   const beyondPair = [fa.attempts - A.attempts, fb.attempts - B.attempts]; // attempts in other matches (and against itself)
@@ -3256,7 +3278,7 @@ function fightCard(spec, v) {
     ' · sealed records ', v.evidence.map((e, i) => [i ? ', ' : '', el('code', null, str(e.seal_sha256).slice(0, 12))]),
     ' · check every record yourself: ', el('code', null, 'uv run ledger verify'),
   );
-  return [tolerance, card, arena, el('div', { class: 'tape' }, tape, slipsHead, slips), band, proof];
+  return { answer: [tolerance, card, el('div', { class: 'tape' }, tape, slipsHead, slips), band, proof], stage, graphs };
 }
 
 function drawVerdict(spec, v) {
@@ -3272,7 +3294,8 @@ function drawVerdict(spec, v) {
   const evidenceText = evidenceMarkdown(v, spec.blueprint.title || spec.task);
 
   const copyNote = el('span', { class: 'note', role: 'status', 'aria-live': 'polite' });
-  const body = [
+  const fight = fightCard(spec, v);
+  const top = [
     signInOutcome === 'signed'
       ? el(
           'p',
@@ -3281,8 +3304,11 @@ function drawVerdict(spec, v) {
           el('span', { class: 'note' }, ' The record comes first; the live race is just below it.'),
         )
       : null,
-    fightCard(spec, v),
+    fight.answer,
     d.notes.length ? el('ul', { class: 'notes' }, d.notes.map((n) => el('li', null, plainNames(n, [d.a, d.b])))) : null,
+  ];
+  const bottom = [
+    fight.stage,
 
     el('h3', null, 'Blueprint'),
     el('p', { class: 'note' }, 'What the result was earned on. Build the real flow to match it, then re-test.'),
@@ -3370,7 +3396,7 @@ function drawVerdict(spec, v) {
         'scenario) and the evidence report (fit, every fault with its count, every scenario and its sealed record).',
     ),
   ];
-  $('verdict-body').replaceChildren(...body.flat(Infinity).filter(Boolean));
+  $('verdict-body').replaceChildren(panes(top, fight.graphs, bottom));
 }
 
 function download(markdown, name) {

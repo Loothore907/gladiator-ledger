@@ -13,9 +13,9 @@ you can watch, and a fresh race that could prove the record wrong.
 | 0:00–0:15 | README, "The idea in one table" | "Claude Haiku and DeepSeek are a tie on a published leaderboard. They even cost the same. On four real workflows the right choice depends on the task and on who is asking. Ledger tells you which, with proof." |
 | 0:15–0:25 | The page, step 1: the four workflow cards; click Refund queue | "Pick the workflow closest to yours. Four are tested, each with what its test catches. If yours is not here, it says so." |
 | 0:25–0:40 | Step 2: Claude Haiku 5.5, then DeepSeek | "Pick two models. The ones with the most head-to-head evidence come first. A published score only finds a fair opponent. It never decides." |
-| 0:40–1:00 | Step 3: the two models side by side, the "Relate graph" box with a cell for every scenario, the verdict band; set "acted without reading" to unforgivable and back; flip the tolerance to Enterprise | "Forty-three scenarios, the same generated world for both each time. Both models get every refund right. Haiku took 37, most of them on process: DeepSeek keeps deciding before it has looked a record up. Does that matter? That is my call, not the tool's. For one person it is minor, and both are fit. I make it unforgivable, and neither is. For a business running it unattended, neither is." |
+| 0:40–1:00 | Step 3, in two panes: the answer on the left (the two models, the verdict band), the "Relate graph" box on the right with a cell for every scenario; set "acted without reading" to unforgivable and back; flip the tolerance to Enterprise | "Seventy scenarios, the same generated world for both each time. Both models get every refund right. Haiku took 60, most of them on process: DeepSeek keeps deciding before it has looked a record up. Does that matter? That is my call, not the tool's. For one person it is minor, and both are fit. I make it unforgivable, and neither is. For a business running it unattended, neither is." |
 | 1:00–1:20 | Point at a few cells in the "Relate graph" box, then click one: the race replays at 8× | "Every cell is a real race I can replay. Each mark is a step: looking something up, acting, a timeout, a check. This is the sealed record played back, not a re-run." |
-| 1:20–1:45 | The live panel: "…the record favours Haiku"; press Race them live; lanes fill; the result line | "Now the prediction is at risk. One brand-new scenario, generated this minute. The record favours Haiku. Watch." (pause for the finish) "In line with the record. The new result is sealed, and it is already in the graph: one more dot, its world drawn underneath, and the verdict read again with it." (scroll up to the ringed dot) |
+| 1:20–1:45 | The live panel: "…the record favours Haiku"; press Race them live; lanes fill; the result line | "Now the prediction is at risk. One brand-new scenario, generated this minute. The record favours Haiku. Watch." (pause for the finish) "In line with the record. The new result is sealed, and it is already in the graph: one more cell, its world drawn underneath, and the verdict read again with it." (point at the ringed cell on the right: the graph pane has brought it into view) |
 | 1:45–2:00 | Download the spec; then `uv run ledger verify` in a terminal | "Then the build plan: the job as tested, the settings, a guardrail for each hazard. Every match is sealed and both halves are published, so anyone can check it. Relate holds it all: the graph in your browser, the same graph on the command line and for your own assistant." |
 
 ## If the live race is not available when recording
@@ -28,8 +28,11 @@ answer." Do not present a replay as live.
 - Re-check every number against the page on the day: the scenario counts and which model the record favours.
   Live races join the record as they end, so the page's counts move as races are run and the figures in this
   outline (the record on Nov 26) will be a little behind. Say what the page shows.
-- After the live race, wait for "It is in the record now" under the result before scrolling up: that line is
-  the moment the race joined, and the ringed cell in the "Relate graph" box is the race just run.
+- Record with the browser window at least 1280 px wide (a full-screen window on most laptops is): step 3 then
+  stands in two panes and the graph stays in view on the right while the race plays on the left. Narrower, the
+  page reads top to bottom and you would have to scroll between the race and the graph.
+- After the live race, wait for "It is in the record now" under the result before pointing at the graph: that
+  line is the moment the race joined, and the ringed cell in the "Relate graph" box is the race just run.
 - Run one live race beforehand to see how long it takes (about half a minute to a minute), and decide whether to
   cut the wait in the edit. If you cut it, keep the start and the finish in one take and say that time was cut.
 - Terminal about 120 columns, large font.

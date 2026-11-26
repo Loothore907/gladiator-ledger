@@ -10,7 +10,9 @@ workflow and two models that have played each other on it, chooses whose toleran
 the result as a fight card: the two models, the evidence as a graph (a row per sealed match record, a cell per
 scenario, each cell saying how both models ended), the comparison, every fault with a level
 they can change, one verdict, and the build spec (the same Markdown `ledger spec` writes). Any scenario replays
-as a race, step by step, from `data/replays/`.
+as a race, step by step, from `data/replays/`. On a window 1280 px wide or more the result stands in two panes:
+the answer, the race and the reports on the left, and the graph on the right, where it stays in view. On a
+narrower one it reads top to bottom.
 
 **The steps, in the graph.** The graph the page builds on load stops at the attempt. When a question is about how
 a model worked, the page fetches the steps of the scenarios it needs from `data/steps/` (one small file per match
