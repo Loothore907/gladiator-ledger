@@ -384,12 +384,12 @@ async function main() {
       const inBand = await page.locator('#second-chart .pc-dot.first').count();
       if (inBand !== firstChoice) problems.push(`the picture fills ${inBand} dots for ${firstChoice} first-choice pairings`);
       if (!/does not\s+say who does the task better/.test(await page.locator('#second-chart figcaption').innerText())) problems.push('the pairing picture does not say it only suggests who to pair');
-      await page.waitForSelector('.rounds button.round', { timeout: 8000 }).catch(() => {});
+      await page.waitForSelector('#pair-graph button.gdot', { timeout: 8000 }).catch(() => {});
     }
-    const squares = await page.locator('.rounds button.round').count();
-    if (!squares) problems.push('the arena has no scenario to open');
+    const squares = await page.locator('#pair-graph button.gdot').count();
+    if (!squares) problems.push('the graph has no scenario to open');
     else {
-      const square = page.locator('.rounds button.round').first();
+      const square = page.locator('#pair-graph button.gdot').first();
       const label = await square.getAttribute('title');
       await square.click();
       const opened = await page.waitForSelector('#race-end', { timeout: 10000 }).then(() => true, () => false);
@@ -401,13 +401,15 @@ async function main() {
         const finish = await page.locator('#race-finish').innerText();
         const outcomes = await page.locator('.race .outcome:not([hidden])').count();
         if (outcomes !== 2) problems.push(`the finished race shows ${outcomes} of 2 grades`);
-        const winner = /won by (.+?) \(/.exec(label || '');
-        if (winner && !finish.startsWith(winner[1])) problems.push(`the square says ${JSON.stringify(label)} but the race ends ${JSON.stringify(finish)}`);
+        // the cell and the end of its replay say the same thing: who took it, and why, in the same words
+        const winner = /: taken by (.+?) \((.+?)\)\. /.exec(label || '');
+        if (!winner && !/: a tie\. /.test(label || '')) problems.push(`the cell of a scenario does not say who took it: ${JSON.stringify(label)}`);
+        if (winner && finish !== `${winner[1]} took this scenario: ${winner[2]}.`) problems.push(`the cell says ${JSON.stringify(label)} but the race ends ${JSON.stringify(finish)}`);
         const hidden = await page.locator('.race .track .tick[hidden]').count();
         if (hidden) problems.push(`${hidden} steps are still hidden after the race ended`);
         // the graph picture under the race: one dot per scenario, and exactly the watched one ringed
-        const dots = await page.locator('#pair-graph figure.graph circle').count();
-        const ringed = await page.locator('#pair-graph figure.graph circle.ring').count();
+        const dots = await page.locator('#pair-graph figure.graph .gdot').count();
+        const ringed = await page.locator('#pair-graph figure.graph .gdot.ring').count();
         if (dots !== squares || ringed !== 1) problems.push(`the graph picture shows ${dots} dots (${ringed} ringed) for ${squares} scenarios`);
         // under the replay: the same world as a picture and item by item, read from the steps now in the graph.
         // It must say what the command line says about that scenario (the first of this pair).
@@ -527,7 +529,7 @@ async function main() {
     // The Relate graph in step 3: one simple picture, labelled as a Relate graph, showing this verdict's own
     // numbers and the question it was read with. The panel that used to sit beside the steps is gone.
     if (example) {
-      await page.waitForSelector('#pair-graph figure.graph circle', { timeout: 8000 }).catch(() => problems.push('step 3 has no graph picture'));
+      await page.waitForSelector('#pair-graph figure.graph .gdot', { timeout: 8000 }).catch(() => problems.push('step 3 has no graph picture'));
       // and under the dots, one scenario opened as a graph of its own without a click: the records of its world,
       // with every mark shown (it is drawn as the scenario ended)
       await page.waitForSelector('#world-graph figure.world > svg rect.wnode', { timeout: 15000 }).catch(() => problems.push('step 3 does not show a scenario as a graph of its records'));
@@ -537,8 +539,18 @@ async function main() {
         const v = await window.ledgerDemo.current();
         return {
           rounds: v.rounds.length,
-          dots: document.querySelectorAll('#pair-graph circle.gdot:not(.live)').length,
-          a: document.querySelectorAll('#pair-graph circle.gdot.a:not(.live)').length,
+          dots: document.querySelectorAll('#pair-graph .gdot:not(.live)').length,
+          a: document.querySelectorAll('#pair-graph .gdot.a:not(.live)').length,
+          // the picture is drawn top down: a row per sealed record, and each cell's halves say how the two
+          // attempts of that scenario ended, exactly as the verdict's own rounds have it
+          records: new Set(v.rounds.map((r) => r.run)).size,
+          rows: document.querySelectorAll('#pair-graph .grow:not(.live)').length,
+          perRow: [...document.querySelectorAll('#pair-graph .grow:not(.live)')].map((row) => [row.dataset.run, row.querySelectorAll('.gdot').length]),
+          halves: [...document.querySelectorAll('#pair-graph .gdot:not(.live)')].map((cell) => [...cell.querySelectorAll('.half')].map((h) => ['clean', 'skipped', 'wrong'].find((k) => h.classList.contains(k))).join('/')).join(' '),
+          wanted: v.rounds.map((r) => [[r.a_right, r.a_passed], [r.b_right, r.b_passed]].map(([right, clean]) => (clean ? 'clean' : right ? 'skipped' : 'wrong')).join('/')).join(' '),
+          wantedRows: Object.entries(v.rounds.reduce((n, r) => ({ ...n, [r.run]: (n[r.run] || 0) + 1 }), {})),
+          grid: document.querySelectorAll('.rounds, .round').length,
+          lines: document.querySelectorAll('#pair-graph figure.graph line').length,
           winsA: v.wins[v.a],
           pictures: document.querySelectorAll('figure.graph').length,
           stats: document.getElementById('graph-stats')?.innerText || '',
@@ -549,13 +561,24 @@ async function main() {
       });
       if (shown.dots !== shown.rounds || shown.a !== shown.winsA) problems.push(`the graph picture shows ${shown.dots} scenarios (${shown.a} won by the first model), the verdict has ${shown.rounds} (${shown.winsA})`);
       if (shown.pictures !== 1) problems.push(`the page should have one graph picture, it has ${shown.pictures}`);
+      if (shown.rows !== shown.records || JSON.stringify(shown.perRow) !== JSON.stringify(shown.wantedRows)) problems.push(`the graph picture has ${shown.rows} rows (${JSON.stringify(shown.perRow)}) for ${shown.records} sealed records (${JSON.stringify(shown.wantedRows)})`);
+      if (shown.halves !== shown.wanted) problems.push('the cells of the graph picture do not say how each attempt ended as the verdict has it');
+      if (shown.grid) problems.push('the old grid of squares is still on the page beside the graph');
+      if (shown.lines) problems.push(`the graph picture still draws ${shown.lines} lines, one for every link of every scenario`);
+      // pointing at a scenario says what happened in it, in a line that stays when the pointer moves on
+      await page.locator('#pair-graph button.gdot').nth(Math.min(3, shown.dots - 1)).hover();
+      const pointed = await page.locator('#graph-tip').innerText();
+      if (!/^Scenario \d+ of \d+, in the (suite match|live race|live batch) of \w+ \d+, \d\d:\d\d UTC: /.test(pointed) || !/(clean run|right, a step skipped|wrong result)\.$/.test(pointed)) problems.push(`pointing at a scenario says: ${JSON.stringify(pointed)}`);
+      await page.locator('#h-verdict').hover();
+      if ((await page.locator('#graph-tip').innerText()) !== pointed) problems.push('what was said of a scenario is gone as soon as the pointer moves on');
+      if ((await page.locator('#pair-graph .gdot.shown').count()) !== 1) problems.push('the scenario whose world is drawn under the rows is not marked in them');
       if (shown.old) problems.push('the graph panel beside the steps is still on the page');
       if (!new RegExp(`${shown.rounds} rows · .* ms`).test(shown.stats) || !shown.query.includes('MATCH')) problems.push(`the graph picture does not show the query behind it and what it returned: ${JSON.stringify(shown.stats)}`);
       if (!/relate/i.test(shown.badge)) problems.push('the graph picture is not labelled as a Relate graph');
       // a scenario in the picture opens its replay, and is then the ringed one
-      await page.locator('#pair-graph circle.gdot:not(.live)').first().click();
+      await page.locator('#pair-graph button.gdot').first().click();
       await page.waitForSelector('#race .track .tick', { state: 'attached', timeout: 8000 }).catch(() => problems.push('clicking a scenario in the graph picture did not open its replay'));
-      await page.waitForSelector('#pair-graph circle.gdot.ring', { timeout: 8000 }).catch(() => problems.push('the scenario being watched is not ringed in the graph picture'));
+      await page.waitForSelector('#pair-graph .gdot.ring', { timeout: 8000 }).catch(() => problems.push('the scenario being watched is not ringed in the graph picture'));
     }
     const foot = await page.locator('footer').innerText();
     if (!/This view cannot start a match/.test(foot) || /real money/.test(foot)) problems.push('the small print of the public page should say this view cannot start a match');
@@ -787,8 +810,8 @@ async function main() {
       const off = await live.locator('#live-stage .track .tick').evaluateAll((marks) => marks.filter((m) => parseFloat(m.style.left) > 100).length);
       if (off) problems.push(`${off} live steps are drawn past the end of the track`);
       // the live result joined the graph as its own kind of node: drawn dashed, and counted in no verdict
-      await live.waitForSelector('#pair-graph circle.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
-      const drawn = await live.locator('#pair-graph circle.gdot').count(); // the scenario dots, not the marks of the world drawn under them
+      await live.waitForSelector('#pair-graph .gdot.live', { timeout: 5000 }).catch(() => problems.push('the live result did not join the graph picture'));
+      const drawn = await live.locator('#pair-graph .gdot').count(); // the scenario cells, not the marks of the world drawn under them
       if (drawn !== pair.pairs + 1) problems.push(`the graph after the live race shows ${drawn} dots, not ${pair.pairs} recorded + 1 live`);
       const after = await live.evaluate(([t, a, b]) => window.ledgerDemo.verdict(t, a, b), [pair.task, pair.a, pair.b]);
       if (after.pairs !== pair.pairs || after.wins[pair.a] !== pair.wins[pair.a]) problems.push('a live result changed the recorded verdict');
@@ -960,7 +983,7 @@ async function main() {
         await first.waitForFunction(() => document.getElementById('live-result').innerText.includes('the first these two have played'), null, { timeout: 10000 }).catch(() => problems.push('a first race between two models is not described as the first evidence'));
         await first.waitForFunction(() => /met once/.test(document.getElementById('band-live')?.innerText || ''), null, { timeout: 6000 }).catch(() => problems.push('after a first live race the no-verdict band does not say the two have now met live'));
         if (!(await first.locator('#live-history').innerText()).includes('all that is known')) problems.push('the live history of a pair with no record does not say it is all that is known');
-        await first.waitForFunction(() => document.querySelectorAll('#pair-graph circle.live').length === 1, null, { timeout: 6000 }).catch(() => problems.push('a first live race is not drawn in the graph picture of a pair with no record'));
+        await first.waitForFunction(() => document.querySelectorAll('#pair-graph .gdot.live').length === 1, null, { timeout: 6000 }).catch(() => problems.push('a first live race is not drawn in the graph picture of a pair with no record'));
         if (runner.asked.a !== neverMet.a || runner.asked.b !== neverMet.b) problems.push(`the page raced ${runner.asked.a} vs ${runner.asked.b}, not the pair chosen in step 2`);
         if (!(await first.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
         await first.close();
@@ -1015,7 +1038,7 @@ async function main() {
       await back.waitForSelector('#live-history .race-card', { timeout: 6000 }).catch(() => problems.push('the live history was lost on the next visit'));
       const kept = await back.locator('#live-history').innerText();
       if (!kept.includes('First draft from') || !kept.includes('it chose')) problems.push(`the live history on the next visit does not carry the write-ups: ${JSON.stringify(kept.slice(0, 300))}`);
-      if ((await back.locator('#pair-graph circle.live').count()) < 1) problems.push('earlier live races are not drawn in the graph on the next visit');
+      if ((await back.locator('#pair-graph .gdot.live').count()) < 1) problems.push('earlier live races are not drawn in the graph on the next visit');
       await context.close();
     } finally {
       runner.close();

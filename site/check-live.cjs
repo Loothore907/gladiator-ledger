@@ -212,7 +212,7 @@ async function pick(page, flow, a, b) {
   await card.waitFor({ state: 'attached' });
   if (await card.evaluate((input) => Boolean(input.closest('#second-more')) && !document.getElementById('second-more').open)) await page.locator('#second-more-summary').click();
   await card.check();
-  await page.waitForFunction(() => !document.getElementById('step-verdict').hidden && document.querySelector('#pair-graph svg'), null, { timeout: 30000 });
+  await page.waitForFunction(() => !document.getElementById('step-verdict').hidden && document.querySelector('#pair-graph .gdot'), null, { timeout: 30000 });
 }
 
 // Everything in a page's graph but the steps (which each page loads only for the scenarios it was asked about),
@@ -287,7 +287,7 @@ async function main() {
     await pick(page, 'Access', want.a, want.b);
     const round = await page.evaluate((run) => window.ledgerDemo.current().then((v) => v.rounds.findIndex((x) => x.run === run)), FILED[0]);
     check(round >= 0, `the verdict on screen has no scenario from ${FILED[0]}`);
-    await page.locator('#pair-graph circle.gdot').nth(round).click();
+    await page.locator('#pair-graph button.gdot').nth(round).click();
     await page.waitForSelector('#race .lane', { timeout: 20000 }).catch(() => problems.push('a scenario from the live record does not replay'));
     check(fetched.includes(`200 /replay/${FILED[0]}`), `the replay of ${FILED[0]} was not read from the live record (read: ${fetched.join(', ')})`);
     await page.waitForSelector('#world-graph svg', { timeout: 30000 }).catch(() => problems.push('the world of a scenario from the live record is not drawn'));
@@ -307,7 +307,7 @@ async function main() {
     const second = await page.evaluate(() => window.ledgerDemo.current());
     check(second.pairs === first.pairs + 1, `the verdict on screen went from ${first.pairs} judged pairs to ${second.pairs} after one race, not ${first.pairs + 1}`);
     check(second.evidence.some((e) => e.run === RACE), 'the verdict on screen does not list the race just run among its sealed records');
-    check((await page.locator('#verdict-body').innerText()).includes(`The arena: ${second.pairs} scenarios`), 'the verdict was not drawn again with the race in it');
+    check(((await page.locator('#verdict-body').textContent()) || '').includes(`Head to head: the ${second.pairs} scenarios these two played against each other`), 'the verdict was not drawn again with the race in it');
     check((await page.locator('#live-outcome').count()) === 1 && (await page.locator('#live-stage .lane').count()) === 2, 'the race just run is no longer on screen after the verdict was read again');
     // that race, as it really went: both got every refund right, DeepSeek skipped lookups and Haiku ran it clean.
     // So it is said as a win on process, each lane ends in the page's own words, and each result is set beside
@@ -317,9 +317,11 @@ async function main() {
     check(/as usual: right in \d+ of \d+/.test(outcome) && /clean in \d+ of \d+/.test(outcome), `the box under the race does not set each result beside the record: ${outcome.slice(0, 400)}`);
     const ends = await page.locator('#live-stage .outcome .end').allInnerTexts();
     check(ends.join(' | ') === 'Right result, a step skipped | ✓ Clean run', `the lanes of the race just run end with ${JSON.stringify(ends)}`);
-    await page.waitForFunction((n) => document.querySelectorAll('#pair-graph circle.gdot:not(.live)').length === n, second.pairs, { timeout: 20000 }).catch(() => problems.push('the evidence graph does not show the race as one more scenario'));
-    check((await page.locator('#pair-graph circle.gdot.live').count()) === 0, 'the race is still drawn as a live result beside the record');
-    check((await page.locator('#pair-graph circle.gdot.ring').count()) === 1, 'the scenario of the race just run is not ringed in the evidence graph');
+    await page.waitForFunction((n) => document.querySelectorAll('#pair-graph .gdot:not(.live)').length === n, second.pairs, { timeout: 20000 }).catch(() => problems.push('the evidence graph does not show the race as one more scenario'));
+    check((await page.locator('#pair-graph .gdot.live').count()) === 0, 'the race is still drawn as a live result beside the record');
+    check((await page.locator('#pair-graph .gdot.ring').count()) === 1, 'the scenario of the race just run is not ringed in the evidence graph');
+    check((await page.locator(`#pair-graph .grow[data-run="${RACE}"]`).innerText().catch(() => '')).includes('just run'), 'the row of the race just run does not say so');
+    check((await page.locator(`#pair-graph .grow[data-run="${RACE}"] .gdot.ring .half.a.skipped`).count()) === 1 && (await page.locator(`#pair-graph .grow[data-run="${RACE}"] .gdot.ring .half.b.clean`).count()) === 1, 'the cell of the race just run does not show how the two attempts ended');
     check((await page.locator('#pair-graph figcaption').first().innerText()).includes('the race you just ran'), 'the evidence graph does not say the ringed scenario is the race just run');
     await page.waitForFunction(() => document.getElementById('world-graph').innerText.includes('This is the race you just ran'), null, { timeout: 30000 }).catch(() => problems.push('the world of the race just run is not drawn under the evidence graph'));
     check((await page.locator('#record-note').innerText()).includes('3 records are newer than this page'), `after the race the line about the live record reads: ${await page.locator('#record-note').innerText()}`);

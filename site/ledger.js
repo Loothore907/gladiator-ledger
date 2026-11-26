@@ -840,6 +840,7 @@ RETURN mt.key AS match ORDER BY match`;
         a_cost: p.a_cost,
         b_cost: p.b_cost,
         run: p.run,
+        suite: p.suite,
         match: p.match,
       }));
       out.consistency = await ask(questions.self_consistency, { version_key: versionKey, models: [a, b], conditions, suite, until: null });

@@ -32,8 +32,8 @@ and walks it:
    they really ran, with the faults where they happened.
 5. **Race them live.** The graph states what the record expects, a runner plays one brand-new scenario (or a
    batch of 10 or 25), and the page says whether the result was in line with the record or against it. The sealed
-   result joins the record as the race ends: seconds later it is one more dot in the evidence graph, its world is
-   drawn under the dots, and the verdict has been read again with it. (Open to judges: "Judge sign-in" on the
+   result joins the record as the race ends: seconds later it is one more cell in the evidence graph, its world is
+   drawn under the rows, and the verdict has been read again with it. (Open to judges: "Judge sign-in" on the
    page, with the access code.)
 6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every hazard,
    and the sealed records behind it.
