@@ -24,9 +24,10 @@ and walks it:
    yours only puts the closest first, and says so when nothing matches.
 2. **Pick two models.** Opponents with the most head-to-head evidence come first. A published index is used only
    to find models close on paper.
-3. **Read the verdict.** Fit first: every fault a model made is counted, with a level you can change
-   (unforgivable, serious, minor) under two ready-made tolerances, one for a business running it unattended and
-   one for a single person. Then the head to head, scenario by scenario.
+3. **Read the verdict.** Fit first, in two parts: did the model get the right result often enough, and how
+   serious are the faults it made on the way. Every fault is counted, with a level you can change (unforgivable,
+   serious, minor) under two ready-made tolerances, one for a business running it unattended and one for a single
+   person. Then the head to head, scenario by scenario.
 4. **Watch the race.** Any recorded scenario replays step by step: both models on the same world, at the pace
    they really ran, with the faults where they happened.
 5. **Race them live.** The graph states what the record expects, a runner plays one brand-new scenario (or a
@@ -41,13 +42,16 @@ server for your own AI assistant, and a command line.
 
 ## Why it is useful
 Choosing a model is usually done by reading rankings or by feel. Ledger replaces that with a claim about the task.
-Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index, a tie on paper.
-In the Nov 22 suite matches they cost about the same and split 64 head-to-head scenarios 30 to 34. Yet on four workflows the answer changes
-with the task and with who is asking: on a refund queue DeepSeek fails 43 of 68 attempts by acting before it has
-read the records, and on access reviews and inventory transfers it leads 11 scenarios to 5. For one person, a single wrong decision in 54 attempts is tolerable; for a
-business moving money it is disqualifying, and Ledger makes both calls and shows the count behind each. When the
-evidence is thin or level it says "leaning" or names no winner, and when neither model is fit it says so and
-lists the tested models that are.
+Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index, a tie on paper,
+and cost about the same. Over 166 head-to-head scenarios on four workflows (the record at 05:00 UTC on Nov 26,
+2026) the answer changes with the task and with who is asking. Haiku is the settled choice on two workflows.
+DeepSeek gets the right result more often on all four, and on access reviews it is the only one of the two a
+business could run unattended: Haiku made one wrong access decision in 81 attempts. On a refund queue both decide
+every refund correctly, and Haiku wins on process: in two attempts of three DeepSeek decides a request before
+looking up a record it was told to read. Ledger does not decide whether that matters. It counts it, gives it a
+level you can change, and shows the answer for one person (minor: both are fit) and for a business (serious:
+neither is). When the evidence is thin or level it says "leaning" or names no winner, and when neither model is
+fit it says so and lists the tested models that are.
 
 ## How Relate is used
 - **Embedded Python library, single-file store**, opened read-only for every question.
@@ -68,11 +72,11 @@ lists the tested models that are.
 git clone https://github.com/Loothore907/gladiator-ledger
 cd gladiator-ledger
 uv sync
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1
 python3 -m http.server --directory site 8000     # the browser page
 ```
 No API keys and no cost. Linux, macOS and Windows. The record grows as live races are run; add
-`--suite small-tier` to a command to get the fixed figures quoted here and in the README.
+`--until 2026-11-26T05:00` to a command to get the figures quoted here and in the README exactly.
 
 ## Before and during the contest (the contest opened Nov 11, 2026)
 | When | What |

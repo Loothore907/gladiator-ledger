@@ -37,7 +37,7 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 | `Match` | `run_id/node/attempt` | difficulty, seed, profile, **conditions** (below), **rule** (`success`, `progress`, `efficiency`, `tie`, `excluded`), excluded | one *pair*: both models on the same generated world |
 | `SelfCheck` | `run_id/node/attempt` | difficulty, seed, conditions, excluded, **same** (did the model end the same way both times), model | one scenario played twice by ONE model (a self run). Never a `Match`: nothing about pairs or wins sees it |
 | `SelfAttempt` | `run_id/node/attempt/side` | the same facts as `Attempt` | one of the two times. `(SelfAttempt)-[:IN]->(SelfCheck)`, `-[:BY]->(Model)`, `-[:MADE]->(Fault)`; `(SelfCheck)-[:USED]->(TestVersion)`, `-[:PART_OF]->(Run)`, `-[:BY]->(Model)`. Counted in the model's fitness for the task |
-| `Attempt` | `match/side` | side, effort, passed, first_pass, mistakes, model_errors, progress, cost_usd, tokens_in, tokens_cached (the part of the input the provider served from its cache), tokens_out, **cost_basis** (`billed`, `repriced`, `list`, `mixed`: where the cost came from, `ledger/costs.py`), tokens, wall_s, calls, termination, items, efficiency | one side of a match |
+| `Attempt` | `match/side` | side, effort, passed (the test's own verdict: right result and right process), **task_correct** (the result alone: every decision right, nothing left undone), first_pass, mistakes, model_errors, progress, cost_usd, tokens_in, tokens_cached (the part of the input the provider served from its cache), tokens_out, **cost_basis** (`billed`, `repriced`, `list`, `mixed`: where the cost came from, `ledger/costs.py`), tokens, wall_s, calls, termination, items, efficiency | one side of a match |
 | `Model` | `name` (exact model id, e.g. `anthropic:claude-haiku-5-5`) | provider | contestants |
 | `Test` | `id` (e.g. `gladiator/refund-queue`) | | challenge provenance |
 | `TestVersion` | `id@version:sha12` | test_id, version, version_rank, content_sha256, status (at run time), forked_from, title, brief, policy (the text the models were given), tools (every tool a model used), tags, emulates, test_type, action_budget | challenge provenance (the exact sealed package) |
@@ -145,7 +145,9 @@ verdict further to one suite's matches, a fixed set that live races never join.
 Whether a model is fit for a task is read from the graph by `task_attempts` and `task_faults` (every attempt the
 model made on the test version under the verdict's conditions, whoever the opponent was and whether the match was
 a suite match or a live race, so a model's fitness for a task is the same in every verdict read under those
-conditions) and judged by a policy: each fault has a level
+conditions) and judged by a policy in two parts that are kept apart (owner, 2026-11-26: the fault levels
+decide). The result: the bar is the share of attempts with the right result (`task_correct`), not the share the
+test passed, which also asks for the process. The process: each fault has a level
 (`unforgivable`, `serious`, `minor`), set per fault with per-task exceptions, under a profile (`enterprise`,
 `personal`) that sets the pass bar and how often a serious fault may show. A mix-up takes the level of the fault
 it is a `KIND_OF`. The reader's own levels overrule all of it. The verdict leads with fitness and then gives the

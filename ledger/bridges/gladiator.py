@@ -154,6 +154,9 @@ def attempt_props(res: dict, side: str, effort, efficiency: float | None) -> dic
         "side": side,
         "effort": effort,
         "passed": bool(res.get("passed")),
+        # the result alone: every decision right and nothing left undone, whatever the process was (the engine's
+        # task check). `passed` asks for this and for the process the test sets. None where a test does not grade it.
+        "task_correct": res.get("task_correct"),
         "first_pass": res.get("first_pass"),
         "mistakes": scoring.mistake_points(res),
         "model_errors": res.get("model_errors"),

@@ -4,6 +4,8 @@ Both are written from the same verdict the spec is built from (`cli.verdict`), s
 disagree. The cost section also appears inside the spec; the reports carry the full detail.
 """
 
+from ledger import policy
+
 BASIS = {
     "billed": "billed: what the provider charged for each call",
     "repriced": "repriced: recomputed from the record's token counts at the provider's published price",
@@ -108,7 +110,7 @@ def evidence_markdown(v: dict, title: str) -> str:
             lines += [
                 f"### `{name}`: {word}",
                 "",
-                f"Passed {f['passed']} of {f['attempts']} attempts ({f['pass_rate']:.0%}; bar {f['bar']:.0%}).",
+                policy.result_line(f),
                 "",
             ]
             if f["faults"]:

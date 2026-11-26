@@ -69,49 +69,58 @@ jobs:
           uv run ledger flows "an agent that handles refund requests for damaged orders" | grep -q "gladiator/refund-queue"
           # The whole record, live races included: these answers move as races are imported, so the commands only
           # have to run. Nothing here may depend on what they say.
+          uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 > /dev/null
           uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 > /dev/null
           uv run ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash > /dev/null
           uv run ledger verdict incident-triage --a "haiku 5.5" --b minimax-m3.1 > /dev/null
-          uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 > /dev/null
-      - name: The README's figures are what the fixed set of suite matches gives
+          uv run ledger spec refund-queue --a "haiku 5.5" --b deepseek-v4.1 > /dev/null
+      - name: The README's figures are what the record gave at the moment it names
         shell: bash
         run: |
           set -euo pipefail
-          # Every figure the README prints comes from the small-tier suite matches (--suite small-tier). Live races
-          # never join that set, so these hold however many are imported; a new suite match changes them in a
-          # reviewed pull request, together with the README.
-          fixed() { uv run ledger "$@" --suite small-tier; }
-          fixed verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --profile enterprise > /dev/null
-          fixed verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --unforgivable "acted without reading" > /dev/null
-          fixed spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report cost > /dev/null
-          fixed spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --report evidence > /dev/null
-          spec=$(fixed spec refund-queue --a "haiku 5.5" --b minimax-m3.1)
+          # Every figure the README prints is the record as it stood at one moment (--until). A race run later
+          # never joins that set, so these hold however many are imported; a record added from before that moment
+          # changes them in a reviewed pull request, together with the README.
+          fixed() { uv run ledger "$@" --until 2026-11-26T05:00; }
+          pair=(--a "haiku 5.5" --b deepseek-v4.1)
+          fixed spec refund-queue "${pair[@]}" --report cost > /dev/null
+          fixed spec refund-queue "${pair[@]}" --report evidence > /dev/null
+          spec=$(fixed spec refund-queue "${pair[@]}")
           grep -qF "## 2. Blueprint" <<< "$spec"
-          triage=$(fixed verdict incident-triage --a "haiku 5.5" --b minimax-m3.1)
-          grep -qF "does this task better" <<< "$triage"
           # Step 3, as printed
-          shown=$(fixed verdict refund-queue --a "haiku 5.5" --b minimax-m3.1)
+          shown=$(fixed verdict refund-queue "${pair[@]}")
           for want in \
-            "it is the only one of the two fit for this task, and it is ahead" \
-            "claude-haiku-5-5: fit. Passed 44 of 54 (81%; bar 80%)" \
-            "minimax-m3.1-flash: NOT fit. Passed 53 of 67 (79%; bar 80%)" \
-            "Head to head: Leaning anthropic:claude-haiku-5-5" \
-            "15 judged pairs" "claude-haiku-5-5 won 7," "minimax-m3.1-flash won 5, 3 tied (sign test p = 0.7744)"; do
+            "the record up to 2026-11-26 05:00 UTC" \
+            "Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better." \
+            "claude-haiku-5-5: fit. Right result in 80 of 81 attempts (99%; bar 80%); 68 of them also followed the process" \
+            "deepseek-v4.1-flash-1017: fit. Right result in 95 of 95 attempts (100%; bar 80%); 30 of them also followed the process" \
+            "tolerated: acted without reading (minor) in 65 of 95" \
+            "Head to head: anthropic:claude-haiku-5-5 does this task better" \
+            "43 judged pairs" "claude-haiku-5-5 won 37," "deepseek-v4.1-flash-1017 won 6, 0 tied" \
+            "decided: 28 on success, 15 on efficiency" \
+            "In 28 of the 37 scenarios anthropic:claude-haiku-5-5 won, both got the right result: it won them on"; do
             grep -qF "$want" <<< "$shown" || { echo "README step 3 is no longer what the command prints: $want"; exit 1; }
           done
-          # "The idea in one table": task, pairs won (Haiku, DeepSeek), share of attempts passed (Haiku, DeepSeek)
-          while read -r task won_a won_b pass_a pass_b; do
-            row=$(fixed verdict "$task" --a "haiku 5.5" --b deepseek-v4.1)
-            grep -qF "16 judged pairs" <<< "$row" &&
+          # the reader's own level for one fault turns the answer round, and so does a business's tolerance
+          strict=$(fixed verdict refund-queue "${pair[@]}" --unforgivable "acted without reading")
+          grep -qF "Neither is fit for this task." <<< "$strict"
+          grep -qF "because: acted without reading (unforgivable) in 65 of 95 attempts" <<< "$strict"
+          # "The idea in one table": task, judged pairs, scenarios won (Haiku, DeepSeek), share of attempts with the
+          # right result (Haiku, DeepSeek), then how the answer starts for one person and for a business
+          while IFS='|' read -r task pairs won_a won_b right_a right_b personal business; do
+            row=$(fixed verdict "$task" "${pair[@]}")
+            grep -qF "$pairs judged pairs" <<< "$row" &&
               grep -qF "claude-haiku-5-5 won $won_a, openrouter:deepseek/deepseek-v4.1-flash-1017 won $won_b," <<< "$row" &&
-              grep -qE "claude-haiku-5-5: .*\($pass_a%; bar 80%\)" <<< "$row" &&
-              grep -qE "deepseek-v4.1-flash-1017: .*\($pass_b%; bar 80%\)" <<< "$row" ||
+              grep -qE "claude-haiku-5-5: .*attempts \($right_a%; bar 80%\)" <<< "$row" &&
+              grep -qE "deepseek-v4.1-flash-1017: .*attempts \($right_b%; bar 80%\)" <<< "$row" &&
+              grep -qF "$personal" <<< "$row" &&
+              grep -qF "$business" <<< "$(fixed verdict "$task" "${pair[@]}" --profile enterprise)" ||
               { echo "The README's table is no longer what the record gives for $task"; exit 1; }
           done <<'ROWS'
-          refund-queue 11 5 81 37
-          access-review 5 11 96 96
-          inventory-transfer 5 11 85 93
-          incident-triage 9 7 87 96
+          refund-queue|43|37|6|99|100|Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better.|Neither is fit for this task.
+          incident-triage|41|30|11|91|97|Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better.|Neither is fit for this task.
+          access-review|41|19|22|98|99|Both are fit for this task.|Use openrouter:deepseek/deepseek-v4.1-flash-1017: it is the only one of the two fit for this task
+          inventory-transfer|41|20|19|87|95|Both are fit for this task.|Neither is fit for this task.
           ROWS
       - name: Rebuilding the store from the shipped records gives the same answers
         shell: bash
@@ -129,7 +138,9 @@ jobs:
   demo-page:
     name: Demo page matches the command line
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The check clicks through every pair of models on every workflow, and each verdict reads more as the record
+    # grows: about 7 minutes on Nov 26 (49 matches), after up to 5 to install the browser. 15 was getting close.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
