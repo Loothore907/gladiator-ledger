@@ -43,7 +43,8 @@ jobs:
   readme:
     name: README commands, clean clone (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # includes loading every step from the sealed records once (about a minute) for the process and route commands
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -74,6 +75,12 @@ jobs:
           uv run ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash > /dev/null
           uv run ledger verdict incident-triage --a "haiku 5.5" --b minimax-m3.1 > /dev/null
           uv run ledger spec refund-queue --a "haiku 5.5" --b deepseek-v4.1 > /dev/null
+          # How they got there: the first of these loads every step from the sealed records into a local store
+          uv run ledger process refund-queue --a "haiku 5.5" --b deepseek-v4.1 --cypher > /dev/null
+          uv run ledger process incident-triage > /dev/null
+          uv run ledger route refund-queue --a "haiku 5.5" --b deepseek-v4.1 > /dev/null
+          uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --check decided-before-seeing=minor > /dev/null
+          uv run ledger ask what_decisions_need --param version_key=gladiator/refund-queue@2.2.0:c6373a0385f6 > /dev/null
       - name: The README's figures are what the record gave at the moment it names
         shell: bash
         run: |
@@ -105,6 +112,28 @@ jobs:
           strict=$(fixed verdict refund-queue "${pair[@]}" --unforgivable "acted without reading")
           grep -qF "Neither is fit for this task." <<< "$strict"
           grep -qF "because: acted without reading (unforgivable) in 65 of 95 attempts" <<< "$strict"
+          # "How they got there": the counts from the steps, the grader's own beside them, a reader's level, a route
+          worked=$(fixed process refund-queue "${pair[@]}")
+          for want in \
+            "each refund request refers to its order (order_id); each refund request refers to its customer (order_id > customer_id)" \
+            "anthropic:claude-haiku-5-5                          81       18     40            18              6" \
+            "openrouter:deepseek/deepseek-v4.1-flash-1017        95       77    241            77             12" \
+            "anthropic:claude-haiku-5-5                          81       12     27            12              0                  12" \
+            "openrouter:deepseek/deepseek-v4.1-flash-1017        95       65    156            65              0                  65"; do
+            grep -qF "$want" <<< "$worked" || { echo "README 'How they got there' is no longer what the command prints: $want"; exit 1; }
+          done
+          own=$(fixed verdict refund-queue "${pair[@]}" --check decided-before-seeing=serious)
+          grep -qF "Neither is fit for this task." <<< "$own"
+          grep -qF "because: decided before seeing a record it depends on (your check) (serious) in 18 of 81 attempts, over the 10% allowed" <<< "$own"
+          grep -qF "because: decided before seeing a record it depends on (your check) (serious) in 77 of 95 attempts, over the 10% allowed" <<< "$own"
+          two=$(fixed route refund-queue "${pair[@]}" --scenario 2)
+          for want in \
+            "Scenario 2 of 43: the same world, two routes  (20261122-070649-4239f8/refund-queue/2, won by A)" \
+            "B  deny_request at step 8, had seen order, NOT customer CUS-003" \
+            "REQ-0002  <- decided differently" \
+            "Decided differently: 1 of 12 items. Decided before seeing a record the item depends on: A 0, B 4."; do
+            grep -qF "$want" <<< "$two" || { echo "README's two routes are no longer what the command prints: $want"; exit 1; }
+          done
           # "The idea in one table": task, judged pairs, scenarios won (Haiku, DeepSeek), share of attempts with the
           # right result (Haiku, DeepSeek), then how the answer starts for one person and for a business
           while IFS='|' read -r task pairs won_a won_b right_a right_b personal business; do

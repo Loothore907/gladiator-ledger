@@ -9,6 +9,8 @@ ledger flows "refunds with policy exceptions"
 ledger opponents "haiku 5.5" --open-only
 ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --out spec.md
 ledger verdict refund-queue --a anthropic:claude-haiku-5-5 --b openrouter:minimax/minimax-m3.1-flash
+ledger process refund-queue --a "haiku 5.5" --b deepseek-v4.1      how they worked, asked of every step on file
+ledger route refund-queue --a "haiku 5.5" --b deepseek-v4.1 --scenario 3     the same world, two routes
 """
 
 import argparse
@@ -20,7 +22,7 @@ from pathlib import Path
 
 import relate
 
-from ledger import load, policy, publish, questions, reports, spec
+from ledger import load, policy, publish, questions, reports, routes, spec
 from ledger.bridges import epoch
 
 DEFAULT_STORE = "data/ledger.rl"
@@ -63,6 +65,10 @@ UNTIL_HELP = (
     "read the record as it stood then: only matches started at or before this moment, a date (2026-11-26, the whole "
     "day) or a date and time in UTC (2026-11-26T05:00). A figure quoted with it stays the same as the record grows"
 )
+NEEDS_HELP = (
+    "for a question about the records an item depends on, only this kind of record, e.g. customer (repeatable; "
+    "the kinds a task has are printed by `ledger process <task>`)"
+)
 SCOPE_DEFAULTS = {
     "test_id": None,
     "suite": None,
@@ -71,7 +77,10 @@ SCOPE_DEFAULTS = {
     "until": None,
     "current_only": False,
     "open_only": False,
+    "kinds": None,
 }
+# Questions that need the steps (ledger/routes.py): asked of the store that holds them.
+STEP_QUESTIONS = {"what_decisions_need", "same_world", *(q for q in questions.ALL if q.startswith("steps:"))}
 # How a setting reads in a sentence, when a note says which conditions some pairs were played under ("{}" is the
 # value). The page reads the same words from rules.json.
 CONDITION_WORDS = {
@@ -402,11 +411,14 @@ def fitness(
     overrides=None,
     bar=None,
     until: float | None = None,
+    checks: dict | None = None,
 ) -> dict:
     """Every model's fitness for one task version, by model id, under a profile (ledger/policy.py). Counts every
     attempt the model made on the task under one set of conditions, whoever the opponent was and whether the match
     was a suite match or a live race, so a model's fitness for a task is the same number in every verdict read
-    under those conditions. `suite` keeps it to one suite's matches (a fixed set)."""
+    under those conditions. `suite` keeps it to one suite's matches (a fixed set). `checks` adds the reader's own
+    process questions as faults at the levels the reader gave them: {"store": a store that holds the steps,
+    "levels": {check: level}, "kinds": kinds of record or None} (ledger/routes.py)."""
     scope = {"version_key": version, "conditions": conditions, "suite": suite, "until": until}
     faults: dict[str, list[dict]] = {}
     for f in rows(store, questions.TASK_FAULTS, scope):
@@ -427,6 +439,12 @@ def fitness(
         if f["fault"] in mine:
             mine[f["fault"]]["attempts_with"] += f["attempts_with"]
             mine[f["fault"]]["times"] += f["times"]
+    if checks and checks.get("levels"):
+        with routes.opened(checks["store"]) as ask:
+            own = routes.as_faults(ask, scope, checks["levels"], checks.get("kinds"))
+        for model, added in own["faults"].items():
+            faults.setdefault(model, []).extend(added)
+        overrides = {**(overrides or {}), **own["levels"]}
     return {
         model: policy.assess(test, r, faults.get(model, []), profile, overrides, bar) for model, r in attempts.items()
     }
@@ -500,10 +518,12 @@ def verdict(
     profile: str | None = None,
     overrides: dict | None = None,
     until: float | None = None,
+    checks: dict | None = None,
 ) -> dict:
     """A task claim: which of two models did THIS task better when they played the same worlds, how sure that is,
     and whether either is good enough. Only the pairs where these two met count. Never a claim about a model in
-    general, and no winner is named on thin evidence or a level score."""
+    general, and no winner is named on thin evidence or a level score. `checks`: the reader's own process
+    questions, counted from the steps and judged at the reader's levels (see fitness)."""
     test = test_id(workflow)
     version = None if all_versions else current_version(store, test)
     params = {"test_id": test, "a": a, "b": b, "suite": suite, "version_key": version, "until": until}
@@ -578,8 +598,10 @@ def verdict(
     if profile:
         # Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
         version_key = max(p["version"] for p in pairs)
-        everyone = fitness(store, test, version_key, conditions, suite, profile, overrides, until=until)
+        everyone = fitness(store, test, version_key, conditions, suite, profile, overrides, until=until, checks=checks)
         out["profile"] = profile
+        if checks and checks.get("levels"):
+            out["own_checks"] = {"levels": checks["levels"], "needs": checks.get("kinds")}
         out["fit"] = {m: everyone[m] for m in (a, b)}
         head = {"a": a, "b": b, "better": better, "verdict": kind}
         out["outcome"], out["headline"], out["use"] = outcome(head, out["fit"])
@@ -702,6 +724,169 @@ def print_verdict(v: dict) -> None:
         print(f"  - {e['run']}  seal {str(e['seal_sha256'])[:12]}  engine {str(e['engine_commit'])[:7]}")
 
 
+def step_scope(store: str, workflow: str, a=None, b=None, suite=None, until=None) -> dict | None:
+    """The scope a process question is asked in: the task's current version under one set of conditions, which
+    is the scope of fitness. For two models, the conditions their verdict is read under; for a task alone, the
+    conditions most of its suite record was played under. None when the task has no judged match (or the two
+    never met on it)."""
+    test = test_id(workflow)
+    version = current_version(store, test)
+    if version is None:
+        return None
+    task = {"test_id": test, "suite": suite, "version_key": version, "until": until}
+    record = {r["conditions"]: r["pairs"] for r in rows(store, questions.TASK_CONDITIONS, task)}
+    if a and b:
+        met = rows(store, questions.PAIR_CONDITIONS, {**task, "a": a, "b": b})
+        if not met:
+            return None
+        conditions = reference_conditions(met, record)
+    elif record:
+        conditions = max(sorted(record), key=lambda c: record[c])
+    else:
+        conditions = None
+    return {"version_key": version, "conditions": conditions, "suite": suite, "until": until}
+
+
+def process(store: str, steps: str, workflow: str, a=None, b=None, names=None, kinds=None, suite=None, until=None):
+    """How the models worked on one task: every process question counted from the steps (ledger/routes.py), for
+    every model on the task or for the two named. `store` is the shipped store, `steps` the one with the steps."""
+    scope = step_scope(store, workflow, a, b, suite, until)
+    if scope is None:
+        return {"task": test_id(workflow), "checks": [], "note": "No judged match on file for this."}
+    with routes.opened(steps) as ask:
+        out = routes.process(ask, test_id(workflow), scope, names, kinds)
+    if a or b:
+        for c in out["checks"]:
+            c["models"] = [m for m in c["models"] if m["model"] in (a, b)]
+    return out
+
+
+def route(store: str, steps: str, workflow: str, a: str, b: str, scenario: int | None = None, suite=None, until=None):
+    """The same world, two routes: for the scenarios two models both played (the pairs their verdict counts),
+    where they decided differently and what each had seen when it decided. One scenario in full with `scenario`
+    (1 is the first), a line per scenario without it."""
+    test = test_id(workflow)
+    scope = step_scope(store, workflow, a, b, suite, until)
+    out = {"task": test, "a": a, "b": b, "scenarios": []}
+    if scope is None:
+        return dict(out, note=f"{a} and {b} never met on {test}.")
+    pairs = rows(store, questions.PAIR_ON_TASK, {"test_id": test, "a": a, "b": b, **scope})
+    out.update(version=scope["version_key"], conditions=scope["conditions"], pairs=len(pairs))
+    chosen = pairs if scenario is None else pairs[scenario - 1 : scenario]
+    if scenario is not None and not chosen:
+        return dict(out, note=f"There are {len(pairs)} scenarios; --scenario takes 1 to {len(pairs)}.")
+    numbers = {p["match"]: n for n, p in enumerate(pairs, 1)}
+    winners = {p["match"]: p["winner"] for p in pairs}
+    with routes.opened(steps) as ask:
+        out["decisions_need"] = routes.what_decisions_need(ask, scope["version_key"])
+        worlds = routes.same_world(ask, [p["match"] for p in chosen])
+    for w in worlds:
+        # sides as the verdict names them: a is the first model asked for, whichever side it played
+        side_of = {model: side for side, model in w["models"].items()}
+        w.update(scenario=numbers[w["match"]], winner=winners[w["match"]], side={a: side_of.get(a), b: side_of.get(b)})
+        if scenario is None:
+            w.pop("items")
+    out["scenarios"] = worlds
+    return out
+
+
+def _models_table(models: list[dict], grader: bool) -> None:
+    width = max([len(m["model"]) for m in models] + [5])
+    head = f"  {'model':{width}}  attempts  with it  times  right anyway  passed anyway"
+    print(head + ("  the grader counted" if grader else ""))
+    for m in models:
+        line = (
+            f"  {m['model']:{width}}  {m['attempts']:8}  {m['attempts_with']:7}  {m['times']:5}  "
+            f"{m['right_with']:12}  {m['passed_with']:13}"
+        )
+        if grader:
+            line += f"  {m['grader_attempts_with'] or 0:18}"
+        print(line)
+
+
+def needs_line(needs: list[dict]) -> str:
+    """What a decision depends on, in words: "each refund request refers to its order (order_id); ..."."""
+    return "; ".join(f"each {n['decided']} refers to its {n['needs']} ({' > '.join(n['via'])})" for n in needs)
+
+
+def print_process(p: dict, show_cypher: bool = False) -> None:
+    print(f"Task: {p['task']}" + (f"  ({p['version']})" if p.get("version") else ""))
+    if p.get("note"):
+        print(p["note"])
+        return
+    if p.get("until"):
+        print(f"The record up to {datetime.fromtimestamp(p['until'], UTC):%Y-%m-%d %H:%M} UTC")
+    print(f"Conditions: {p['conditions']}")
+    if p["decisions_need"]:
+        print(f"What a decision needs here, as the worlds on file show it: {needs_line(p['decisions_need'])}.")
+    print(
+        "\nEach question is one pattern over the steps in the graph, counted per model: the attempts with it, how often "
+        "in all, and of the attempts with it how many still got every decision right and how many the test passed."
+    )
+    for c in p["checks"]:
+        kept = f"  (only: {', '.join(c['needs'])})" if c.get("needs") else ""
+        print(f"\n{c['check']}: {c['asks']}{kept}")
+        if c["note"]:
+            print(f"  {c['note']}")
+        if c["models"]:
+            _models_table(c["models"], bool(c["grader_counts"]))
+        else:
+            print("  no attempts in this scope")
+        if c["grader_counts"]:
+            print(f"  (the grader's own count of '{c['grader_counts']}', in attempts, is the last column)")
+        if show_cypher:
+            print("\n  The question, as asked of the graph:")
+            print("\n".join("    " + line for line in c["cypher"].splitlines()))
+    print("\nGive a question a level in a verdict: ledger verdict <task> --a .. --b .. --check <question>=serious")
+
+
+def print_route(r: dict) -> None:
+    a, b = r["a"], r["b"]
+    print(f"Task: {r['task']}" + (f"  ({r['version']})" if r.get("version") else ""))
+    print(f"A  {a}\nB  {b}")
+    if r.get("note"):
+        print(f"\n{r['note']}")
+        return
+    if r.get("decisions_need"):
+        print(f"What a decision needs here: {needs_line(r['decisions_need'])}.")
+    if len(r["scenarios"]) == 1 and "items" in r["scenarios"][0]:
+        w = r["scenarios"][0]
+        won = "a tie" if w["winner"] == "tie" else f"won by {'A' if w['winner'] == a else 'B'}"
+        print(f"\nScenario {w['scenario']} of {r['pairs']}: the same world, two routes  ({w['match']}, {won})")
+
+        def cell(side: dict | None) -> str:
+            if not side or not side.get("decision"):
+                return "left undone"
+            seen = [n["kind"] for n in side["needs"] if n["seen"]]
+            unseen = [f"{n['kind']} {n['record']}" for n in side["needs"] if n["seen"] is False]
+            text = f"{side['decision']} at step {side['step']}"
+            text += f", had seen {' and '.join(seen)}" if seen else ""
+            return text + (f", NOT {' or '.join(unseen)}" if unseen else "")
+
+        for item in w["items"]:
+            mark = "  <- decided differently" if item["differ"] else ""
+            print(f"\n  {item['item']}{mark}")
+            print(f"    A  {cell(item['sides'].get(w['side'][a]))}")
+            print(f"    B  {cell(item['sides'].get(w['side'][b]))}")
+        unseen = w["decided_unseen"]
+        print(
+            f"\n  Decided differently: {len(w['decided_differently'])} of {len(w['items'])} items. "
+            f"Decided before seeing a record the item depends on: A {unseen.get(w['side'][a], 0)}, "
+            f"B {unseen.get(w['side'][b], 0)}."
+        )
+        return
+    print(f"\n{r['pairs']} scenarios, both models on the same world each time ({r['conditions']})")
+    print("\n  scenario  won by  decided differently  A decided unseen  B decided unseen")
+    for w in r["scenarios"]:
+        won = "tie" if w["winner"] == "tie" else "A" if w["winner"] == a else "B"
+        unseen = w["decided_unseen"]
+        print(
+            f"  {w['scenario']:8}  {won:6}  {len(w['decided_differently']):19}  "
+            f"{unseen.get(w['side'][a], 0):16}  {unseen.get(w['side'][b], 0):16}"
+        )
+    print("\nOne scenario item by item: add --scenario N")
+
+
 def money(x):
     return "-" if x is None else f"${x:.4f}"
 
@@ -768,6 +953,12 @@ def main(argv=None):
     b.add_argument("--records", type=Path, required=True, help="folder holding runs/<run_id>/record.json")
     b.add_argument("--validations", type=Path, help="Gladiator validations/ folder")
     b.add_argument("--scores", type=Path, help="folder holding Epoch's eci_scores.csv (data/epoch)")
+    b.add_argument(
+        "--steps",
+        action="store_true",
+        help="also load every step of every attempt (about seven times larger; the process and route commands "
+        "build such a store beside the shipped one by themselves)",
+    )
     i = sub.add_parser(
         "import",
         parents=[common],
@@ -826,7 +1017,43 @@ def main(argv=None):
             metavar="FAULT",
             help=f"treat this fault as {level} (repeatable), whatever the profile says",
         )
+    v.add_argument(
+        "--check",
+        action="append",
+        default=[],
+        metavar="QUESTION=LEVEL",
+        help="add a process question of your own as a fault at a level you choose, counted from the steps "
+        f"(repeatable; questions: {', '.join(routes.CHECKS)}; levels: {', '.join(policy.LEVELS)})",
+    )
+    v.add_argument("--needs", action="append", default=[], metavar="KIND", help=NEEDS_HELP)
+    v.add_argument("--data", type=Path, default=Path("data"), help="data folder, for the steps (default data/)")
     v.add_argument("--json", action="store_true")
+    pr = sub.add_parser(
+        "process",
+        parents=[common],
+        help="how the models worked on a task: process questions asked of every step on file",
+    )
+    pr.add_argument("workflow", help="test id, e.g. refund-queue")
+    pr.add_argument("--a", help="only this model (with --b: these two, under the conditions of their verdict)")
+    pr.add_argument("--b", help="second model")
+    pr.add_argument("--check", action="append", default=[], choices=sorted(routes.CHECKS), help="only this question")
+    pr.add_argument("--needs", action="append", default=[], metavar="KIND", help=NEEDS_HELP)
+    pr.add_argument("--suite", help="only attempts played in this suite")
+    pr.add_argument("--until", help=UNTIL_HELP)
+    pr.add_argument("--cypher", action="store_true", help="print each question as it is asked of the graph")
+    pr.add_argument("--data", type=Path, default=Path("data"), help="data folder (default data/)")
+    pr.add_argument("--json", action="store_true")
+    ro = sub.add_parser(
+        "route", parents=[common], help="the same world, two routes: where two models parted ways, item by item"
+    )
+    ro.add_argument("workflow", help="test id, e.g. refund-queue")
+    ro.add_argument("--a", required=True, help="first model")
+    ro.add_argument("--b", required=True, help="second model")
+    ro.add_argument("--scenario", type=int, help="one scenario in full (1 is the first); without it, a line each")
+    ro.add_argument("--suite", help="only pairs played in this suite")
+    ro.add_argument("--until", help=UNTIL_HELP)
+    ro.add_argument("--data", type=Path, default=Path("data"), help="data folder (default data/)")
+    ro.add_argument("--json", action="store_true")
     st = sub.add_parser("site", parents=[common], help="export the data the browser demo loads (site/data/)")
     st.add_argument("--data", type=Path, default=Path("data"), help="data folder (default data/)")
     st.add_argument("--out", type=Path, default=Path("site/data"), help="where to write (default site/data/)")
@@ -878,6 +1105,8 @@ def main(argv=None):
             out["validations"] = load.load_validations(args.validations, args.store)
         if args.scores:
             out["scores"] = load.load_scores(args.scores, args.store)
+        if args.steps:
+            out["steps"] = load.load_steps(args.records, args.store)
         print(json.dumps({k: {x: v[x] for x in v if x != "stats"} for k, v in out.items()}, indent=1))
     elif args.cmd == "import":
         out = {}
@@ -917,7 +1146,8 @@ def main(argv=None):
                 params[k] = v
         for k, v in SCOPE_DEFAULTS.items():
             params.setdefault(k, v)
-        result = rows(args.store, questions.ALL[args.question], params)
+        asked = routes.ensure(args.store) if args.question in STEP_QUESTIONS else args.store
+        result = rows(asked, questions.ALL[args.question], params)
         if args.json:
             print(json.dumps(result, indent=1, default=str))
         else:
@@ -983,6 +1213,16 @@ def main(argv=None):
         b = resolve_model(args.store, args.b) or args.b
         overrides = {fault: level for level in policy.LEVELS for fault in getattr(args, level)}
         profile = None if args.profile == "none" else args.profile
+        checks = None
+        if args.check:
+            levels = dict(text.partition("=")[::2] for text in args.check)
+            for name, level in levels.items():
+                if name not in routes.CHECKS or level not in policy.LEVELS:
+                    ap.error(
+                        f"--check takes QUESTION=LEVEL: one of {', '.join(routes.CHECKS)}, "
+                        f"at one of {', '.join(policy.LEVELS)}"
+                    )
+            checks = {"store": routes.ensure(args.store, args.data), "levels": levels, "kinds": args.needs or None}
         result = verdict(
             args.store,
             args.workflow,
@@ -995,11 +1235,29 @@ def main(argv=None):
             profile,
             overrides,
             parse_until(args.until),
+            checks,
         )
         if args.json:
             print(json.dumps(result, indent=1, default=str))
         else:
             print_verdict(result)
+    elif args.cmd in ("process", "route"):
+        a = (resolve_model(args.store, args.a) or args.a) if args.a else None
+        b = (resolve_model(args.store, args.b) or args.b) if args.b else None
+        steps = routes.ensure(args.store, args.data)
+        until = parse_until(args.until)
+        if args.cmd == "process":
+            result = process(
+                args.store, steps, args.workflow, a, b, args.check or None, args.needs or None, args.suite, until
+            )
+        else:
+            result = route(args.store, steps, args.workflow, a, b, args.scenario, args.suite, until)
+        if args.json:
+            print(json.dumps(result, indent=1, default=str))
+        elif args.cmd == "process":
+            print_process(result, args.cypher)
+        else:
+            print_route(result)
     return 0
 
 

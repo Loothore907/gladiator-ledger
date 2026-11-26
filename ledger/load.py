@@ -26,14 +26,24 @@ Graph (docs/SCHEMA.md):
   (TestVersion)-[:VALIDATED_BY]->(:ValidationRun)-[:GUARDS]->(Hazard)
      one ValidationRun per level and player of a validation record: the reference player must pass every seed;
      each corner-cutting player must fail where its hazard is present.
+
+Steps (load_steps; ledger/bridges/steps.py): how each attempt got to its result.
+  (:Step)           one step of an attempt: the tool, its kind, how the world answered
+  (:Item)           one record of a generated world (a refund request, its order, the order's customer)
+  (Attempt)-[:TOOK]->(Step)-[:NEXT]->(Step)     the route, in order
+  (Step)-[:SAW]->(Item)  (Step)-[:DECIDED]->(Item)  (Step)-[:CHECKED]->(Item)  (Step)-[:TOLD_OF {notice}]->(Item)
+  (Item)-[:REFERS_TO {field}]->(Item)           as the world's answers show it
+  (Item)-[:IN]->(Match)                         both attempts of a pair played the same world and share its items
 """
 
 from pathlib import Path
 
 import relate
 
-from ledger.bridges import Evidence, epoch, gladiator
+from ledger.bridges import Evidence, epoch, gladiator, steps
 from ledger.bridges.gladiator import seal_ok  # noqa: F401  (re-exported: the seal check other modules use)
+
+LABELS = {"world": "Match", "attempt": "Attempt"}
 
 SCHEMA = [
     "CREATE CONSTRAINT run_id IF NOT EXISTS FOR (n:Run) REQUIRE n.run_id IS UNIQUE",
@@ -52,6 +62,53 @@ SCHEMA = [
     # Keyword search over what each workflow asks for ("describe your flow, find the closest tested one").
     "CREATE FULLTEXT INDEX flow_text IF NOT EXISTS FOR (n:TestVersion) ON EACH [n.title, n.brief, n.policy]",
 ]
+
+# Steps are seven times the size of everything else together, so they are loaded only when asked for (load_steps)
+# and their constraints are created then.
+STEP_SCHEMA = [
+    "CREATE CONSTRAINT step_key IF NOT EXISTS FOR (n:Step) REQUIRE n.key IS UNIQUE",
+    "CREATE CONSTRAINT item_key IF NOT EXISTS FOR (n:Item) REQUIRE n.key IS UNIQUE",
+]
+
+# {world} and {attempt} are the labels of the run being loaded: Match and Attempt, or SelfCheck and SelfAttempt
+# for a run of one model against itself. Items are written first, so a step only ever links to an item that has
+# its kind and its world.
+WRITE_ITEMS = """
+UNWIND $items AS i
+MATCH (w:{world} {{key: i.world}})
+MERGE (it:Item {{key: i.key}})
+SET it.id = i.id, it.kind = i.kind
+MERGE (it)-[:IN]->(w)
+"""
+
+WRITE_REFERS = """
+UNWIND $refers AS x
+MATCH (a:Item {key: x.a}), (b:Item {key: x.b})
+MERGE (a)-[r:REFERS_TO]->(b)
+SET r.field = x.field
+"""
+
+WRITE_STEPS = """
+UNWIND $routes AS r
+MATCH (a:{attempt} {{key: r.attempt}})
+UNWIND r.steps AS s
+MERGE (st:Step {{key: s.key}})
+SET st.n = s.n, st.tool = s.tool, st.kind = s.kind, st.state = s.state, st.at_s = s.at_s, st.item = s.item
+MERGE (a)-[:TOOK]->(st)
+FOREACH (k IN s.saw | MERGE (i:Item {{key: k}}) MERGE (st)-[:SAW]->(i))
+FOREACH (k IN s.decided | MERGE (i:Item {{key: k}}) MERGE (st)-[:DECIDED]->(i))
+FOREACH (k IN s.checked | MERGE (i:Item {{key: k}}) MERGE (st)-[:CHECKED]->(i))
+FOREACH (t IN s.told | MERGE (i:Item {{key: t.item}}) MERGE (st)-[x:TOLD_OF]->(i) SET x.notice = t.notice)
+"""
+
+# The order of a route: each step to the one after it.
+WRITE_NEXT = """
+UNWIND $routes AS r
+UNWIND r.steps AS s
+WITH r, s WHERE s.n > 1
+MATCH (x:Step {key: r.attempt + '/' + toString(s.n - 1)}), (y:Step {key: s.key})
+MERGE (x)-[:NEXT]->(y)
+"""
 
 WRITE_VALIDATIONS = """
 UNWIND $checks AS c
@@ -222,6 +279,32 @@ def load(records_root: Path, store: str) -> dict:
         "stats": stats.get("runs", {}),
         "fault_stats": stats.get("faults", {}),
     }
+
+
+def load_steps(records_root: Path, store: str, batch: int = 100) -> dict:
+    """Load every step of every attempt, and the world records they touched, into a store that already holds the
+    runs (load). Safe to repeat. Each run is marked with the number of steps loaded for it (Run.steps), which is
+    how a store says its steps are complete (ledger/routes.py)."""
+    totals = {"runs": 0, "steps": 0, "items": 0}
+    with relate.connect(store) as conn:
+        for statement in STEP_SCHEMA:
+            conn.execute(statement)
+        for run in steps.read_steps(records_root):
+            labels = {"world": "SelfCheck", "attempt": "SelfAttempt"} if run["self"] else LABELS
+            for at in range(0, len(run["items"]), batch * 20):
+                conn.execute(WRITE_ITEMS.format(**labels), {"items": run["items"][at : at + batch * 20]})
+            for at in range(0, len(run["refers"]), batch * 20):
+                conn.execute(WRITE_REFERS, {"refers": run["refers"][at : at + batch * 20]})
+            for at in range(0, len(run["routes"]), batch):
+                routes = run["routes"][at : at + batch]
+                conn.execute(WRITE_STEPS.format(**labels), {"routes": routes})
+                conn.execute(WRITE_NEXT, {"routes": routes})
+            n = sum(len(r["steps"]) for r in run["routes"])
+            conn.execute("MATCH (r:Run {run_id: $id}) SET r.steps = $n", {"id": run["run_id"], "n": n})
+            totals["runs"] += 1
+            totals["steps"] += n
+            totals["items"] += len(run["items"])
+    return totals
 
 
 def load_validations(root: Path, store: str) -> dict:

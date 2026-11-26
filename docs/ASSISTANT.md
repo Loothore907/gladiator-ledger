@@ -68,6 +68,12 @@ becomes "neither is fit".
 ## What the assistant can and cannot do
 - It can: find the closest tested workflow, list who has played it, suggest opponents, give a verdict, write the
   spec, and read the graph with its own read-only Cypher.
+- It can also say how a model worked, from the steps in the graph: ask *"did either of them decide a refund
+  before it had looked at the customer?"* and it should answer with a count for each model, how many of those
+  attempts still got everything right, and the grader's own count beside it (`how_they_worked`). Ask *"show me
+  where they parted ways in the second scenario"* for the two routes side by side (`same_world`). Tell it the
+  lapse is serious for you and the verdict is judged with it (`own_checks`). The first such question loads the
+  steps from the sealed records, which takes about a minute.
 - It cannot: change the store (it is opened read-only), or run a new match. If two models have not met on a task,
   the right answer is "no match has been played", and the server's instructions tell the assistant to say so.
 

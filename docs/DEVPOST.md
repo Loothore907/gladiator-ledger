@@ -59,13 +59,22 @@ fit it says so and lists the tested models that are.
   attempts share a world. Fitness follows each model through every attempt it made on a task, whoever the
   opponent, to the faults it made there. A task's own mix-ups ("should close, did escalate") are linked as kinds
   of a wrong decision, so a rule set on the general fault reaches the specific ones.
+- **The graph goes down to the step.** Every attempt is a path of steps through a small world of connected records
+  (a refund request, its order, the order's customer), and both models of a match walk the same records. A
+  question about how a model works is then a pattern: "decided a refund before it had seen the customer" is three
+  hops and an ordering; "repeated a timed-out action without checking" is a walk along the route
+  (`(first)-[:NEXT]->+(again)`). Two such patterns ask what Gladiator's grader counted during the matches, and
+  the graph agrees with it on all 1,874 attempts. A sharper one, asked in order, finds 18 attempts the grader
+  passed, and shows that on the refund queue the skipped lookup never cost a wrong decision. A reader gives any
+  of them a level and the verdict follows. No new match is played for any of it.
 - **Full-text index** over each workflow's text for step 1.
 - **The WebAssembly build, in memory, in a browser worker.** The demo page builds the whole graph client-side
   with the same statements as the command line, and a CI check compares more than 8,000 values between the two,
   including the downloadable spec character for character.
 - **Read-only access for agents over MCP**, including free-form read-only Cypher.
 - **Idempotent loading** (`MERGE` on stable keys behind uniqueness constraints) through two bridges: match records
-  and a published benchmark index. 11 kinds of node, 17 relationships.
+  and a published benchmark index. 11 kinds of node and 17 relationships in the shipped store; with the steps
+  (62,374 of them, loaded locally from the same records on first use), 13 and 24.
 
 ## Setup
 ```

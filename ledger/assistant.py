@@ -14,7 +14,7 @@ from typing import Any
 import relate
 from mcp.server.mcpserver import MCPServer
 
-from ledger import cli, policy, questions, reports, spec
+from ledger import cli, policy, questions, reports, routes, spec
 
 INSTRUCTIONS = """\
 Gladiator Ledger answers one question: of two AI models, which does THIS task better, how sure is that, and what
@@ -38,6 +38,12 @@ Walk the person through this loop, one step at a time:
    notes say when scenarios were won on process alone; pass that on. For the head to head, report the verdict word exactly: "better" is settled; "leaning" is ahead but
    could be chance; "no real difference shown" and "not enough evidence" name no winner. When neither is fit,
    offer the models in `fit_on_task`; if that is empty, say no tested model is fit and do not guess at one.
+   How a model WORKED is in the graph too, step by step. how_they_worked asks process questions of every step
+   on file (did it decide an item before it had seen a record the item depends on; did it repeat a timed-out
+   action without checking), and gives each count beside the grader's own where the grader has one. A count is
+   a fact, not a fault: whether it matters is the person's call. If it matters to them, pass it to verdict as
+   `own_checks` with the level they choose, and it is judged like any other fault. same_world lays two models'
+   routes through one scenario side by side, item by item: use it to show where they parted ways.
 4. spec: the build plan (decision, blueprint, cost, evidence) as Markdown, and with report="cost" or "evidence" the two reports that go with it. Offer it once there is a verdict.
 
 Rules that are not optional:
@@ -48,6 +54,8 @@ Rules that are not optional:
   whether it will hold in production.
 - Cite the evidence: the run ids returned with a verdict are sealed match records anyone can check.
 - read_graph runs read-only Cypher for questions the other tools do not cover. Call describe_graph first.
+  With `steps` true it reads the store that also holds every step, so you can write your own pattern over a
+  model's route; keep such a question to one test version or one match, since there are tens of thousands of steps.
 """
 
 MODELS_ON_FLOW = """
@@ -85,6 +93,13 @@ mix-up, work left undone, stopped before finishing), (Fault)-[:KIND_OF]->(Fault)
 (TestVersion)-[:VALIDATED_BY]->(ValidationRun),
 (ValidationRun)-[:GUARDS]->(Hazard), (Model)-[:SCORED {score, low, high}]->(Benchmark), (Benchmark)-[:FROM]->(Source).
 A Match is one PAIR: both models' attempts on the same generated world. Always filter `NOT mt.excluded`.
+Steps (only in the store read with `steps` true): Step{key, n (its place in the attempt, from 1), tool, kind
+(read|check|act|end|talk), state (ok|timeout|refused), at_s, item}, Item{key, id, kind}: one record of a generated
+world, e.g. a refund request, its order, the order's customer. (Attempt)-[:TOOK]->(Step), (Step)-[:NEXT]->(Step)
+in order, (Step)-[:SAW]->(Item) (its answer showed the record), (Step)-[:DECIDED]->(Item) (it acted on it; the
+tool is the decision), (Step)-[:CHECKED]->(Item), (Step)-[:TOLD_OF {notice}]->(Item) (a notice said the record
+changed), (Item)-[:REFERS_TO {field}]->(Item) as the world's answers show it, (Item)-[:IN]->(Match): the two
+attempts of a match share the world's items, so their routes can be compared item by item.
 Model names are exact ids such as anthropic:claude-haiku-5-5; models known only from the published index are
 named epoch:<name> and have no matches.
 """
@@ -135,6 +150,48 @@ def build(store: str) -> MCPServer:
         A close score only makes a head-to-head fair. It is never a reason to prefer a model."""
         return cli.opponents(store, model, open_weights_only, max(1, min(how_many, 25)))
 
+    def own(checks: dict[str, str] | None, needs: list[str] | None = None) -> dict | None:
+        """A person's own process questions for a verdict: checked, and bound to the store that holds the steps."""
+        if not checks:
+            return None
+        for name, level in checks.items():
+            if name not in routes.CHECKS or level not in policy.LEVELS:
+                raise ValueError(
+                    f"own_checks maps a question ({', '.join(routes.CHECKS)}) to a level ({', '.join(policy.LEVELS)})"
+                )
+        return {"store": routes.ensure(store), "levels": dict(checks), "kinds": needs or None}
+
+    @server.tool(title="How they worked: process questions asked of every step on file")
+    def how_they_worked(
+        task: str, model_a: str = "", model_b: str = "", question: str = "", needs: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Every attempt is a route through a small world of records, held in the graph step by step. Each
+        question is one Cypher pattern over those steps (returned as `cypher`), counted per model on the task:
+        `attempts`, the attempts where it was found (`attempts_with`), how often in all (`times`), and of the
+        attempts with it how many still got every decision right (`right_with`) and how many the test passed
+        (`passed_with`). `grader_attempts_with` is Gladiator's own count where its grader counts the same thing.
+        `decisions_need` says what a decision on this task depends on, as the worlds on file show it. Name two
+        models for the scope of their verdict, one model or none for the task's own record; `question` keeps it
+        to one question, `needs` to some kinds of record (e.g. ["customer"]). The first call loads the steps from
+        the sealed records, which takes about a minute."""
+        if question and question not in routes.CHECKS:
+            return {
+                "error": f"No question named {question!r}.",
+                "questions": {k: v["asks"] for k, v in routes.CHECKS.items()},
+            }
+        a, b = (model_id(m) if m else None for m in (model_a, model_b))
+        return cli.process(store, routes.ensure(store), task, a, b, [question] if question else None, needs or None)
+
+    @server.tool(title="The same world, two routes: where two models parted ways")
+    def same_world(task: str, model_a: str, model_b: str, scenario: int = 0) -> dict[str, Any]:
+        """Two models played the same generated world, so their routes can be laid side by side. Without
+        `scenario`: one line per scenario their verdict counts (who won it, on how many items they decided
+        differently, and how many items each decided before seeing a record the item depends on). With
+        `scenario` (1 is the first): that world item by item, each model's decision, the step it was made at, and
+        which of the records the item depends on the model had seen by then."""
+        steps = routes.ensure(store)
+        return cli.route(store, steps, task, model_id(model_a), model_id(model_b), scenario or None)
+
     @server.tool(title="Verdict: which of two models did this task better")
     def verdict(
         task: str,
@@ -143,6 +200,7 @@ def build(store: str) -> MCPServer:
         tolerance: str = policy.DEFAULT_PROFILE,
         own_levels: dict[str, str] | None = None,
         good_enough_bar: float = cli.GOOD_ENOUGH,
+        own_checks: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Fit first, then head to head. `headline` is the answer to act on and `use` the model to use (null when
         there is none). `fit` says for each model whether it is fit for the task under `tolerance` (enterprise or
@@ -152,7 +210,9 @@ def build(store: str) -> MCPServer:
         `own_levels` overrules the level of any fault by name, e.g. {"left undone": "unforgivable"} (levels:
         unforgivable, serious, minor). The head to head counts only the pairs where these two met: verdict
         (better, leaning, no real difference shown, not enough evidence, or no data), pair counts, how pairs were
-        decided, cost and time, and the sealed match records. `fit_on_task` lists every tested model that is fit."""
+        decided, cost and time, and the sealed match records. `fit_on_task` lists every tested model that is fit.
+        `own_checks` adds process questions from how_they_worked as faults at a level the person chooses, e.g.
+        {"decided-before-seeing": "serious"}: counted from the steps and judged like any other fault."""
         return cli.verdict(
             store,
             task,
@@ -161,6 +221,7 @@ def build(store: str) -> MCPServer:
             bar=good_enough_bar,
             profile=tolerance,
             overrides=own_levels,
+            checks=own(own_checks),
         )
 
     @server.tool(title="Spec: the build plan from one task and two models")
@@ -205,15 +266,21 @@ def build(store: str) -> MCPServer:
     def describe_graph() -> dict[str, Any]:
         """What is in the Relate graph and which named Cypher questions exist. Read this before read_graph."""
         counts = cli.rows(store, "MATCH (n) RETURN labels(n)[0] AS kind, count(*) AS n ORDER BY kind")
-        return {"graph": GRAPH, "counts": counts, "named_questions": sorted(questions.ALL)}
+        return {
+            "graph": GRAPH,
+            "counts": counts,
+            "named_questions": sorted(questions.ALL),
+            "step_questions": sorted(cli.STEP_QUESTIONS),
+        }
 
     @server.tool(title="Read the graph with Cypher (read-only)")
     def read_graph(
-        cypher: str = "", named_question: str = "", parameters: dict[str, Any] | None = None
+        cypher: str = "", named_question: str = "", parameters: dict[str, Any] | None = None, steps: bool = False
     ) -> dict[str, Any]:
         """Run one read-only Cypher statement, or one of the named questions from describe_graph (pass its name
         in `named_question`). The store is opened read-only, so a statement that writes fails. At most 200 rows
-        come back; `truncated` says when there were more."""
+        come back; `truncated` says when there were more. `steps` true reads the store that also holds every
+        step and world record (the named `step_questions` always do); its first use loads them, about a minute."""
         if named_question:
             if named_question not in questions.ALL:
                 return {"error": f"No question named {named_question!r}.", "named_questions": sorted(questions.ALL)}
@@ -222,7 +289,8 @@ def build(store: str) -> MCPServer:
         if not cypher.strip():
             return {"error": "Give `cypher` or `named_question`."}
         try:
-            found = cli.rows(store, cypher, parameters or {})
+            asked = routes.ensure(store) if steps or named_question in cli.STEP_QUESTIONS else store
+            found = cli.rows(asked, cypher, parameters or {})
         except relate.Error as exc:  # the engine's message is the useful part for the assistant
             return {"error": f"{type(exc).__name__}: {exc}"}
         return {"rows": found[:ROW_LIMIT], "row_count": len(found), "truncated": len(found) > ROW_LIMIT}
