@@ -612,6 +612,10 @@ def verdict(
                 "rule": p["rule"],
                 "a_passed": p["a_passed"],
                 "b_passed": p["b_passed"],
+                # the right result (every decision right, nothing left undone), whether or not the test's own
+                # pass, which also asks for its process, was earned: a clean run is both
+                "a_right": bool(p["a_right"]),
+                "b_right": bool(p["b_right"]),
                 "a_cost": p["a_cost"],
                 "b_cost": p["b_cost"],
                 "run": p["run"],

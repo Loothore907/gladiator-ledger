@@ -6,6 +6,10 @@ import { fixed, floatRepr, jsonDumps, percent, round, str, sum } from './pyforma
 
 // One model's attempts on a task in a sentence (policy.result_line): how often the result was right, which is
 // what the bar asks, and in how many of those the process the test sets was followed as well.
+// How an attempt ended, in three words (ledger/reports.py, ended). A clean run is what the test itself calls a
+// pass: the right result and every step it asks for.
+export const ended = (right, clean) => (clean ? 'clean run' : right ? 'right, a step skipped' : 'wrong result');
+
 export function resultLine(f) {
   return (
     `Right result in ${f.right} of ${f.attempts} attempts (${percent(f.right_rate)}; bar ${percent(f.bar)}); ` +
@@ -146,12 +150,18 @@ export function evidenceMarkdown(v, title) {
   for (const n of v.notes) lines.push(`- ${n}`);
   if (v.notes.length) lines.push('');
   if (v.rounds && v.rounds.length) {
-    lines.push(`| # | Winner | Decided on | \`${a}\` | \`${b}\` | Sealed record |`, '|---|---|---|---|---|---|');
+    lines.push(
+      'Each attempt ended one of three ways: a clean run (the right result and every step the test asks for, ' +
+        'which is what the test itself calls a pass), the right result with a step skipped, or a wrong result.',
+      '',
+      `| # | Winner | Decided on | \`${a}\` | \`${b}\` | Sealed record |`,
+      '|---|---|---|---|---|---|',
+    );
     v.rounds.forEach((r, i) => {
       const winner = r.winner === 'tie' ? 'tie' : `\`${r.winner}\``;
       lines.push(
-        `| ${i + 1} | ${winner} | ${r.rule} | ${r.a_passed ? 'passed' : 'failed'} | ` +
-          `${r.b_passed ? 'passed' : 'failed'} | \`${r.run}\` |`,
+        `| ${i + 1} | ${winner} | ${r.rule} | ${ended(r.a_right, r.a_passed)} | ` +
+          `${ended(r.b_right, r.b_passed)} | \`${r.run}\` |`,
       );
     });
     lines.push('');
@@ -825,6 +835,8 @@ RETURN mt.key AS match ORDER BY match`;
         rule: p.rule,
         a_passed: p.a_passed,
         b_passed: p.b_passed,
+        a_right: Boolean(p.a_right),
+        b_right: Boolean(p.b_right),
         a_cost: p.a_cost,
         b_cost: p.b_cost,
         run: p.run,

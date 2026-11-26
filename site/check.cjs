@@ -708,12 +708,61 @@ async function main() {
       await live.locator('#live-go').click();
       await live.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('the live race never reported a result'));
       const said = await live.locator('#live-result').innerText();
-      // the winner of the race gets the green box: it did this task better, in this test, with these settings
-      const box = live.locator('#live-winner.win');
-      if (!(await box.count())) problems.push('the live race has no winner box');
+      // The race is said from what happened. Here one model got the right result and the other did not, so it
+      // is a win on the job and gets the green box, with how usual each result is for each model in the record.
+      const box = live.locator('#live-outcome.win[data-kind="result"]');
+      if (!(await box.count())) problems.push('a race one model got right and the other got wrong has no winner box');
       else {
         const text = await box.innerText();
-        for (const part of ['won', 'did this task better than', 'standard difficulty', 'budget scoring', 'It passed the test and the other did not']) if (!text.includes(part)) problems.push(`the winner box lacks ${JSON.stringify(part)}: ${JSON.stringify(text)}`);
+        for (const part of ['won: it got the right result', 'did not (0 of 1 items right)', 'standard difficulty', 'budget scoring', 'right in', 'every step followed', 'not judged: the result was wrong']) {
+          if (!text.includes(part)) problems.push(`the box under the live race lacks ${JSON.stringify(part)}: ${JSON.stringify(text)}`);
+        }
+      }
+      // each lane says how its attempt ended in the page's three words, never "passed" or "did not pass"
+      const ends = await live.locator('#live-stage .outcome .end').allInnerTexts();
+      if (ends.join(' | ') !== '✓ Clean run | ✕ Wrong result') problems.push(`the live lanes end with ${JSON.stringify(ends)}`);
+      if (/\bpass(ed)?\b/i.test(await live.locator('#live-stage').innerText())) problems.push('the live lanes still speak of passing');
+
+      // The rules behind those words, case by case (window.ledgerDemo.raceOutcome): a winner's box only when the
+      // winner did the job. Two runs that both cut a corner, or two wrong results, are never called a win.
+      {
+        const end = (right, clean, extra = {}) => ({ graded: true, right, clean, items: 12, correct: right ? 12 : 9, slips: clean ? [] : right ? ['acted without reading'] : [], cost: 0.004, seconds: 30, ...extra });
+        const cases = [
+          ['both clean, one cheaper', end(true, true, { cost: 0.01 }), end(true, true), 'b', 'efficiency', 'win', 'won on efficiency'],
+          ['both clean, nothing between them', end(true, true), end(true, true), null, 'tie', 'even', 'No winner'],
+          ['both right, one clean', end(true, false), end(true, true), 'b', 'process', 'win', 'won on process'],
+          ['both right, neither clean', end(true, false, { cost: 0.0185, seconds: 201 }), end(true, false), 'b', 'unclean', 'mixed', 'Both right, neither clean'],
+          ['one right and clean, one wrong', end(true, true), end(false, false), 'a', 'result', 'win', 'won: it got the right result'],
+          ['one right with a step skipped, one wrong', end(true, false), end(false, false), 'a', 'result', 'win', 'won: it got the right result'],
+          ['only the loser got it right', end(true, false), end(false, false, { correct: 12 }), 'b', 'split', 'mixed', 'No clear winner'],
+          ['neither right, one got further', end(false, false, { correct: 10 }), end(false, false, { correct: 7 }), 'a', 'neither', 'stop', 'Neither got the right result'],
+        ];
+        for (const [what, A, B, winner, kind, tone, headline] of cases) {
+          const got = await live.evaluate(([x, y, w, a, b]) => window.ledgerDemo.raceOutcome({ a, b, winner: w === 'a' ? a : w === 'b' ? b : null, A: x, B: y }), [A, B, winner, pair.a, pair.b]);
+          if (got.kind !== kind || got.tone !== tone || !got.headline.includes(headline)) problems.push(`a race that was "${what}" is said as ${JSON.stringify([got.kind, got.tone, got.headline])}, not ${JSON.stringify([kind, tone, headline])}`);
+          if (tone !== 'win' && /\bwon\b/.test(`${got.headline} ${got.body}`)) problems.push(`a race that was "${what}" is still called won: ${JSON.stringify(got)}`);
+          compared += 1;
+        }
+        // the owner's race of Nov 26: both right, each skipped one lookup, one far cheaper and faster
+        const both = await live.evaluate(([x, y, a, b]) => window.ledgerDemo.raceOutcome({ a, b, winner: b, A: x, B: y }), [end(true, false, { cost: 0.0185, seconds: 201 }), end(true, false, { cost: 0.0045, seconds: 30 }), pair.a, pair.b]);
+        for (const part of ['neither passed the test as written', 'is ahead on efficiency ($0.0045 in 30 s, against $0.0185 in 201 s)', 'not a win on the job']) {
+          if (!both.body.includes(part)) problems.push(`"both right, neither clean" does not say ${JSON.stringify(part)}: ${JSON.stringify(both.body)}`);
+        }
+        // why a recorded scenario went to its winner, in the same words (the replay's last line, the grid's labels)
+        const round = (winner, ar, ac, br, bc, rule = 'efficiency') => ({ winner, rule, a_right: ar, a_passed: ac, b_right: br, b_passed: bc });
+        const whys = [
+          [round(pair.a, true, true, true, true), 'efficiency'],
+          [round(pair.a, true, true, true, false, 'success'), 'process'],
+          [round(pair.b, false, false, true, true, 'success'), 'result'],
+          [round(pair.b, true, false, true, false), 'unclean'],
+          [round(pair.a, false, false, false, false, 'progress'), 'neither'],
+          [round('tie', true, true, true, true), 'tie'],
+        ];
+        for (const [r, kind] of whys) {
+          const got = await live.evaluate(([x, a]) => window.ledgerDemo.whyTaken(x, a), [r, pair.a]);
+          if (got.kind !== kind) problems.push(`a scenario ${JSON.stringify(r)} is explained as ${JSON.stringify(got)}, not as ${kind}`);
+          compared += 1;
+        }
       }
       const want = pair.better === pair.a ? 'in line with the record' : 'against the record';
       if (!said.includes(want)) problems.push(`the live result should read "${want}": ${JSON.stringify(said)}`);
@@ -750,7 +799,7 @@ async function main() {
       // was right), and the first draft of the pair's live history, kept apart from the record
       await live.waitForSelector('#live-history .race-card', { timeout: 5000 }).catch(() => problems.push('the live race was not written up on the page'));
       const written = await live.locator('#live-history').innerText();
-      for (const part of ['First draft from 1 live race', 'won 1', 'won 0', 'Live race 1', 'the only one to pass', '1 of 1 items right', 'wrong decision', 'stopped before finishing', 'ALR-1: it chose "escalate alert", the right decision was "close alert"', 'live-check-1', 'not a verdict', 'join the record']) {
+      for (const part of ['First draft from 1 live race', 'took 1', 'took 0', 'Right result:', 'Clean runs:', 'Live race 1', 'won: it got the right result', '1 of 1 items right', 'wrong decision', 'stopped before finishing', 'ALR-1: it chose "escalate alert", the right decision was "close alert"', 'live-check-1', 'not a verdict', 'join the record']) {
         if (!written.includes(part)) problems.push(`the live write-up lacks ${JSON.stringify(part)}: ${JSON.stringify(written.slice(0, 600))}`);
       }
       if ((await live.locator('#live-history .race-card').count()) !== 1) problems.push('one live race should be written up once');
@@ -794,16 +843,16 @@ async function main() {
       await live.waitForSelector('#batch-band', { timeout: 10000 }).catch(() => problems.push('the batch never reported a result'));
       if (runner.asked.a !== pair.a || runner.asked.b !== pair.a || runner.asked.runs !== 10) problems.push(`a steadiness batch asked the runner for ${JSON.stringify(runner.asked)}`);
       const steady = await live.locator('#live-batch').innerText();
-      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'acted without reading in 1', '$0.0412', 'live-batch-1', 'never head-to-head']) {
+      for (const part of ['STEADINESS CHECK', 'ran 19 of 20 attempts clean (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'acted without reading in 1', '$0.0412', 'live-batch-1', 'never head-to-head']) {
         if (!steady.toUpperCase().includes(part.toUpperCase())) problems.push(`the steadiness result lacks ${JSON.stringify(part)}: ${JSON.stringify(steady.slice(0, 500))}`);
       }
       if (!(await live.locator('#live-stage .batch-lane').first().innerText()).includes('10 steps so far')) problems.push('a batch lane does not count steps as they happen');
       const squares = await live.locator('#live-stage .bsq').evaluateAll((all) => [all.length, all.filter((x) => x.classList.contains('pass')).length, all.filter((x) => x.classList.contains('fail')).length]);
-      if (squares.join() !== '20,19,1') problems.push(`the batch squares show ${squares} (all, passed, failed), not 20,19,1`);
+      if (squares.join() !== '20,19,1') problems.push(`the batch squares show ${squares} (all, clean runs, not clean), not 20,19,1`);
       // an attempt that got every decision right and skipped a step is not the same failure as a wrong decision
       const soft = live.locator('#live-stage .bsq.fail.soft');
-      if ((await soft.count()) !== 1 || !/every decision was right \(acted without reading\)/.test((await soft.first().getAttribute('title')) || '')) problems.push('an attempt that got every decision right but skipped a step is not marked apart from a wrong one');
-      if (!(await live.locator('#batch-right').innerText().catch(() => '')).includes('1 of the 1 that did not pass')) problems.push('the batch does not say how many of the attempts that did not pass had every decision right');
+      if ((await soft.count()) !== 1 || !/right result, a step skipped \(acted without reading\)/.test((await soft.first().getAttribute('title')) || '')) problems.push('an attempt that got every decision right but skipped a step is not marked apart from a wrong one');
+      if (!(await live.locator('#batch-right').innerText().catch(() => '')).includes('1 of the 1 that were not clean runs')) problems.push('the batch does not say how many of the attempts that were not clean runs had every decision right');
       if (!(await live.locator('#batch-legend').count())) problems.push('the batch lanes have no legend');
       if (await live.locator('#live-stage .bsq.won, #live-stage .bsq.lost').count()) problems.push('one model on both lanes was given scenario winners');
       if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('# Live batch report')) problems.push('the batch offers no report');
@@ -817,7 +866,7 @@ async function main() {
       // which lane won which scenario is on the lanes themselves: 5 to the first, 3 to the second, none where one did not play
       const rings = await live.evaluate(() => ['a', 'b'].map((lane) => document.querySelectorAll(`#live-stage .batch-lane.${lane} .bsq.won`).length));
       if (rings.join() !== '5,3') problems.push(`the lanes ring ${rings} scenarios as won, not 5 and 3`);
-      if (!(await live.locator('#live-stage .batch-lane.a').innerText()).includes('won 5 scenarios')) problems.push('a lane does not say how many scenarios it won');
+      if (!(await live.locator('#live-stage .batch-lane.a').innerText()).includes('took 5 scenarios')) problems.push('a lane does not say how many scenarios it took');
       if (!/won this scenario/.test((await live.locator('#live-stage .batch-lane.b .bsq').nth(2).getAttribute('title')) || '')) problems.push('the scenario one lane passed and the other did not is not marked as won');
       // pressing the button brings the race into view, and the way back to the start stays in reach
       const inView = await live
@@ -836,7 +885,7 @@ async function main() {
       const unplayed = await live.locator('#batch-unplayed').innerText().catch(() => '');
       if (runner.asked.early_stop !== true) problems.push('a batch did not ask the runner to stop early by default');
       if (!(await live.locator('#live-early').isVisible())) problems.push('a batch does not offer the early stop');
-      if (!/^Stopped early: .* did not pass 3 of the 10 scenarios asked for, so it could no longer pass 80%/.test(unplayed) || !unplayed.includes('8 scenarios were played by both')) problems.push(`a batch cut short does not say so: ${JSON.stringify(unplayed)}`);
+      if (!/^Stopped early: .* did not run 3 of the 10 scenarios asked for clean, so it could no longer run 80% of them clean/.test(unplayed) || !unplayed.includes('8 scenarios were played by both')) problems.push(`a batch cut short does not say so: ${JSON.stringify(unplayed)}`);
       const cutShort = await live.locator('#live-batch').innerText();
       for (const part of ['8 of 8 played (100%); 2 not played', '9 of 10 played (90%)', '8 fresh scenarios (of 10 asked for)']) if (!cutShort.includes(part)) problems.push(`the cut-short batch lacks ${JSON.stringify(part)}: ${JSON.stringify(cutShort.slice(0, 700))}`);
       if ((await live.locator('#live-stage .bsq.skip').count()) !== 2) problems.push('scenarios that were not played are not marked on the lane');

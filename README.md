@@ -279,7 +279,10 @@ allows a serious fault in 10% of them; `enterprise` needs 90% and allows 2%. The
 
 **Then the head to head.** Only the pairs where these two met count, and each pair is judged as the engine judges
 it: passing beats not passing; if both passed or neither did, the one that got further wins, then the more
-efficient. So the head to head does count process, and a verdict says how many scenarios were won on it. The
+efficient. A pass is what the page calls a **clean run**: the right result and every step the test asks for. So the
+head to head does count process, a verdict says how many scenarios were won on it, and a scenario can be lost with
+every decision right. An attempt ends one of three ways, and the page and the reports keep them apart everywhere:
+a clean run, the right result with a step skipped, or a wrong result. The
 result is one of four: **better** (settled), **leaning** (ahead, but it could still be chance), **no real
 difference shown**, or **not enough evidence** (fewer than eight pairs). When neither model is fit, Ledger lists
 the tested models that are, cheapest first, or says that none is.

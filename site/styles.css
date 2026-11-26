@@ -328,6 +328,21 @@ select.level.serious { border-color: var(--warn); background: var(--warn-soft); 
 .band { border-radius: 12px; padding: 20px 24px; text-align: center; margin-bottom: 14px; }
 .band.win { background: var(--win); color: var(--win-ink); }
 .band.even { background: var(--neutral-soft); border: 1.5px dashed var(--muted); }
+/* a live race that was not a win on the job: both right and neither clean (mixed), or neither right (stop) */
+.band.mixed { background: var(--warn-soft); border: 1.5px solid var(--warn); }
+.band.mixed .headline { color: var(--warn); }
+.band.stop { background: var(--stop-soft); border: 1.5px solid var(--stop); }
+.band.stop .headline { color: var(--stop); }
+table.what-happened { width: 100%; max-width: 760px; margin: 10px auto 12px; border-collapse: collapse; font-size: 14px; text-align: left; }
+table.what-happened th, table.what-happened td { padding: 6px 12px 6px 0; border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent); vertical-align: top; font-weight: 400; color: inherit; background: none; border-bottom: 0; }
+table.what-happened thead th { font-size: 12px; font-weight: 600; opacity: 0.85; border-top: 0; }
+table.what-happened tbody th { font-weight: 700; }
+table.what-happened td:last-child { white-space: nowrap; padding-right: 0; }
+table.what-happened small { display: block; opacity: 0.85; }
+.band.mixed table.what-happened tbody th.a, .band.stop table.what-happened tbody th.a, .band.even table.what-happened tbody th.a { color: var(--side-a); }
+.band.mixed table.what-happened tbody th.b, .band.stop table.what-happened tbody th.b, .band.even table.what-happened tbody th.b { color: var(--side-b); }
+/* how an attempt ended: a clean run, the right result with a step skipped, or a wrong result */
+.end.clean { color: var(--win); } .end.skipped { color: var(--warn); } .end.wrong, .end.none { color: var(--stop); }
 .band.stop { background: var(--stop-soft); border: 1.5px solid var(--stop); }
 .band .band-kind { font-size: 12.5px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; opacity: 0.85; margin: 0; }
 .band .headline { font-size: 23px; font-weight: 750; margin: 6px 0 10px; }

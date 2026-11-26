@@ -87,8 +87,12 @@ def attempt_timeline(res: dict, tools: list[str]) -> dict:
     ending = gladiator.ENDING_FAULTS.get(res.get("termination"))
     if ending:
         faults[ending] = 1
+    right = res.get("task_correct")
     return {
         "passed": bool(res.get("passed")),
+        # every decision right and nothing left undone, as the grader says it; a pass (a clean run) also asks
+        # for the process, so an attempt can be right and still not pass
+        "right": bool(res.get("passed") if right is None else right),
         "seconds": round(float(res.get("wall_s") or clock), 2),
         "cost_usd": round(float(res.get("cost_usd") or 0), 6),
         "items": details.get("items"),
