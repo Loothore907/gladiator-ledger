@@ -23,29 +23,39 @@ built from the same statements; and an MCP server gives AI assistants the same g
 > reproduces from a clean clone with **no API keys and no cost**.
 
 > **The record grows.** A live race on the hosted runner is sealed by the same engine on the same tests, imported
-> here and counted like any other match, so the page and the commands answer from more matches as races are run.
-> The figures printed in this README are from a fixed set, the 31 small-tier suite matches of Nov 22
-> (`--suite small-tier`), so what you run gives exactly what you read. Leave `--suite` off to count the live
-> races too. Two corrections to the data are described under [Corrections](#corrections).
+> here and counted like any other match played under the same conditions, so the page and the commands answer from
+> more matches as races are run. The figures printed in this README are the record as it stood at 05:00 UTC on
+> Nov 26, 2026 (49 matches). Add `--until 2026-11-26T05:00` to a command and what you run is exactly what you read;
+> leave it off for the record as it is today. Corrections to the data, and one change to how fitness is judged,
+> are described under [Corrections](#corrections).
 
 ## The idea in one table
 Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published capability index: a tie on paper.
-Here are the same two models on four workflows, sixteen judged pairs each, played on the same generated worlds
-(the Nov 22 suite matches; any row: `uv run ledger verdict <task> --a "haiku 5.5" --b deepseek-v4.1 --suite small-tier`).
+They cost about the same too, half a cent an attempt. Here are the two on four workflows, 41 to 43 scenarios each,
+both models on the same generated world every time
+(any row: `uv run ledger verdict <task> --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00`).
 
-| Task | Pairs won (Haiku / DeepSeek) | Attempts passed on the task (Haiku / DeepSeek) | For one person | For a business running it unattended |
+| Task | Scenarios won (Haiku / DeepSeek) | Attempts with the right result (Haiku / DeepSeek) | For one person | For a business running it unattended |
 |---|---|---|---|---|
-| Refund queue | 11 / 5 | 81% / 37% | **Use Haiku**: DeepSeek is not fit | neither is fit |
-| Access review | 5 / 11 | 96% / 96% | both fit, leaning DeepSeek | **Use DeepSeek**: Haiku is not fit |
-| Inventory transfer | 5 / 11 | 85% / 93% | both fit, leaning DeepSeek | neither is fit |
-| Incident triage | 9 / 7 | 87% / 96% | both fit, leaning Haiku | neither is fit |
+| Refund queue | 37 / 6 | 99% / 100% | **Use Haiku**: both are fit, and it did it better | neither is fit |
+| Incident triage | 30 / 11 | 91% / 97% | **Use Haiku**: both are fit, and it did it better | neither is fit |
+| Access review | 19 / 22 | 98% / 99% | both fit, no settled lead | **Use DeepSeek**: Haiku is not fit |
+| Inventory transfer | 20 / 19 | 87% / 95% | both fit, no settled lead | neither is fit |
 
-One model is not "better". The two cost about the same per attempt (half a cent) and split their 64 pairs 30 to
-34, yet task by task they are not level: on refunds DeepSeek fails 43 of 68 attempts by acting before it has read
-the records, and on access reviews and inventory transfers it leads 11 to 5. And **the right answer depends on who
-is asking**: a single wrong decision in 54 attempts is tolerable for one person and disqualifying for a business
-moving money or access rights. Ledger makes both calls, shows the count behind each, says "leaning" when a lead
-could still be chance, and lets you change the rule.
+One model is not "better". Haiku won 106 of the 166 scenarios and is the settled choice on two workflows. Yet
+DeepSeek got the right result more often on all four, and on access reviews it is the only one of the two a
+business could run unattended: Haiku made one wrong access decision in 81 attempts.
+
+The two columns disagree because they measure different things. **The right result** asks whether every decision
+was right. **Scenarios won** also counts how a model got there. On the refund queue both models decide the
+refunds correctly, and 28 of Haiku's 37 wins are on process alone: in two attempts of three, DeepSeek decides a
+request before looking up a record the brief tells it to read. Whether that matters is not Ledger's call. It is a
+fault with a level, and **the right answer depends on who is asking**: for one person it is minor and both models
+are fit; for a business it is serious and neither is. Ledger makes both calls, shows the count behind each, says
+"leaning" when a lead could still be chance, and lets you change the rule.
+
+That last point is in the table too. With sixteen scenarios each, DeepSeek led access review and inventory
+transfer 11 to 5, and Ledger called both "leaning, not settled". Twenty-five more scenarios levelled them.
 
 ## Three ways to use it
 All three walk the same loop over the same graph and give the same answers (the page is checked against the
@@ -104,7 +114,7 @@ Windows (CI checks Linux and Windows on every change).
 git clone https://github.com/Loothore907/gladiator-ledger
 cd gladiator-ledger
 uv sync
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1
 ```
 
 ## The loop, step by step
@@ -117,16 +127,16 @@ uv run ledger flows "an agent that handles refund requests for damaged orders"
 Closest tested workflows to: 'an agent that handles refund requests for damaged orders'  (searched for: refund
 requests damaged orders request order)      (output wrapped and shortened here)
 
-  gladiator/refund-queue  (Refund queue, version 2.2.0)  match 5.44
-    12 models, 207 judged pairs; modelled on tau-bench (style)
-    Refund queue duty for an online shop: every open refund request needs a decision. Check each request's ...
+  gladiator/refund-queue  (Refund queue, version 2.2.0)  match 6.03
+    12 models, 232 judged pairs; modelled on tau-bench (style)
+    You run the refund queue for an online shop. Go through every open refund request, look up its order ...
 
-  gladiator/inventory-transfer  (Inventory transfer, version 1.2.0)  match 2.15
+  gladiator/inventory-transfer  (Inventory transfer, version 1.2.0)  match 2.54
     ...
 ```
 A keyword search (a Relate **full-text index** over each workflow's title, brief and rules) that then walks the
 graph to what is known about each match: how many models and judged pairs stand behind it. When nothing matches it
-says so and lists what exists. It never invents a match. (Output of Nov 25, 2026. This command reads the whole
+says so and lists what exists. It never invents a match. (Output of Nov 26, 2026. This command reads the whole
 record, so the pair counts grow as live races are imported.)
 
 ### Step 2. Pick a fair opponent
@@ -140,64 +150,77 @@ Epoch Capabilities Index: 160.3  (range 158.2 to 162.7)
 Closest on paper, open weights only:
   model                                         score     gap  ranges overlap  weights  in Ledger
   epoch:Kimi K3.1 Pro                           161.2   +0.87  yes             open     no matches yet
-  openrouter:deepseek/deepseek-v4.1-flash-1017  159.4   -0.92  yes             open     66 pairs already played against it
+  openrouter:deepseek/deepseek-v4.1-flash-1017  159.4   -0.92  yes             open     166 pairs already played against it
   ...
 ```
 Ledger never ranks models by a published score. It uses one, [Epoch AI's](https://epoch.ai/benchmarks)
 Capabilities Index, for a narrower question: which models are close enough on paper that a head-to-head is worth
-running? Haiku and DeepSeek are less than one point apart, with overlapping ranges. Over all four workflows they
-are close too (30 pairs to 34 in the suite matches), but on the refund queue only one of them is fit for the job.
-**Close on paper, different on the task**: that gap is what Ledger is for. (Output of Nov 25, 2026; the count of
+running? Haiku and DeepSeek are less than one point apart, with overlapping ranges. On the tasks they are not a
+tie: Haiku is the settled choice on two of the four workflows, and for a business only DeepSeek is fit on a third.
+**Close on paper, different on the task**: that gap is what Ledger is for. (Output of Nov 26, 2026; the count of
 pairs already played grows with live races.)
 
 ### Step 3. Get the verdict
 ```bash
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00
 ```
 ```text
-Use anthropic:claude-haiku-5-5: it is the only one of the two fit for this task, and it is ahead,
-not settled.                                                           (output wrapped and shortened here)
-
+Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better.
+                                                                       (output wrapped and shortened here)
 Fit for this task (personal tolerance):
-  anthropic:claude-haiku-5-5: fit. Passed 44 of 54 (81%; bar 80%).
-      tolerated: wrong decision (serious) in 1 of 54
-      tolerated: acted without reading (minor) in 9 of 54
-  openrouter:minimax/minimax-m3.1-flash: NOT fit. Passed 53 of 67 (79%; bar 80%).
-      because: passed 53 of 67 attempts (79%), under the 80% bar
+  anthropic:claude-haiku-5-5: fit. Right result in 80 of 81 attempts (99%; bar 80%); 68 of them
+  also followed the process the test asks for.
+      tolerated: wrong decision (serious) in 1 of 81
+      tolerated: acted without reading (minor) in 12 of 81
+  openrouter:deepseek/deepseek-v4.1-flash-1017: fit. Right result in 95 of 95 attempts (100%; bar 80%);
+  30 of them also followed the process the test asks for.
+      tolerated: acted without reading (minor) in 65 of 95
 
-Head to head: Leaning anthropic:claude-haiku-5-5
-  15 judged pairs on the same generated worlds: anthropic:claude-haiku-5-5 won 7,
-  openrouter:minimax/minimax-m3.1-flash won 5, 3 tied (sign test p = 0.7744)
+Head to head: anthropic:claude-haiku-5-5 does this task better
+  43 judged pairs on the same generated worlds: anthropic:claude-haiku-5-5 won 37,
+  openrouter:deepseek/deepseek-v4.1-flash-1017 won 6, 0 tied (sign test p = 0.0)
+  decided: 28 on success, 15 on efficiency
+
+Notes:
+  - In 28 of the 37 scenarios anthropic:claude-haiku-5-5 won, both got the right result: it won them on
+    process, by following the steps the test asks for where the other did not.
 ```
-**Fit comes first.** A model is fit for a task when it passes enough of its attempts and stays inside your
-tolerance for faults. Every attempt the model made on the task under the same conditions counts, whoever the
-opponent was, so a model's fitness for a task reads the same in every verdict. (`--suite small-tier` keeps the
-answer to the fixed set of suite matches, so it reads exactly as printed here. Without it, live races played
-under those conditions count as well.) Each fault has a
-level: **unforgivable** (one attempt with it makes the model unfit, shown with its count), **serious** (fine if
-rare) or **minor** (shown, never decides). The same fault is not equally serious everywhere: paying a refund twice
-breaks a business, paging the on-call twice is an annoyance. Two tolerances ship, and every level can be overruled:
+**Fit comes first, and it has two parts.** The **result**: in enough of its attempts, every decision was right and
+nothing was left undone. That is the bar. The **process**: how it got there, read from the faults it made. Each
+fault has a level: **unforgivable** (one attempt with it makes the model unfit, shown with its count), **serious**
+(fine if rare) or **minor** (shown, never decides). The two are kept apart on purpose. The test passes an attempt
+only when both the result and the process are right, so DeepSeek "passes" 30 of its 95 refund attempts while
+getting every one of them right. Whether the skipped lookup matters is your call, not the bar's.
+
+Every attempt the model made on the task under the same conditions counts, whoever the opponent was, so a model's
+fitness for a task reads the same in every verdict. The same fault is not equally serious everywhere: paying a
+refund twice breaks a business, paging the on-call twice is an annoyance. Two tolerances ship, and every level can
+be overruled:
 
 ```bash
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --profile enterprise
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --unforgivable "acted without reading"
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --profile enterprise
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --unforgivable "acted without reading"
 ```
-`personal` needs 80% of attempts passed and allows a serious fault in 10% of them; `enterprise` needs 90% and
-allows 2%. The defaults are in [`ledger/policy.py`](ledger/policy.py).
+Both of those answer "neither is fit": a business will not accept a skipped lookup in more than 2% of attempts,
+and a reader who calls it unforgivable accepts none. `personal` needs the right result in 80% of attempts and
+allows a serious fault in 10% of them; `enterprise` needs 90% and allows 2%. The defaults are in
+[`ledger/policy.py`](ledger/policy.py).
 
-**Then the head to head.** Only the pairs where these two met count. It is one of four: **better** (a settled
-result), **leaning** (ahead, but it could still be chance), **no real difference shown**, or **not enough
-evidence** (fewer than eight pairs). When neither model is fit, Ledger lists the tested models that are, cheapest
-first, or says that none is.
+**Then the head to head.** Only the pairs where these two met count, and each pair is judged as the engine judges
+it: passing beats not passing; if both passed or neither did, the one that got further wins, then the more
+efficient. So the head to head does count process, and a verdict says how many scenarios were won on it. The
+result is one of four: **better** (settled), **leaning** (ahead, but it could still be chance), **no real
+difference shown**, or **not enough evidence** (fewer than eight pairs). When neither model is fit, Ledger lists
+the tested models that are, cheapest first, or says that none is.
 
 ### Step 4. Get the spec
 ```bash
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --out spec.md
+uv run ledger spec refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --out spec.md
 ```
 One document in four layers:
 
-- **Decision.** The answer to act on (here: use Haiku, the only one of the two that is fit, ahead but not
-  settled), each model's fitness with its reasons, the pair counts, and the comparison.
+- **Decision.** The answer to act on (here: use Haiku; both are fit and it did the task better), each model's
+  fitness with its reasons, the pair counts, and the comparison.
 - **Blueprint.** The job and the rules exactly as tested, the tools the flow needs, the settings the result holds
   for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and for every hazard an autonomy call:
   **can run alone** where the chosen model never fell for it in these matches, **needs a guard** where it did,
@@ -213,9 +236,9 @@ under these settings. A starting point for the real flow, to be tested again onc
 Two more reports are written from the same verdict, so the three cannot disagree:
 
 ```bash
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --report cost       # the cost breakdown
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --report evidence   # the evidence report
-uv run ledger spec refund-queue --a "haiku 5.5" --b minimax-m3.1 --suite small-tier --report all --out spec.md
+uv run ledger spec refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --report cost       # the cost breakdown
+uv run ledger spec refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --report evidence   # the evidence report
+uv run ledger spec refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00 --report all --out spec.md
 ```
 The **cost breakdown** adds every scenario's cost for both models. The **evidence report** lists each model's
 fitness with every fault and its count, and every scenario with its winner, how it was decided and its sealed
@@ -271,11 +294,11 @@ Graph: 11 kinds of node and 17 relationships. See [docs/SCHEMA.md](docs/SCHEMA.m
 The matches come from [Gladiator](https://github.com/Loothore907/gladiator-core), an open head-to-head evaluation
 engine. Each pair of attempts is judged in order: success beats failure; if neither succeeds, getting further wins;
 if both succeed, the more efficient wins; and no real difference is a tie. Ledger re-judges every pair with that rule.
-These questions read the whole record, live races included, so the counts below (Nov 25, 2026) grow.
+These questions read the whole record, live races included, so the counts below (Nov 26, 2026) grow.
 
 **Where models slip** (`uv run ledger ask hazard_profile`). For each model and each hazard a test can generate:
 how many attempts met it, and how many fell for it. The commonest slip is acting without reading: deciding a
-request before looking up the records it depends on (DeepSeek in 45 of 281 attempts; only one model never did it).
+request before looking up the records it depends on (DeepSeek in 67 of 381 attempts; only one model never did it).
 After an ambiguous timeout, ten of the twelve models always checked before retrying.
 
 **Why there is no overall ranking** (`uv run ledger ask beat_cycles`). On the same test, A beat B, B beat C and C
@@ -314,12 +337,12 @@ check it gives the same answers:
 
 ```bash
 uv run ledger build --records data/records --validations data/validations --scores data/epoch --store rebuilt.rl
-uv run ledger verdict refund-queue --a "haiku 5.5" --b minimax-m3.1 --store rebuilt.rl
+uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --store rebuilt.rl
 ```
 
-**Known limits.** Evidence is uneven. Thirteen pairings of small models have 12 to 16 judged pairs on every workflow,
-enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read "not enough evidence", which is
-the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
+**Known limits.** Evidence is uneven. One pairing (Haiku and DeepSeek) has 41 to 43 judged pairs on every workflow,
+and twelve more have 12 to 16, enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read
+"not enough evidence", which is the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
 that only resembles one of these four needs its own test. Every verdict from the page and the assistant rests on
 finished, sealed matches. A live race (judges only for now) runs on a separate Gladiator runner: the page shows
 it as it happens, and once its sealed record has been imported it counts in the verdict like any other match, so
@@ -331,6 +354,15 @@ one obstacle was weaker than intended in the versions played here (below).
 Commons Attribution licence; see [data/epoch/README.md](data/epoch/README.md) for the credit.
 
 ## Corrections
+**How fitness is judged changed (2026-11-26).** Until then a model was fit for a task only if it passed enough of
+its attempts, and the test passes an attempt only when the result and the process are both right. Four live
+batches showed what that hid: on the refund queue DeepSeek got every refund decision right in all 95 attempts and
+was called not fit, because in 65 of them it decided a request before looking up a record the brief tells it to
+read. Ledger already listed that as a fault whose level the reader sets, and then let the pass rate overrule the
+reader. Now the bar asks for the right result, and the process is judged only by the fault levels. No record,
+count or head-to-head result changed. Verdicts that said "not fit" for process alone changed, the first row of the
+table at the top among them: it used to read "Use Haiku: DeepSeek is not fit".
+
 **Costs corrected (2026-11-23).** A check of recorded costs against the providers' real bills found the engine
 had priced two kinds of call wrongly (Claude Haiku 5.5 about four times too high, models run through OpenRouter
 about 40% too low). Every cost here is now the provider's billed figure where one exists, and every scenario

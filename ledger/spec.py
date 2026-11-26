@@ -15,7 +15,7 @@ point for building the real flow, not a promise about it.
 
 import json
 
-from ledger import questions, reports
+from ledger import policy, questions, reports
 
 # What to build for each hazard a model tripped on. Keys are hazard names (ledger/bridges/gladiator.py HAZARDS).
 GUARDRAILS = {
@@ -63,7 +63,7 @@ def build(rows, verdict: dict) -> dict:
     }
     if judged:
         out["decision"].update({k: verdict[k] for k in ("outcome", "headline", "profile")})
-        keep = ("fit", "attempts", "passed", "pass_rate", "bar", "reasons")
+        keep = ("fit", "attempts", "passed", "pass_rate", "right", "right_rate", "bar", "reasons")
         out["fit"] = {model: {k: f[k] for k in keep} for model, f in verdict["fit"].items()}
     if verdict["verdict"] == "no data":
         return out
@@ -85,6 +85,7 @@ def build(rows, verdict: dict) -> dict:
             "suite": verdict.get("suite"),
             "version_key": verdict["version"],
             "conditions": verdict.get("conditions"),
+            "until": verdict.get("until"),
         },
     )
     guards = []
@@ -156,10 +157,7 @@ def markdown(spec: dict) -> str:
             f = spec["fit"][name]
             word = {True: "fit", False: "not fit", None: "too few attempts to say"}[f["fit"]]
             why = "; ".join(f["reasons"])
-            lines.append(
-                f"- `{name}`: **{word}**. Passed {f['passed']} of {f['attempts']} attempts on this task "
-                f"({f['pass_rate']:.0%}; bar {f['bar']:.0%})." + (f" Because: {why}." if why else "")
-            )
+            lines.append(f"- `{name}`: **{word}**. {policy.result_line(f)}" + (f" Because: {why}." if why else ""))
         versus = {
             "better": f"`{d['better']}` did this task better than the other model.",
             "leaning": f"`{d['better']}` is ahead, but the lead could still be chance.",
@@ -178,13 +176,17 @@ def markdown(spec: dict) -> str:
         + ", ".join(f"{n} on {rule}" for rule, n in sorted(d["decided_by"].items(), key=lambda x: -x[1]))
         + ".",
         "",
-        f"| Model | Passed | Cost per attempt | Seconds per attempt | Mistakes per attempt | Good enough (bar {d['bar']:.0%}) |",
-        "|---|---|---|---|---|---|",
+        (
+            "| Model | Right result | Passed (result and process) | Cost per attempt | Seconds per attempt | "
+            f"Mistakes per attempt | Good enough (bar {d['bar']:.0%}) |"
+        ),
+        "|---|---|---|---|---|---|---|",
     ]
     for name in (a, b):
         s = models[name]
         lines.append(
-            f"| `{name}` | {s['passed']} of {s['attempts']} | ${s['cost_per_attempt']:.4f} | "
+            f"| `{name}` | {s['right']} of {s['attempts']} | {s['passed']} of {s['attempts']} | "
+            f"${s['cost_per_attempt']:.4f} | "
             f"{s['seconds_per_attempt']:.0f} | {s['mistakes']:.1f} | {'yes' if s['good_enough'] else 'no'} |"
         )
     lines.append("")

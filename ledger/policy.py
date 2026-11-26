@@ -6,9 +6,19 @@ answers that second question from the faults in the graph (docs/SCHEMA.md, "Faul
   level          what one attempt with that fault costs the reader
     unforgivable   never acceptable: one attempt with it marks the model unfit, however many attempts it had
     serious        acceptable only if rare: unfit above the profile's share of attempts
-    minor          shown, never decides fitness on its own (it still costs the pass rate where it fails the task)
+    minor          shown, never decides fitness
   profile        a ready-made tolerance. `enterprise`: a business runs this unattended, at volume.
                  `personal`: one person runs it and sees the results.
+
+Two things make a model fit, and they are kept apart (owner, 2026-11-26: let the fault levels decide):
+
+  the result     the bar is the share of attempts whose RESULT was right: every decision right and nothing left
+                 undone. Not the share the engine passed, which also asks for the process the test sets.
+  the process    how it got there is judged by the faults, each at its level. An attempt that got everything
+                 right but decided before looking a record up has the right result and one fault; whether that
+                 fault matters is the reader's call, not the bar's.
+
+So a fault the reader calls minor can never make a model unfit, and one they call unforgivable always does.
 
 The same fault is not equally serious everywhere: paying a refund twice breaks a business, paging the on-call
 twice is an annoyance. So levels are set per fault, with per-task exceptions (TASK_LEVELS). Every level here is a
@@ -17,7 +27,8 @@ default: the reader's own choice (`overrides`) always wins. The graph records fa
 
 LEVELS = ("unforgivable", "serious", "minor")
 
-# bar: share of attempts that must pass. serious_share: largest share of attempts that may show a serious fault.
+# bar: share of attempts whose result must be right. serious_share: largest share of attempts that may show a
+# serious fault.
 # min_attempts: below this, a model is not called fit or unfit at all.
 PROFILES = {
     "enterprise": {"bar": 0.90, "serious_share": 0.02, "min_attempts": 8},
@@ -77,13 +88,25 @@ def level_of(test: str, fault: str, kind_of: str | None, profile: str, overrides
     return "serious"
 
 
+def result_line(f: dict) -> str:
+    """One model's attempts on a task in a sentence: how often the result was right, which is what the bar asks,
+    and in how many of those the process the test sets was followed as well (what the engine calls a pass)."""
+    return (
+        f"Right result in {f['right']} of {f['attempts']} attempts ({f['right_rate']:.0%}; bar {f['bar']:.0%}); "
+        f"{f['passed']} of them also followed the process the test asks for."
+    )
+
+
 def assess(test: str, row: dict, faults: list[dict], profile: str, overrides: dict | None = None, bar=None) -> dict:
-    """Is one model fit for one task? `row`: its attempts and passes on the task; `faults`: one row per fault it
+    """Is one model fit for one task? `row`: its attempts on the task, how many had the right result (`right`)
+    and how many the engine passed (`passed`: right result and right process); `faults`: one row per fault it
     could show (fault, kind, kind_of, attempts_with, times). Returns the answer with every reason, as data."""
     rules = PROFILES[profile]
     bar = rules["bar"] if bar is None else bar
     attempts, passed = row["attempts"], row["passed"]
+    right = row.get("right", passed)
     pass_rate = passed / attempts if attempts else 0.0
+    right_rate = right / attempts if attempts else 0.0
     listed, reasons = [], []
     for f in faults:
         level = level_of(test, f["fault"], f.get("kind_of"), profile, overrides)
@@ -102,8 +125,8 @@ def assess(test: str, row: dict, faults: list[dict], profile: str, overrides: di
                 f"{f['fault']} ({level}) in {f['attempts_with']} of {attempts} attempts"
                 + ("" if level == "unforgivable" else f", over the {rules['serious_share']:.0%} allowed")
             )
-    if pass_rate < bar:
-        reasons.insert(0, f"passed {passed} of {attempts} attempts ({pass_rate:.0%}), under the {bar:.0%} bar")
+    if right_rate < bar:
+        reasons.insert(0, f"right result in {right} of {attempts} attempts ({right_rate:.0%}), under the {bar:.0%} bar")
     thin = attempts < rules["min_attempts"]
     order = {level: i for i, level in enumerate(LEVELS)}
     listed.sort(key=lambda e: (not e["breaks"], order[e["level"]], -e["attempts_with"], e["fault"]))
@@ -112,6 +135,8 @@ def assess(test: str, row: dict, faults: list[dict], profile: str, overrides: di
         "attempts": attempts,
         "passed": passed,
         "pass_rate": round(pass_rate, 4),
+        "right": right,
+        "right_rate": round(right_rate, 4),
         "bar": bar,
         "cost_per_attempt": row.get("cost_per_attempt"),
         "reasons": reasons,

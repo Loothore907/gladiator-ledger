@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import relate
@@ -23,7 +24,7 @@ from ledger import load, policy, publish, questions, reports, spec
 from ledger.bridges import epoch
 
 DEFAULT_STORE = "data/ledger.rl"
-GOOD_ENOUGH = 0.8  # default bar for "good enough for this task": share of attempts passed
+GOOD_ENOUGH = 0.8  # default bar for "good enough for this task": share of attempts with the right result
 MIN_PAIRS = 8  # fewer judged pairs than this for a model on a workflow is "not enough evidence"
 CLEAR_P = 0.05  # sign-test p-value below which a head-to-head lead counts as clear
 
@@ -58,11 +59,16 @@ def current_version(store: str, test: str) -> str | None:
     return found[0]["key"] if found else None
 
 
+UNTIL_HELP = (
+    "read the record as it stood then: only matches started at or before this moment, a date (2026-11-26, the whole "
+    "day) or a date and time in UTC (2026-11-26T05:00). A figure quoted with it stays the same as the record grows"
+)
 SCOPE_DEFAULTS = {
     "test_id": None,
     "suite": None,
     "version_key": None,
     "conditions": None,
+    "until": None,
     "current_only": False,
     "open_only": False,
 }
@@ -332,6 +338,18 @@ def print_opponents(o: dict) -> None:
     print("Scores: Epoch AI, 'Capabilities & benchmarking', epoch.ai/benchmarks (CC BY 4.0). See data/epoch/README.md.")
 
 
+def parse_until(text: str | None) -> float | None:
+    """`--until`: a date (the whole of that day counts) or a date and time, in UTC, as unix seconds."""
+    if not text:
+        return None
+    moment = datetime.fromisoformat(text)
+    if "T" not in text and " " not in text:
+        moment = moment.replace(hour=23, minute=59, second=59)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.timestamp()
+
+
 def reference_conditions(found: list[dict], record: dict[str, int]) -> str:
     """The one set of conditions a verdict between two models is read under. In order: the conditions of the suite
     matches between the two (most pairs); if they never met in a suite, those most of the task's own suite record
@@ -375,13 +393,21 @@ def not_counted_note(not_counted: list[dict]) -> str:
 
 
 def fitness(
-    store: str, test: str, version: str, conditions: str, suite: str | None, profile: str, overrides=None, bar=None
+    store: str,
+    test: str,
+    version: str,
+    conditions: str,
+    suite: str | None,
+    profile: str,
+    overrides=None,
+    bar=None,
+    until: float | None = None,
 ) -> dict:
     """Every model's fitness for one task version, by model id, under a profile (ledger/policy.py). Counts every
     attempt the model made on the task under one set of conditions, whoever the opponent was and whether the match
     was a suite match or a live race, so a model's fitness for a task is the same number in every verdict read
     under those conditions. `suite` keeps it to one suite's matches (a fixed set)."""
-    scope = {"version_key": version, "conditions": conditions, "suite": suite}
+    scope = {"version_key": version, "conditions": conditions, "suite": suite, "until": until}
     faults: dict[str, list[dict]] = {}
     for f in rows(store, questions.TASK_FAULTS, scope):
         faults.setdefault(f.pop("model"), []).append(f)
@@ -394,6 +420,7 @@ def fitness(
         spent = (r["cost_per_attempt"] or 0) * r["attempts"] + (extra["spent"] or 0)
         r["attempts"] += extra["attempts"]
         r["passed"] += extra["passed"]
+        r["right"] += extra["right"]
         r["cost_per_attempt"] = spent / r["attempts"]
     for f in rows(store, questions.SELF_FAULTS, scope):
         mine = {x["fault"]: x for x in faults.get(f["model"], [])}
@@ -438,11 +465,14 @@ def outcome(v: dict, fit: dict) -> tuple[str, str, str | None]:
 def _side(pairs: list[dict], side: str) -> dict:
     n = len(pairs)
     passed = sum(1 for p in pairs if p[f"{side}_passed"])
+    right = sum(1 for p in pairs if p[f"{side}_right"])  # the result alone, whatever the process was
     spent = sum(p[f"{side}_cost"] or 0 for p in pairs)
     return {
         "attempts": n,
         "passed": passed,
         "pass_rate": passed / n,
+        "right": right,
+        "right_rate": right / n,
         "cost_per_attempt": spent / n,
         # what a successful result really costs, failures included (None when nothing passed)
         "cost_per_pass": spent / passed if passed else None,
@@ -469,19 +499,21 @@ def verdict(
     min_pairs: int = MIN_PAIRS,
     profile: str | None = None,
     overrides: dict | None = None,
+    until: float | None = None,
 ) -> dict:
     """A task claim: which of two models did THIS task better when they played the same worlds, how sure that is,
     and whether either is good enough. Only the pairs where these two met count. Never a claim about a model in
     general, and no winner is named on thin evidence or a level score."""
     test = test_id(workflow)
     version = None if all_versions else current_version(store, test)
-    params = {"test_id": test, "a": a, "b": b, "suite": suite, "version_key": version}
-    out = {"task": test, "version": version or "all versions", "suite": suite, "a": a, "b": b, "bar": bar}
+    params = {"test_id": test, "a": a, "b": b, "suite": suite, "version_key": version, "until": until}
+    out = {"task": test, "version": version or "all versions", "suite": suite, "until": until, "a": a, "b": b}
+    out["bar"] = bar
     met_under = rows(store, questions.PAIR_CONDITIONS, params)
     if not met_under:
         return dict(out, verdict="no data", better=None, pairs=0, notes=[f"{a} and {b} never met on {test}."])
     # One verdict, one set of conditions: pairs played under any other are on file and said so, never pooled.
-    task_scope = {"test_id": test, "suite": suite, "version_key": version}
+    task_scope = {"test_id": test, "suite": suite, "version_key": version, "until": until}
     record = {r["conditions"]: r["pairs"] for r in rows(store, questions.TASK_CONDITIONS, task_scope)}
     conditions = reference_conditions(met_under, record)
     params["conditions"] = conditions
@@ -517,14 +549,23 @@ def verdict(
                 "a lean, not a settled result."
             )
     for s in stats.values():
-        s["good_enough"] = s["pass_rate"] >= bar
+        s["good_enough"] = s["right_rate"] >= bar
     if better and not stats[better]["good_enough"]:
         notes.append(
-            f"{better} did better here, but passed only {stats[better]['pass_rate']:.0%} of attempts "
-            f"(bar {bar:.0%}): better than the other one is not the same as good enough."
+            f"{better} did better here, but got the right result in only {stats[better]['right_rate']:.0%} of "
+            f"attempts (bar {bar:.0%}): better than the other one is not the same as good enough."
         )
     if not any(s["good_enough"] for s in stats.values()):
-        notes.append(f"Neither model reaches the bar of {bar:.0%} passed on this task.")
+        notes.append(f"Neither model reaches the bar of {bar:.0%} right results on this task.")
+    # a scenario won by passing where the other did not, although both got the right result, was won on process
+    for model, side, other in ((a, "a", "b"), (b, "b", "a")):
+        on_process = sum(1 for p in pairs if p["winner"] == model and p["rule"] == "success" and p[f"{other}_right"])
+        won = wins_a if side == "a" else wins_b
+        if on_process:
+            notes.append(
+                f"In {on_process} of the {won} scenarios {model} won, both got the right result: it won them on "
+                "process, by following the steps the test asks for where the other did not."
+            )
     efforts = {tuple(s["effort"]) for s in stats.values()}
     if len(efforts) > 1 or any(len(e) > 1 for e in efforts):
         notes.append("The two models did not play under one identical effort setting in every pair.")
@@ -537,7 +578,7 @@ def verdict(
     if profile:
         # Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
         version_key = max(p["version"] for p in pairs)
-        everyone = fitness(store, test, version_key, conditions, suite, profile, overrides)
+        everyone = fitness(store, test, version_key, conditions, suite, profile, overrides, until=until)
         out["profile"] = profile
         out["fit"] = {m: everyone[m] for m in (a, b)}
         head = {"a": a, "b": b, "better": better, "verdict": kind}
@@ -557,13 +598,14 @@ def verdict(
             for p in pairs
         ]
         # consistency: what each of the two did when given the same scenario twice (self runs), if it was
-        own = {"version_key": version_key, "models": [a, b], "conditions": conditions, "suite": suite}
+        own = {"version_key": version_key, "models": [a, b], "conditions": conditions, "suite": suite, "until": until}
         out["consistency"] = rows(store, questions.SELF_CONSISTENCY, own)
         # who else is fit on this task, cheapest first: where to look when neither of these two is
         out["fit_on_task"] = [
             {
                 "model": m,
                 "pass_rate": f["pass_rate"],
+                "right_rate": f["right_rate"],
                 "attempts": f["attempts"],
                 "cost_per_attempt": f["cost_per_attempt"],
             }
@@ -591,6 +633,8 @@ def verdict(
 def print_verdict(v: dict) -> None:
     a, b = v["a"], v["b"]
     scope = f"  suite {v['suite']}" if v.get("suite") else ""
+    if v.get("until"):
+        scope += f"  the record up to {datetime.fromtimestamp(v['until'], UTC):%Y-%m-%d %H:%M} UTC"
     print(f"Task: {v['task']}  ({v['version']}){scope}")
     print(f"{a}  vs  {b}")
     if v["verdict"] == "no data":
@@ -608,9 +652,7 @@ def print_verdict(v: dict) -> None:
         for name in (a, b):
             f = v["fit"][name]
             word = {True: "fit", False: "NOT fit", None: "too few attempts"}[f["fit"]]
-            print(
-                f"  {name}: {word}. Passed {f['passed']} of {f['attempts']} ({f['pass_rate']:.0%}; bar {f['bar']:.0%})."
-            )
+            print(f"  {name}: {word}. {policy.result_line(f)}")
             for reason in f["reasons"]:
                 print(f"      because: {reason}")
             for x in f["faults"]:
@@ -626,7 +668,8 @@ def print_verdict(v: dict) -> None:
             print("  Fit on this task among the models tested, cheapest first:")
             for o in others:
                 print(
-                    f"      {o['model']}: passed {o['pass_rate']:.0%} of {o['attempts']}, {money(o['cost_per_attempt'])} an attempt"
+                    f"      {o['model']}: right result in {o['right_rate']:.0%} of {o['attempts']} attempts, "
+                    f"{money(o['cost_per_attempt'])} an attempt"
                 )
             if not others:
                 print("      none: no tested model is fit for this task under this tolerance")
@@ -638,11 +681,12 @@ def print_verdict(v: dict) -> None:
     how = ", ".join(f"{n} on {rule}" for rule, n in sorted(v["decided_by"].items(), key=lambda kv: -kv[1]))
     print(f"  decided: {how}")
     width = max(len(a), len(b), 5)
-    print(f"\n  {'model':{width}}  passed   $/attempt  sec/attempt  mistakes  good enough (bar {v['bar']:.0%})")
+    print(f"\n  {'model':{width}}  right   passed   $/attempt  sec/attempt  mistakes  good enough (bar {v['bar']:.0%})")
     for name in (a, b):
         s = v["models"][name]
         print(
-            f"  {name:{width}}  {s['passed']:>2}/{s['attempts']:<3}  {money(s['cost_per_attempt']):>9}  "
+            f"  {name:{width}}  {s['right']:>2}/{s['attempts']:<3}  {s['passed']:>2}/{s['attempts']:<3}  "
+            f"{money(s['cost_per_attempt']):>9}  "
             f"{s['seconds_per_attempt']:11.0f}  {s['mistakes']:8.1f}  {'yes' if s['good_enough'] else 'no'}"
         )
     if v["hazards"]:
@@ -761,8 +805,11 @@ def main(argv=None):
     v.add_argument("--a", required=True, help="first model, e.g. anthropic:claude-haiku-5-5")
     v.add_argument("--b", required=True, help="second model")
     v.add_argument("--suite", help="only pairs played in this suite (suites can set different budgets)")
+    v.add_argument("--until", help=UNTIL_HELP)
     v.add_argument("--all-versions", action="store_true", help="also count pairs on older versions of the test")
-    v.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that counts as good enough")
+    v.add_argument(
+        "--bar", type=float, default=GOOD_ENOUGH, help="share of attempts with the right result that is good enough"
+    )
     v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
     v.add_argument(
         "--profile",
@@ -802,7 +849,10 @@ def main(argv=None):
         help="whose tolerance decides whether a model is fit for the task (none = the head to head only)",
     )
     sp.add_argument("--suite", help="only pairs played in this suite")
-    sp.add_argument("--bar", type=float, default=GOOD_ENOUGH, help="share of attempts passed that is good enough")
+    sp.add_argument("--until", help=UNTIL_HELP)
+    sp.add_argument(
+        "--bar", type=float, default=GOOD_ENOUGH, help="share of attempts with the right result that is good enough"
+    )
     sp.add_argument("--out", type=Path, help="write the spec to this file (Markdown) instead of printing it")
     sp.add_argument("--json", action="store_true", help="print the spec as JSON only")
     sp.add_argument(
@@ -900,7 +950,8 @@ def main(argv=None):
         a = resolve_model(args.store, args.a) or args.a
         b = resolve_model(args.store, args.b) or args.b
         profile = None if args.profile == "none" else args.profile
-        found = verdict(args.store, args.workflow, a, b, args.suite, bar=args.bar, profile=profile)
+        until = parse_until(args.until)
+        found = verdict(args.store, args.workflow, a, b, args.suite, bar=args.bar, profile=profile, until=until)
         found["suite"] = args.suite
         built = spec.build(lambda q, p: rows(args.store, q, p), found)
         title = (built.get("blueprint") or {}).get("title") or built["task"]
@@ -933,7 +984,17 @@ def main(argv=None):
         overrides = {fault: level for level in policy.LEVELS for fault in getattr(args, level)}
         profile = None if args.profile == "none" else args.profile
         result = verdict(
-            args.store, args.workflow, a, b, args.suite, args.all_versions, args.bar, args.min_pairs, profile, overrides
+            args.store,
+            args.workflow,
+            a,
+            b,
+            args.suite,
+            args.all_versions,
+            args.bar,
+            args.min_pairs,
+            profile,
+            overrides,
+            parse_until(args.until),
         )
         if args.json:
             print(json.dumps(result, indent=1, default=str))

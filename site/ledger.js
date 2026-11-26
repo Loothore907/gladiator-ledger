@@ -4,11 +4,21 @@
 
 import { fixed, floatRepr, jsonDumps, percent, round, str, sum } from './pyformat.js';
 
+// One model's attempts on a task in a sentence (policy.result_line): how often the result was right, which is
+// what the bar asks, and in how many of those the process the test sets was followed as well.
+export function resultLine(f) {
+  return (
+    `Right result in ${f.right} of ${f.attempts} attempts (${percent(f.right_rate)}; bar ${percent(f.bar)}); ` +
+    `${f.passed} of them also followed the process the test asks for.`
+  );
+}
+
 // Numbers that are floats in Python even when they are whole (JSON cannot tell 1 from 1.0).
 const FLOAT_KEYS = new Set([
   'bar',
   'p_value',
   'pass_rate',
+  'right_rate',
   'cost_per_attempt',
   'seconds_per_attempt',
   'mistakes',
@@ -114,7 +124,7 @@ export function evidenceMarkdown(v, title) {
       lines.push(
         `### \`${name}\`: ${word}`,
         '',
-        `Passed ${f.passed} of ${f.attempts} attempts (${percent(f.pass_rate)}; bar ${percent(f.bar)}).`,
+        resultLine(f),
         '',
       );
       if (f.faults.length) {
@@ -263,11 +273,14 @@ export function createLedger(ask, questions, rules) {
   function side(pairs, s) {
     const n = pairs.length;
     const passed = pairs.filter((p) => p[`${s}_passed`]).length;
+    const right = pairs.filter((p) => p[`${s}_right`]).length; // the result alone, whatever the process was
     const spent = sum(pairs.map((p) => p[`${s}_cost`] || 0));
     return {
       attempts: n,
       passed,
       pass_rate: passed / n,
+      right,
+      right_rate: right / n,
       cost_per_attempt: spent / n,
       cost_per_pass: passed ? spent / passed : null,
       spent,
@@ -304,7 +317,9 @@ export function createLedger(ask, questions, rules) {
     const limits = policy.profiles[profile];
     bar = bar === null ? limits.bar : bar;
     const { attempts, passed } = row;
+    const right = row.right ?? passed;
     const passRate = attempts ? passed / attempts : 0.0;
+    const rightRate = attempts ? right / attempts : 0.0;
     const listed = [];
     const reasons = [];
     for (const f of faults) {
@@ -322,8 +337,8 @@ export function createLedger(ask, questions, rules) {
         );
       }
     }
-    if (passRate < bar) {
-      reasons.unshift(`passed ${passed} of ${attempts} attempts (${percent(passRate)}), under the ${percent(bar)} bar`);
+    if (rightRate < bar) {
+      reasons.unshift(`right result in ${right} of ${attempts} attempts (${percent(rightRate)}), under the ${percent(bar)} bar`);
     }
     const thin = attempts < limits.min_attempts;
     const order = (e) => policy.levels.indexOf(e.level);
@@ -339,6 +354,8 @@ export function createLedger(ask, questions, rules) {
       attempts,
       passed,
       pass_rate: round(passRate, 4),
+      right,
+      right_rate: round(rightRate, 4),
       bar,
       cost_per_attempt: row.cost_per_attempt ?? null,
       reasons,
@@ -382,7 +399,7 @@ export function createLedger(ask, questions, rules) {
   // whoever the opponent was and whether the match was a suite match or a live race. `suite` keeps it to one
   // suite's matches (a fixed set).
   async function fitness(test, version, conditions, suite, profile, overrides = null, bar = null) {
-    const scope = { version_key: version, conditions, suite };
+    const scope = { version_key: version, conditions, suite, until: null };
     const faults = {};
     for (const { model, ...f } of await ask(questions.task_faults, scope)) (faults[model] ||= []).push(f);
     const attempts = new Map((await ask(questions.task_attempts, scope)).map((r) => [r.model, { ...r }]));
@@ -393,6 +410,7 @@ export function createLedger(ask, questions, rules) {
       const spent = (r.cost_per_attempt || 0) * r.attempts + (extra.spent || 0);
       r.attempts += extra.attempts;
       r.passed += extra.passed;
+      r.right += extra.right;
       r.cost_per_attempt = spent / r.attempts;
     }
     for (const f of await ask(questions.self_faults, scope)) {
@@ -455,15 +473,16 @@ export function createLedger(ask, questions, rules) {
   ) {
     const test = testId(workflow);
     const version = await currentVersion(test);
-    const params = { test_id: test, a, b, suite, version_key: version };
-    const out = { task: test, version: version || 'all versions', suite, a, b, bar };
+    // the page always reads the whole record: `until` (the command line's --until) stays empty here
+    const params = { test_id: test, a, b, suite, version_key: version, until: null };
+    const out = { task: test, version: version || 'all versions', suite, until: null, a, b, bar };
     const metUnder = await ask(questions.pair_conditions, params);
     if (!metUnder.length) {
       return { ...out, verdict: 'no data', better: null, pairs: 0, notes: [`${a} and ${b} never met on ${test}.`] };
     }
     // One verdict, one set of conditions: pairs played under any other are on file and said so, never pooled.
     const record = new Map(
-      (await ask(questions.task_conditions, { test_id: test, suite, version_key: version })).map((r) => [r.conditions, r.pairs]),
+      (await ask(questions.task_conditions, { test_id: test, suite, version_key: version, until: null })).map((r) => [r.conditions, r.pairs]),
     );
     const conditions = referenceConditions(metUnder, record);
     params.conditions = conditions;
@@ -502,14 +521,27 @@ export function createLedger(ask, questions, rules) {
       }
     }
     const each = Object.values(stats);
-    for (const s of each) s.good_enough = s.pass_rate >= bar;
+    for (const s of each) s.good_enough = s.right_rate >= bar;
     if (better && !stats[better].good_enough) {
       notes.push(
-        `${better} did better here, but passed only ${percent(stats[better].pass_rate)} of attempts ` +
-          `(bar ${percent(bar)}): better than the other one is not the same as good enough.`,
+        `${better} did better here, but got the right result in only ${percent(stats[better].right_rate)} of ` +
+          `attempts (bar ${percent(bar)}): better than the other one is not the same as good enough.`,
       );
     }
-    if (!each.some((s) => s.good_enough)) notes.push(`Neither model reaches the bar of ${percent(bar)} passed on this task.`);
+    if (!each.some((s) => s.good_enough)) notes.push(`Neither model reaches the bar of ${percent(bar)} right results on this task.`);
+    // a scenario won by passing where the other did not, although both got the right result, was won on process
+    for (const [model, other, won] of [
+      [a, 'b', winsA],
+      [b, 'a', winsB],
+    ]) {
+      const onProcess = pairs.filter((p) => p.winner === model && p.rule === 'success' && p[`${other}_right`]).length;
+      if (onProcess) {
+        notes.push(
+          `In ${onProcess} of the ${won} scenarios ${model} won, both got the right result: it won them on ` +
+            'process, by following the steps the test asks for where the other did not.',
+        );
+      }
+    }
     const efforts = new Set(each.map((s) => JSON.stringify(s.effort)));
     if (efforts.size > 1 || each.some((s) => s.effort.length > 1)) {
       notes.push('The two models did not play under one identical effort setting in every pair.');
@@ -543,10 +575,10 @@ export function createLedger(ask, questions, rules) {
         run: p.run,
         match: p.match,
       }));
-      out.consistency = await ask(questions.self_consistency, { version_key: versionKey, models: [a, b], conditions, suite });
+      out.consistency = await ask(questions.self_consistency, { version_key: versionKey, models: [a, b], conditions, suite, until: null });
       out.fit_on_task = Object.entries(everyone)
         .filter(([, f]) => f.fit)
-        .map(([model, f]) => ({ model, pass_rate: f.pass_rate, attempts: f.attempts, cost_per_attempt: f.cost_per_attempt }));
+        .map(([model, f]) => ({ model, pass_rate: f.pass_rate, right_rate: f.right_rate, attempts: f.attempts, cost_per_attempt: f.cost_per_attempt }));
     }
     return {
       ...out,
@@ -597,6 +629,8 @@ export function createLedger(ask, questions, rules) {
           attempts: f.attempts,
           passed: f.passed,
           pass_rate: f.pass_rate,
+          right: f.right,
+          right_rate: f.right_rate,
           bar: f.bar,
           reasons: f.reasons,
         };
@@ -616,6 +650,7 @@ export function createLedger(ask, questions, rules) {
       suite: v.suite ?? null,
       version_key: v.version,
       conditions: v.conditions ?? null,
+      until: v.until ?? null,
     });
     const guards = [];
     for (const model of chosen ? [chosen] : [v.a, v.b]) {
@@ -689,11 +724,7 @@ export function createLedger(ask, questions, rules) {
         const f = spec.fit[name];
         const word = f.fit === null ? 'too few attempts to say' : f.fit ? 'fit' : 'not fit';
         const why = f.reasons.join('; ');
-        lines.push(
-          `- \`${name}\`: **${word}**. Passed ${f.passed} of ${f.attempts} attempts on this task ` +
-            `(${percent(f.pass_rate)}; bar ${percent(f.bar)}).` +
-            (why ? ` Because: ${why}.` : ''),
-        );
+        lines.push(`- \`${name}\`: **${word}**. ${resultLine(f)}` + (why ? ` Because: ${why}.` : ''));
       }
       const versus = {
         better: `\`${d.better}\` did this task better than the other model.`,
@@ -710,13 +741,14 @@ export function createLedger(ask, questions, rules) {
         `${d.wins[b]}, ${d.ties} tied (sign test p = ${floatRepr(d.p_value)}).`,
       `- Decided by: ${decidedText(d.decided_by)}.`,
       '',
-      `| Model | Passed | Cost per attempt | Seconds per attempt | Mistakes per attempt | Good enough (bar ${percent(d.bar)}) |`,
-      '|---|---|---|---|---|---|',
+      '| Model | Right result | Passed (result and process) | Cost per attempt | Seconds per attempt | ' +
+        `Mistakes per attempt | Good enough (bar ${percent(d.bar)}) |`,
+      '|---|---|---|---|---|---|---|',
     );
     for (const name of [a, b]) {
       const s = models[name];
       lines.push(
-        `| \`${name}\` | ${s.passed} of ${s.attempts} | $${fixed(s.cost_per_attempt, 4)} | ` +
+        `| \`${name}\` | ${s.right} of ${s.attempts} | ${s.passed} of ${s.attempts} | $${fixed(s.cost_per_attempt, 4)} | ` +
           `${fixed(s.seconds_per_attempt, 0)} | ${fixed(s.mistakes, 1)} | ${s.good_enough ? 'yes' : 'no'} |`,
       );
     }

@@ -974,7 +974,7 @@ async function drawPairGraph(v, ring = null) {
   if (!box) return;
   const version = v.version !== 'all versions' ? v.version : await ledger.currentVersion(v.task);
   const query = questionsText.pair_on_task;
-  const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version, conditions: v.conditions ?? null });
+  const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version, conditions: v.conditions ?? null, until: null });
   const figure = await evidenceGraph(v, ring);
   if ($('pair-graph') !== box) return;
   box.replaceChildren(
@@ -2225,7 +2225,7 @@ function fightCard(spec, v) {
           'span',
           { class: 'text' },
           el('span', { class: 'name' }, sentence(name)),
-          el('span', { class: 'sub' }, `${PROFILE_HELP[name] || ''} ${percent(p.bar)} of attempts must pass; a serious fault may show in at most ${percent(p.serious_share)} of them.`),
+          el('span', { class: 'sub' }, `${PROFILE_HELP[name] || ''} ${percent(p.bar)} of attempts must end in the right result; a serious fault may show in at most ${percent(p.serious_share)} of them.`),
         ),
       );
     }),
@@ -2295,15 +2295,22 @@ function fightCard(spec, v) {
   const num = (text, cls = '') => el('span', { class: `fig ${cls}` }, text);
   const tape = [
     tapeRow(num(String(v.wins[a])), 'Scenarios won', `of ${v.pairs} played against each other`, num(String(v.wins[b]))),
-    tapeRow(num(`${A.passed} of ${A.attempts}`), 'Scenarios passed', 'in those same pairs', num(`${B.passed} of ${B.attempts}`)),
+    tapeRow(num(`${A.right} of ${A.attempts}`), 'Right result', 'in those same pairs: every decision right, nothing left undone', num(`${B.right} of ${B.attempts}`)),
+    tapeRow(num(`${A.passed} of ${A.attempts}`), 'Right result and right process', 'what the test itself calls a pass', num(`${B.passed} of ${B.attempts}`)),
     tapeRow(num(`$${fixed(A.cost_per_attempt, 4)}`), 'Cost per attempt', 'lower is better', num(`$${fixed(B.cost_per_attempt, 4)}`)),
     tapeRow(num(`${fixed(A.seconds_per_attempt, 0)}s`), 'Seconds per attempt', 'lower is better', num(`${fixed(B.seconds_per_attempt, 0)}s`)),
     el('div', { class: 'tape-head' }, `Fit for this task: every attempt each model made on it, against any opponent`),
     tapeRow(
-      num(`${fa.passed} of ${fa.attempts}`, fa.pass_rate < fa.bar ? 'bad' : ''),
-      'Attempts passed',
-      `${percent(fa.pass_rate)} and ${percent(fb.pass_rate)}; ${percent(fa.bar)} needed`,
-      num(`${fb.passed} of ${fb.attempts}`, fb.pass_rate < fb.bar ? 'bad' : ''),
+      num(`${fa.right} of ${fa.attempts}`, fa.right_rate < fa.bar ? 'bad' : ''),
+      'Attempts with the right result',
+      `${percent(fa.right_rate)} and ${percent(fb.right_rate)}; ${percent(fa.bar)} needed`,
+      num(`${fb.right} of ${fb.attempts}`, fb.right_rate < fb.bar ? 'bad' : ''),
+    ),
+    tapeRow(
+      num(`${fa.passed} of ${fa.attempts}`),
+      'Of those, right process too',
+      'how it got there is judged below, fault by fault, at the level you set',
+      num(`${fb.passed} of ${fb.attempts}`),
     ),
     ...consistencyRows(v, a, b),
   ];
@@ -2378,7 +2385,7 @@ function fightCard(spec, v) {
             'p',
             null,
             'Fit for this task among the models tested, cheapest first: ',
-            others.map((o) => `${shortName(o.model)} (passed ${percent(o.pass_rate)} of ${o.attempts} attempts, $${fixed(o.cost_per_attempt, 4)} each)`).join('; '),
+            others.map((o) => `${shortName(o.model)} (right result in ${percent(o.right_rate)} of ${o.attempts} attempts, $${fixed(o.cost_per_attempt, 4)} each)`).join('; '),
             '.',
           )
         : el('p', null, `No model tested on this task is fit at ${v.profile} tolerance. That points to a larger model, more reasoning effort, or guardrails around the faults above; this page has no matches for those to show.`);

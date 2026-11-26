@@ -51,6 +51,13 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   Gladiator model id only when it is an exact match (`MODEL_IDS` in `ledger/bridges/epoch.py`).
 - **Relate is the store and the query engine, not an export target.** Questions are Cypher over the graph.
 - **No made-up winners.** Thin evidence or a level head-to-head means no pick is named, the same as in Gladiator.
+- **Fitness is decided by the fault levels (owner, 2026-11-26).** The bar asks for the right result (every
+  decision right, nothing left undone), not for the test's own pass, which also asks for its process. How a model
+  got there is judged only by its faults, each at the level the reader gives it, so a fault the reader calls minor
+  never makes a model unfit. The head to head still judges a pair as Gladiator does, and a verdict says how many
+  scenarios were won on process alone.
+- **Quoted figures carry their date.** A figure printed in the README or the submission is the record as it stood
+  at a stated moment, reproducible with `--until`; CI checks them that way. The page always reads the whole record.
 - The graph is a view: records stay the master copy, and the loader must stay safe to re-run.
 - **Publishing approved (owner, 2026-11-22):** real match results and costs for named models are committed in
   `data/` (the shipped store). Add records only with `ledger import` (copies sealed records, their private halves

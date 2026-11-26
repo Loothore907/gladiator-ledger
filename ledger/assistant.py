@@ -31,7 +31,11 @@ Walk the person through this loop, one step at a time:
    to head and still not be fit). Fitness depends on whose tolerance applies: ask whether this is for a business
    running it unattended (enterprise) or for one person (personal), and whether any fault is unforgivable for
    them; pass those as `tolerance` and `own_levels`. Give each model's reasons and counts ("in 1 of 54
-   attempts"). For the head to head, report the verdict word exactly: "better" is settled; "leaning" is ahead but
+   attempts"). Fitness has two parts, and they are not the same thing: `right` is the attempts whose RESULT was
+   right (every decision right, nothing left undone), and the bar applies to that; `passed` is the smaller count
+   the test itself passed, which also asks for its process. Never call a model unfit, or say it "failed", because
+   `passed` is low: a lapse of process is a fault with a level, and the person decides whether it matters. The
+   notes say when scenarios were won on process alone; pass that on. For the head to head, report the verdict word exactly: "better" is settled; "leaning" is ahead but
    could be chance; "no real difference shown" and "not enough evidence" name no winner. When neither is fit,
    offer the models in `fit_on_task`; if that is empty, say no tested model is fit and do not guess at one.
 4. spec: the build plan (decision, blueprint, cost, evidence) as Markdown, and with report="cost" or "evidence" the two reports that go with it. Offer it once there is a verdict.
@@ -67,7 +71,8 @@ GRAPH = """\
 Nodes: Source{name}, Run{run_id, suite, effort, attempt_budget_usd, engine_commit, seal_sha256},
 Match{key, rule (success|progress|efficiency|tie|excluded), excluded, difficulty, conditions (the settings,
 difficulty and scoring it was played under: only pairs with equal conditions are comparable)},
-Attempt{key, passed, mistakes, progress, cost_usd, wall_s, tokens, effort}, Model{name, display_name, weights,
+Attempt{key, passed (right result and right process), task_correct (the result alone), mistakes, progress,
+cost_usd, wall_s, tokens, effort}, Model{name, display_name, weights,
 organization}, Test{id}, TestVersion{key, version, version_rank, title, brief, policy, tools, emulates},
 Hazard{name}, Fault{key, name, kind (trap|decision|mix-up|ending), test_id}, ValidationRun{key, level, player, ok},
 Benchmark{name}.
@@ -141,7 +146,9 @@ def build(store: str) -> MCPServer:
     ) -> dict[str, Any]:
         """Fit first, then head to head. `headline` is the answer to act on and `use` the model to use (null when
         there is none). `fit` says for each model whether it is fit for the task under `tolerance` (enterprise or
-        personal), counting every attempt it made on the task, with the reasons and each fault's level and count.
+        personal), counting every attempt it made on the task, with the reasons and each fault's level and count:
+        `right` of `attempts` had the right result (the bar applies to `right_rate`), and `passed` of them also
+        followed the process the test asks for.
         `own_levels` overrules the level of any fault by name, e.g. {"left undone": "unforgivable"} (levels:
         unforgivable, serious, minor). The head to head counts only the pairs where these two met: verdict
         (better, leaning, no real difference shown, not enough evidence, or no data), pair counts, how pairs were

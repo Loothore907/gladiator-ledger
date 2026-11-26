@@ -58,11 +58,12 @@ Ask in plain words, for example:
 
 A good session finds the refund workflow, suggests opponents that are close on paper, and asks whether this is
 for a business running it unattended or for you alone. It then leads with the answer to act on. Against MiniMax
-for one person, as the record stood on Nov 25, 2026, that is "use Claude Haiku 5.5: it is the only one of the two
-fit for this task, and it is ahead, **not settled**", with the counts behind it, and it offers the spec. Ask the
-same about incident triage and it should say Haiku is the only one of the two that is fit and that it did the task
-better. The record grows as live races are imported, so the counts, and in time the answers, can move. Tell it a
-fault is unforgivable for you ("it must never act before reading") and the answer should change.
+for one person, as the record stood on Nov 26, 2026, that is "both are fit for this task; Claude Haiku 5.5 is
+ahead head to head, **not settled**", with the counts behind it, and it offers the spec. Ask the same about
+incident triage and it should say Haiku is the only one of the two that is fit and that it did the task better.
+The record grows as live races are imported, so the counts, and in time the answers, can move. Tell it a fault is
+unforgivable for you ("it must never act before reading") and the answer should change: on the refund queue it
+becomes "neither is fit".
 
 ## What the assistant can and cannot do
 - It can: find the closest tested workflow, list who has played it, suggest opponents, give a verdict, write the

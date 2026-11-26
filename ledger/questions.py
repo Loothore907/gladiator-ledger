@@ -95,6 +95,9 @@ RETURN model, fault, kind, kind_of, attempts, attempts_with, times, toFloat(atte
 ORDER BY model, kind, times DESC, fault
 """
 
+# $until, on every question a verdict is made of: only runs started at or before that moment (unix seconds), so a
+# verdict can be read from the record as it stood then. NULL reads the whole record.
+#
 # Fit for the task: every model's attempts on one test version under one set of conditions (Match.conditions:
 # the same settings, difficulty and scoring), and the faults it made in those attempts. Fitness is about the model
 # and the task, so every opponent it faced counts and so does every suite and live race played under those
@@ -103,8 +106,11 @@ TASK_ATTEMPTS = """
 MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run),
       (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
 WHERE NOT mt.excluded AND ($conditions IS NULL OR mt.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
+  AND ($until IS NULL OR r.started_unix <= $until)
 RETURN m.name AS model, m.display_name AS display_name, count(a) AS attempts,
-       sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed, avg(a.cost_usd) AS cost_per_attempt
+       sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed,
+       sum(CASE WHEN coalesce(a.task_correct, a.passed) THEN 1 ELSE 0 END) AS right,
+       avg(a.cost_usd) AS cost_per_attempt
 ORDER BY cost_per_attempt, model
 """
 
@@ -112,6 +118,7 @@ TASK_FAULTS = """
 MATCH (tv:TestVersion {key: $version_key})-[:CAN_SHOW]->(f:Fault),
       (tv)<-[:USED]-(mt:Match)-[:PART_OF]->(r:Run), (mt)<-[:IN]-(a:Attempt)-[:BY]->(m:Model)
 WHERE NOT mt.excluded AND ($conditions IS NULL OR mt.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
+  AND ($until IS NULL OR r.started_unix <= $until)
 OPTIONAL MATCH (a)-[x:MADE]->(f)
 OPTIONAL MATCH (f)-[:KIND_OF]->(parent:Fault)
 WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
@@ -127,14 +134,17 @@ SELF_ATTEMPTS = """
 MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(sc:SelfCheck)-[:PART_OF]->(r:Run),
       (sc)<-[:IN]-(a:SelfAttempt)-[:BY]->(m:Model)
 WHERE NOT sc.excluded AND ($conditions IS NULL OR sc.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
+  AND ($until IS NULL OR r.started_unix <= $until)
 RETURN m.name AS model, m.display_name AS display_name, count(a) AS attempts,
-       sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed, sum(a.cost_usd) AS spent
+       sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS passed,
+       sum(CASE WHEN coalesce(a.task_correct, a.passed) THEN 1 ELSE 0 END) AS right, sum(a.cost_usd) AS spent
 ORDER BY model
 """
 SELF_FAULTS = """
 MATCH (tv:TestVersion {key: $version_key})-[:CAN_SHOW]->(f:Fault),
       (tv)<-[:USED]-(sc:SelfCheck)-[:PART_OF]->(r:Run), (sc)<-[:IN]-(a:SelfAttempt)-[:BY]->(m:Model)
 WHERE NOT sc.excluded AND ($conditions IS NULL OR sc.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
+  AND ($until IS NULL OR r.started_unix <= $until)
 OPTIONAL MATCH (a)-[x:MADE]->(f)
 OPTIONAL MATCH (f)-[:KIND_OF]->(parent:Fault)
 WITH m.name AS model, f.name AS fault, f.kind AS kind, parent.name AS kind_of,
@@ -148,6 +158,7 @@ SELF_CONSISTENCY = """
 MATCH (tv:TestVersion {key: $version_key})<-[:USED]-(sc:SelfCheck)-[:BY]->(m:Model), (sc)-[:PART_OF]->(r:Run)
 WHERE NOT sc.excluded AND m.name IN $models
   AND ($conditions IS NULL OR sc.conditions = $conditions) AND ($suite IS NULL OR r.suite = $suite)
+  AND ($until IS NULL OR r.started_unix <= $until)
 OPTIONAL MATCH (sc)<-[:IN]-(a:SelfAttempt)
 WITH m.name AS model, sc, sum(CASE WHEN a.passed THEN 1 ELSE 0 END) AS ok
 RETURN model, count(sc) AS scenarios, sum(CASE WHEN sc.same THEN 1 ELSE 0 END) AS same,
@@ -234,6 +245,7 @@ MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match
 WHERE NOT mt.excluded
   AND ($suite IS NULL OR r.suite = $suite)
   AND ($version_key IS NULL OR tv.key = $version_key)
+  AND ($until IS NULL OR r.started_unix <= $until)
 RETURN mt.conditions AS conditions, count(mt) AS pairs,
        sum(CASE WHEN coalesce(r.suite, '') STARTS WITH 'live-' THEN 0 ELSE 1 END) AS suite_pairs
 ORDER BY conditions
@@ -246,6 +258,7 @@ MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match
 WHERE NOT mt.excluded AND NOT coalesce(r.suite, '') STARTS WITH 'live-'
   AND ($suite IS NULL OR r.suite = $suite)
   AND ($version_key IS NULL OR tv.key = $version_key)
+  AND ($until IS NULL OR r.started_unix <= $until)
 RETURN mt.conditions AS conditions, count(mt) AS pairs
 ORDER BY conditions
 """
@@ -260,14 +273,17 @@ MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match
 WHERE NOT mt.excluded
   AND ($suite IS NULL OR r.suite = $suite)
   AND ($version_key IS NULL OR tv.key = $version_key)
+  AND ($until IS NULL OR r.started_unix <= $until)
   AND ($conditions IS NULL OR mt.conditions = $conditions)
 OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
 RETURN mt.key AS match, r.run_id AS run, r.seal_sha256 AS seal, r.engine_commit AS engine, r.suite AS suite,
        tv.key AS version, mt.difficulty AS difficulty, mt.rule AS rule, coalesce(w.name, 'tie') AS winner,
-       xa.passed AS a_passed, xa.cost_usd AS a_cost, xa.wall_s AS a_time, xa.mistakes AS a_mistakes,
+       xa.passed AS a_passed, coalesce(xa.task_correct, xa.passed) AS a_right,
+       xb.passed AS b_passed, coalesce(xb.task_correct, xb.passed) AS b_right,
+       xa.cost_usd AS a_cost, xa.wall_s AS a_time, xa.mistakes AS a_mistakes,
        xa.effort AS a_effort, xa.cost_basis AS a_basis, xa.calls AS a_calls,
        xa.tokens_in AS a_in, xa.tokens_cached AS a_cached, xa.tokens_out AS a_out,
-       xb.passed AS b_passed, xb.cost_usd AS b_cost, xb.wall_s AS b_time, xb.mistakes AS b_mistakes,
+       xb.cost_usd AS b_cost, xb.wall_s AS b_time, xb.mistakes AS b_mistakes,
        xb.effort AS b_effort, xb.cost_basis AS b_basis, xb.calls AS b_calls,
        xb.tokens_in AS b_in, xb.tokens_cached AS b_cached, xb.tokens_out AS b_out
 ORDER BY mt.key
@@ -280,6 +296,7 @@ MATCH (t:Test {id: $test_id})<-[:VERSION_OF]-(tv:TestVersion)<-[:USED]-(mt:Match
 WHERE NOT mt.excluded AND m.name IN [$a, $b] AND o.name IN [$a, $b] AND m.name <> o.name
   AND ($suite IS NULL OR r.suite = $suite)
   AND ($version_key IS NULL OR tv.key = $version_key)
+  AND ($until IS NULL OR r.started_unix <= $until)
   AND ($conditions IS NULL OR mt.conditions = $conditions)
 MATCH (tv)-[:INCLUDES]->(h:Hazard)
 OPTIONAL MATCH (x)-[tr:TRIPPED_ON]->(h)

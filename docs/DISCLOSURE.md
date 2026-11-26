@@ -34,13 +34,25 @@ In the Gladiator repositories, during the contest:
 
 ## The data
 `data/` holds 37 sealed public match records from the Nov 22 suite matches, plus the live races and batches run
-since on the hosted race runner (8 as of Nov 25, $0.42 in API usage; imported with `ledger import --runner`, public
-halves only, and counted in verdicts like any other match; more join as they are run). The 37 cover 12 models ( Anthropic, OpenAI and Google models through their APIs,
+since on the hosted race runner (12 as of Nov 26, $1.35 in API usage; imported with `ledger import --runner`, public
+halves only, and counted in verdicts like any other match played under the same conditions; more join as they are
+run). The 37 cover 12 models ( Anthropic, OpenAI and Google models through their APIs,
 and open-weights models through OpenRouter) and come with 20 validation records. Those suite matches were played on Nov 22, 2026 and
 cost $24.90 in API usage in total (corrected figures, see below), paid from the author's provider
 accounts and plan credits. Each record includes its exact model ids, prices and costs, and the commit of the public Gladiator engine
 that played it. Each match's private half (`operator.json`, the answer key of its generated worlds) is published
 beside the record now that the match is over; `ledger verify` checks it against the fingerprint in the record.
+
+**How fitness is judged changed on 2026-11-26.** A Gladiator test passes an attempt only when the result is right
+and the process it sets was followed. Ledger's bar for "fit" used that pass rate. Four live batches of 25 between
+Claude Haiku 5.5 and DeepSeek V4.1 Flash showed what it hid: on the refund queue DeepSeek got every decision right
+in all 95 of its attempts, and passed 30, because in the other 65 it decided a request before looking up a record
+the brief tells it to read. Across the twelve models, 153 of the 185 refund-queue attempts that did not pass had
+every decision right. Ledger already recorded that as a fault whose level the reader sets ("minor" for one person
+by default), and then let the pass rate overrule the reader. Since this date the bar asks for the right result,
+and the process is judged only by the fault levels. No record, count or head-to-head result changed. Verdicts that
+said "not fit" for process alone did, and so did the claim this entry led with: "on the refund queue only Haiku is
+fit" became "both get the refunds right; Haiku follows the stated process and DeepSeek often does not".
 
 **A weaker obstacle in two workflows, found on 2026-11-24.** A Gladiator test can change a record while the model
 works and say so in a tool result; the model must then decide by the new facts. In refund-queue 2.2.0 and
