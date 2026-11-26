@@ -64,7 +64,9 @@ fresh scenario between the two models chosen in step 2 (each model's card says w
 what the record expects, or that the two have never met on this task, then streams the race as it happens, then
 says whether the result was in line with the record or against it. The sealed result is then imported into the
 record (the runner starts the import when a race ends, and a scheduled job picks up anything missed), and from then
-on the verdict counts it. A batch plays 10 or 25 scenarios in one go, and one model on both lanes is a consistency
+on the verdict counts it, provided it was played under the record's conditions: the same settings, difficulty and
+scoring. A race at another level is kept on file, and the verdict says so and leaves it out. A batch plays 10 or 25
+scenarios in one go, and one model on both lanes is a consistency
 check that is never counted as a head-to-head. Judges sign in once, with the "Judge sign-in"
 button and their access code (or an invitation link that carries it); nobody else is shown a race button. The panel shows what is left of each provider's live budget, and a
 model leaves the list when its provider's budget is used up. To run one on your own
@@ -168,9 +170,10 @@ Head to head: Leaning anthropic:claude-haiku-5-5
   openrouter:minimax/minimax-m3.1-flash won 5, 3 tied (sign test p = 0.7744)
 ```
 **Fit comes first.** A model is fit for a task when it passes enough of its attempts and stays inside your
-tolerance for faults. Every attempt the model made on the task counts, whoever the opponent was. (`--suite
-small-tier` keeps the answer to the fixed set of suite matches, so it reads exactly as printed here. Without it
-the live races between the two count as well.) Each fault has a
+tolerance for faults. Every attempt the model made on the task under the same conditions counts, whoever the
+opponent was, so a model's fitness for a task reads the same in every verdict. (`--suite small-tier` keeps the
+answer to the fixed set of suite matches, so it reads exactly as printed here. Without it, live races played
+under those conditions count as well.) Each fault has a
 level: **unforgivable** (one attempt with it makes the model unfit, shown with its count), **serious** (fine if
 rare) or **minor** (shown, never decides). The same fault is not equally serious everywhere: paying a refund twice
 breaks a business, paging the on-call twice is an annoyance. Two tolerances ship, and every level can be overruled:

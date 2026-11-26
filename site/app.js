@@ -66,6 +66,14 @@ window.ledgerDemo = {
   },
   // the verdict now on screen (what the graph picture is drawn from)
   current: async () => shown.v,
+  // which pairs a verdict counts: the rule itself, for site/check.cjs
+  referenceConditions: async (found, record) => (await ledgerReady).ledger.referenceConditions(found, new Map(Object.entries(record))),
+  conditionsApart: async (reference, other) => (await ledgerReady).ledger.conditionsApart(reference, other),
+  // one Cypher statement on the graph in this tab (a copy in memory: nothing here reaches the record)
+  cypher: async (query, params = {}) => {
+    await graphReady;
+    return ask(query, params);
+  },
   // the cost breakdown and the evidence report for one judged pair, as the command line writes them
   reports: async (task, a, b, profile, overrides = null) => {
     const { ledger, rules } = await ledgerReady;
@@ -945,7 +953,7 @@ async function drawPairGraph(v, ring = null) {
   if (!box) return;
   const version = v.version !== 'all versions' ? v.version : await ledger.currentVersion(v.task);
   const query = questionsText.pair_on_task;
-  const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version });
+  const ran = await timed(query, { test_id: v.task, a: v.a, b: v.b, suite: null, version_key: version, conditions: v.conditions ?? null });
   const figure = await evidenceGraph(v, ring);
   if ($('pair-graph') !== box) return;
   box.replaceChildren(
@@ -1171,7 +1179,7 @@ function smallPrint() {
   if (!foot) return;
   foot.textContent =
     signInOutcome === 'signed'
-      ? 'You are signed in for live runs. The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money from the live budgets shown beside the button. What goes to the runner is the task, the two models, the settings and your sign-in; nothing else. Each live result is sealed and shown beside the record at once; it is counted in the verdict once it has been imported into the record, which happens in batches, not instantly.'
+      ? 'You are signed in for live runs. The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money from the live budgets shown beside the button. What goes to the runner is the task, the two models, the settings and your sign-in; nothing else. Each live result is sealed and shown beside the record at once; it is counted in the verdict once it has been imported into the record, which happens in batches, not instantly. A verdict counts the races played under its own conditions: one you start at another difficulty or scoring is kept on file, and the verdict says so and leaves it out.'
       : 'Every verdict on this page rests on recorded matches: finished, sealed and replayable here. The page reads them locally in this browser tab, needs no key and sends nothing you type anywhere. This view cannot start a match. Live races run on a separate Gladiator runner and are open to the hackathon judges for now (Judge sign-in, at the top).';
 }
 

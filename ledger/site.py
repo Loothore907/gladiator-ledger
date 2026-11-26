@@ -31,6 +31,41 @@ def _dump(path: Path, value) -> int:
     return path.stat().st_size
 
 
+def _conditions_examples() -> dict:
+    """Which pairs a verdict counts (cli.reference_conditions, cli.conditions_apart), on made-up cases. The shipped
+    records hold no pair played under other conditions, so the page's own copy of the rule is checked against
+    these, and site/check.cjs then adds such a pair to the graph in the browser and looks at the verdict."""
+    std = "attempt_budget_usd=0.12; difficulty=standard; effort=low; max_output_tokens=4096; profile=budget; timeout_s=180"
+    easy = std.replace("difficulty=standard", "difficulty=easy")
+    fast = std.replace("profile=budget", "profile=latency")
+    dearer = std.replace("attempt_budget_usd=0.12", "attempt_budget_usd=0.4")
+
+    def met(conditions: str, pairs: int, suite_pairs: int) -> dict:
+        return {"conditions": conditions, "pairs": pairs, "suite_pairs": suite_pairs}
+
+    cases = [
+        ([met(std, 16, 16), met(easy, 25, 0)], {std: 200}),  # the suite matches between the two decide
+        ([met(std, 2, 0), met(easy, 25, 0)], {std: 200}),  # never met in a suite: the task's own record decides
+        ([met(fast, 3, 0), met(easy, 4, 0)], {std: 200}),  # no pair under that either: where they met most
+        ([met(fast, 3, 0), met(easy, 3, 0)], {std: 200}),  # a full tie: the first in order
+        ([met(easy, 1, 0)], {}),
+        ([met(std, 4, 4), met(dearer, 6, 6)], {std: 200, dearer: 20}),  # two suites, two budgets: the larger
+    ]
+    others = [easy, fast, easy.replace("profile=budget", "profile=latency"), dearer, std + "; new_setting=7"]
+    others.append(std.replace("; timeout_s=180", ""))
+    return {
+        "reference": [{"found": f, "record": r, "is": cli.reference_conditions(f, r)} for f, r in cases],
+        "apart": [{"reference": std, "other": o, "what": cli.conditions_apart(std, o)} for o in others],
+        # one race at the easy level beside a record at the standard one: what the verdict must then say
+        "one_easy_race": {
+            "from": "difficulty=standard",
+            "to": "difficulty=easy",
+            "what": cli.conditions_apart(std, easy),
+            "note": cli.not_counted_note([{"what": cli.conditions_apart(std, easy), "pairs": 1}]),
+        },
+    }
+
+
 def export(data: Path, store: str, out: Path) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     runs = gladiator.read_records(data / "records")
@@ -68,6 +103,7 @@ def export(data: Path, store: str, out: Path) -> dict:
                 "good_enough": cli.GOOD_ENOUGH,
                 "filler": sorted(cli.FILLER),
                 "benchmark": epoch.BENCHMARK,
+                "condition_words": cli.CONDITION_WORDS,
                 "guardrails": spec.GUARDRAILS,
                 "unforgivable": spec.UNFORGIVABLE,
                 "reads": list(spec.READS),
@@ -118,5 +154,6 @@ def export(data: Path, store: str, out: Path) -> dict:
     expected["flows"].append(cli.find_flows(store, "zebra unicorns"))
     expected["opponents"].append(cli.opponents(store, "anthropic:claude-haiku-5-5", open_only=True))
     expected["opponents"].append(cli.opponents(store, "openrouter:minimax/minimax-m3.1-flash"))
+    expected["conditions"] = _conditions_examples()
     sizes["expected.json"] = _dump(out / "expected.json", expected)
     return sizes

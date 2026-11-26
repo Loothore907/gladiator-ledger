@@ -65,7 +65,9 @@ mismatch, console error, failed request or request to another host.
 
 The same answers are available in the browser console as plain data: `ledgerDemo.flows(text)`,
 `ledgerDemo.opponents(model, openOnly)`, `ledgerDemo.verdict(task, a, b)`, `ledgerDemo.spec(task, a, b)` and
-`ledgerDemo.specMarkdown(task, a, b)`.
+`ledgerDemo.specMarkdown(task, a, b)`. `ledgerDemo.cypher(query, params)` runs one Cypher statement on the graph
+in the tab (a copy in memory: nothing there reaches the record), for example
+`ledgerDemo.cypher('MATCH (m:Model) RETURN m.name')`.
 
 ## Host it
 
