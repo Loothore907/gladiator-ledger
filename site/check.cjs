@@ -561,6 +561,39 @@ async function main() {
       });
       if (shown.dots !== shown.rounds || shown.a !== shown.winsA) problems.push(`the graph picture shows ${shown.dots} scenarios (${shown.a} won by the first model), the verdict has ${shown.rounds} (${shown.winsA})`);
       if (shown.pictures !== 1) problems.push(`the page should have one graph picture, it has ${shown.pictures}`);
+      // Step 3 stands in two panes on a wide window (this one is 1280 wide): the answer, the race and the reports
+      // on the left, the Relate graph on the right, which stays in view while the left is read down to its end.
+      // On a narrow window the three parts read top to bottom, and nothing is wider than the window.
+      {
+        const boxes = () =>
+          page.evaluate(() => {
+            const box = (q) => {
+              const r = document.querySelector(q).getBoundingClientRect();
+              return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+            };
+            return { top: box('.pane-answer.top'), graph: box('#pane-graph'), bottom: box('.pane-answer.bottom'), window: [window.innerWidth, window.innerHeight], wide: document.documentElement.scrollWidth - window.innerWidth };
+          });
+        const side = await boxes();
+        if (!(side.graph.left >= side.top.right && side.bottom.right <= side.graph.left && side.top.left < 100)) problems.push(`on a wide window the graph is not beside the answer: ${JSON.stringify(side)}`);
+        if (side.wide > 1) problems.push(`step 3 is ${side.wide} px wider than a wide window`);
+        for (const id of ['pair-graph', 'worked']) if (!(await page.locator(`#pane-graph #${id}, #pane-graph .${id}`).count())) problems.push(`the graph pane does not hold ${id}`);
+        for (const id of ['live', 'race', 'download-spec', 'verdict-band']) if (await page.locator(`#pane-graph #${id}`).count()) problems.push(`${id} is in the graph pane, not with the answer`);
+        // (asked in the middle of the left side: at its very end the two panes end together, and the graph
+        // leaves the window with the last of the reports, as it should)
+        await page.evaluate(() => document.querySelector('.pane-answer.bottom h3').scrollIntoView({ block: 'start' }));
+        await page.waitForTimeout(300);
+        const read = await boxes();
+        if (!(read.top.bottom < 0)) problems.push('the window was not scrolled past the answer for the check that the graph stays in view');
+        if (!(read.graph.top >= 0 && read.graph.top < 140 && read.graph.bottom <= read.window[1] + 1)) problems.push(`the graph does not stay in view while the reports are read: ${JSON.stringify(read.graph)} in a window ${read.window[1]} high`);
+        await page.setViewportSize({ width: 900, height: 720 });
+        await page.waitForTimeout(300);
+        const stacked = await boxes();
+        if (!(stacked.top.bottom <= stacked.graph.top + 1 && stacked.graph.bottom <= stacked.bottom.top + 1 && Math.abs(stacked.graph.left - stacked.top.left) < 2)) problems.push(`on a narrow window the three parts do not read top to bottom: ${JSON.stringify(stacked)}`);
+        if (stacked.wide > 1) problems.push(`step 3 is ${stacked.wide} px wider than a narrow window`);
+        await page.setViewportSize({ width: 1280, height: 720 });
+        await page.locator('#h-verdict').scrollIntoViewIfNeeded();
+        await page.waitForTimeout(300);
+      }
       if (shown.rows !== shown.records || JSON.stringify(shown.perRow) !== JSON.stringify(shown.wantedRows)) problems.push(`the graph picture has ${shown.rows} rows (${JSON.stringify(shown.perRow)}) for ${shown.records} sealed records (${JSON.stringify(shown.wantedRows)})`);
       if (shown.halves !== shown.wanted) problems.push('the cells of the graph picture do not say how each attempt ended as the verdict has it');
       if (shown.grid) problems.push('the old grid of squares is still on the page beside the graph');

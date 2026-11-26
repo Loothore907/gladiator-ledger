@@ -27,7 +27,8 @@ uv run ledger verify                                                    # every 
 ### Five things worth a look
 1. **The answer depends on who is asking.** On the page, switch the tolerance from one person to a business, or
    change one fault's level. The same record gives a different answer, with the count behind it.
-2. **The graph behind the answer.** The box marked "Relate graph" shows the Cypher it ran and what came back. It
+2. **The graph behind the answer.** The box marked "Relate graph" shows the Cypher it ran and what came back. On
+   a wide window it stands to the right of the answer and stays in view while you read, replay or race. It
    is drawn top down: the test version, a row for each sealed match record, the two models. Each cell in a row is
    one scenario both played, and its two halves say how each model ended: a clean run, the right result with a
    step skipped, or a wrong result. Point at one to read what happened; click it and it replays as a race, with
