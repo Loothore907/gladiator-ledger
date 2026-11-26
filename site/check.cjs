@@ -104,13 +104,13 @@ function fakeRunner(models, extra) {
         const same = ask.a === ask.b;
         for (let n = 1; n <= 10; n += 1) {
           send('step', { side: 'A', attempt: n, turn: 0, tool_name: 'list_alerts' });
-          send('attempt_end', { side: 'A', attempt: n, passed: n !== 3, termination: 'session_ended' });
+          send('attempt_end', { side: 'A', attempt: n, passed: n !== 3, termination: 'session_ended', ...(n === 3 ? { grade_details: { items: 3, correct: 3, acted_without_reading: 1 } } : {}) });
           // in a batch between two models, the second runs out of money after eight scenarios
           send('attempt_end', same || n <= 8 ? { side: 'B', attempt: n, passed: true, termination: 'session_ended' } : { side: 'B', attempt: n, passed: false, termination: 'not_run' });
         }
         const scenarios = Array.from({ length: 10 }, (_, i) => ({ a_passed: i !== 2, b_passed: true, winner: i === 2 ? 'B' : i < 6 ? 'A' : i < 8 ? 'B' : 'tie' }));
         const batch = { run_id: `live-batch-${batches.length + 1}`, seal: 'fedcba9876543210', task: ask.task, a: ask.a, b: ask.b, same_model: same, runs: 10, difficulty: ask.difficulty, profile: ask.profile, spent_usd: 0.0412,
-          a_attempts: 10, a_passed: 9, a_not_run: 0, a_cost_usd: 0.021, a_seconds: 31, a_faults: { wrong: 1 }, a_endings: {},
+          a_attempts: 10, a_passed: 9, a_not_run: 0, a_cost_usd: 0.021, a_seconds: 31, a_faults: { acted_without_reading: 1 }, a_endings: {},
           b_attempts: 10, b_passed: 10, b_not_run: 0, b_cost_usd: 0.0202, b_seconds: 28, b_faults: {}, b_endings: {},
           scenarios, pairs: 10, a_wins: 5, b_wins: 3, ties: 2, same_result: 9, p_value: 0.7266 };
         if (!same) Object.assign(batch, { early_stop: ask.early_stop === false ? null : { side: 'A', model: ask.a, failed: 3, runs: 10, pass_rate: 0.8 }, b_attempts: 8, b_passed: 8, b_not_run: 2, pairs: 8, ties: 0, scenarios: scenarios.map((x, i) => (i < 8 ? x : { a_passed: null, b_passed: null, winner: null })) });
@@ -642,18 +642,42 @@ async function main() {
       await live.waitForSelector('#batch-band', { timeout: 10000 }).catch(() => problems.push('the batch never reported a result'));
       if (runner.asked.a !== pair.a || runner.asked.b !== pair.a || runner.asked.runs !== 10) problems.push(`a steadiness batch asked the runner for ${JSON.stringify(runner.asked)}`);
       const steady = await live.locator('#live-batch').innerText();
-      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'wrong decision in 1', '$0.0412', 'live-batch-1', 'never head-to-head']) {
+      for (const part of ['STEADINESS CHECK', 'passed 19 of 20 attempts (95%)', 'ended the same way in 9 of 10', 'unlikely to be above', 'acted without reading in 1', '$0.0412', 'live-batch-1', 'never head-to-head']) {
         if (!steady.toUpperCase().includes(part.toUpperCase())) problems.push(`the steadiness result lacks ${JSON.stringify(part)}: ${JSON.stringify(steady.slice(0, 500))}`);
       }
       if (!(await live.locator('#live-stage .batch-lane').first().innerText()).includes('10 steps so far')) problems.push('a batch lane does not count steps as they happen');
       const squares = await live.locator('#live-stage .bsq').evaluateAll((all) => [all.length, all.filter((x) => x.classList.contains('pass')).length, all.filter((x) => x.classList.contains('fail')).length]);
       if (squares.join() !== '20,19,1') problems.push(`the batch squares show ${squares} (all, passed, failed), not 20,19,1`);
+      // an attempt that got every decision right and skipped a step is not the same failure as a wrong decision
+      const soft = live.locator('#live-stage .bsq.fail.soft');
+      if ((await soft.count()) !== 1 || !/every decision was right \(acted without reading\)/.test((await soft.first().getAttribute('title')) || '')) problems.push('an attempt that got every decision right but skipped a step is not marked apart from a wrong one');
+      if (!(await live.locator('#batch-right').innerText().catch(() => '')).includes('1 of the 1 that did not pass')) problems.push('the batch does not say how many of the attempts that did not pass had every decision right');
+      if (!(await live.locator('#batch-legend').count())) problems.push('the batch lanes have no legend');
+      if (await live.locator('#live-stage .bsq.won, #live-stage .bsq.lost').count()) problems.push('one model on both lanes was given scenario winners');
       if (!(await live.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('# Live batch report')) problems.push('the batch offers no report');
       await live.locator('#live-who').selectOption('pair');
       await live.locator('#live-go').click();
       await live.waitForFunction(() => /won 5 of 8 scenarios both played/.test(document.getElementById('batch-band')?.innerText || ''), null, { timeout: 10000 }).catch(() => problems.push('a batch between the pair did not name who won more scenarios'));
       if (runner.asked.a !== pair.a || runner.asked.b !== pair.b) problems.push('a pair batch did not race the pair chosen in step 2');
       if (!(await live.locator('#batch-band.win').count())) problems.push('the winner of a batch does not get the green box');
+      // which lane won which scenario is on the lanes themselves: 5 to the first, 3 to the second, none where one did not play
+      const rings = await live.evaluate(() => ['a', 'b'].map((lane) => document.querySelectorAll(`#live-stage .batch-lane.${lane} .bsq.won`).length));
+      if (rings.join() !== '5,3') problems.push(`the lanes ring ${rings} scenarios as won, not 5 and 3`);
+      if (!(await live.locator('#live-stage .batch-lane.a').innerText()).includes('won 5 scenarios')) problems.push('a lane does not say how many scenarios it won');
+      if (!/won this scenario/.test((await live.locator('#live-stage .batch-lane.b .bsq').nth(2).getAttribute('title')) || '')) problems.push('the scenario one lane passed and the other did not is not marked as won');
+      // pressing the button brings the race into view, and the way back to the start stays in reach
+      const inView = await live
+        .waitForFunction(
+          () => {
+            const [lanes, strip] = ['live-stage', 'trail'].map((id) => document.getElementById(id).getBoundingClientRect());
+            return lanes.bottom > 0 && lanes.top < innerHeight && strip.top >= 0 && strip.bottom <= innerHeight;
+          },
+          null,
+          { timeout: 4000 },
+        )
+        .then(() => true, () => false);
+      if (!inView) problems.push('after a batch, the lanes or the Start over strip are out of view');
+      if (!(await live.locator('#trail #start-over').isVisible())) problems.push('Start over is not in the strip at the top of the window');
       // scenarios one side did not play are said plainly, and every count stands on the scenarios both played
       const unplayed = await live.locator('#batch-unplayed').innerText().catch(() => '');
       if (runner.asked.early_stop !== true) problems.push('a batch did not ask the runner to stop early by default');

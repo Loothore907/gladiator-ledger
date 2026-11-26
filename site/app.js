@@ -230,6 +230,25 @@ function mayLeave() {
 }
 
 // Back to the start: nothing chosen, nothing on screen. The sign-in is kept.
+// The strip that stays at the top of the window while the page is scrolled: what is chosen so far, and the one
+// way back to the start. It is there from the first choice on, so nobody has to scroll up to find it.
+function drawTrail() {
+  $('trail').hidden = !state.task;
+  const pair = state.a ? shortName(state.a) + (state.b ? ` vs ${shortName(state.b)}` : '') : null;
+  $('trail-text').textContent = [state.flow ? state.flow.title : null, pair].filter(Boolean).join(' · ');
+}
+
+// How often a split would happen by chance, in words: never "about 0.0%".
+const chance = (p) => (p < 0.001 ? 'less than 0.1%' : `about ${percent(p, 1)}`);
+
+// Bring what was just started, or has just finished, into view, and move the keyboard's focus with it.
+function follow(node, block = 'start') {
+  if (!node) return;
+  if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1');
+  node.scrollIntoView({ behavior: 'smooth', block });
+  node.focus({ preventScroll: true });
+}
+
 function startOver() {
   if (!mayLeave()) return;
   turn += 1;
@@ -238,7 +257,7 @@ function startOver() {
   $('step-models').hidden = true;
   $('step-verdict').hidden = true;
   $('verdict-body').replaceChildren();
-  $('start-over').hidden = true;
+  drawTrail();
   $('flow-text').value = '';
   searchFlows();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -246,9 +265,9 @@ function startOver() {
 
 async function chooseFlow(flow) {
   if (!mayLeave()) return;
-  $('start-over').hidden = false;
   const mine = ++turn;
   Object.assign(state, { task: flow.test, flow, a: null, b: null, partners: new Map(), models: [], costs: new Map(), overrides: {} });
+  drawTrail();
   shown.v = null;
   drawFlows();
   $('first-list').replaceChildren(); // the last workflow's models must not be clickable while this one loads
@@ -315,6 +334,7 @@ async function chooseFirst(model) {
   }
   const mine = ++turn;
   Object.assign(state, { a: model, b: null });
+  drawTrail();
   $('second-more-list').replaceChildren(); // the last model's pairings must not be choosable while this one's load
   $('second-more').open = false;
   $('second-list').replaceChildren();
@@ -537,6 +557,7 @@ async function chooseSecond(model) {
     return;
   }
   state.b = model;
+  drawTrail();
   drawSecond();
   await showVerdict(true);
 }
@@ -1504,11 +1525,21 @@ async function drawLive(v) {
     const began = Date.now();
     const ticking = setInterval(() => (clock.textContent = `${Math.round((Date.now() - began) / 1000)} s`), 1000);
     stage.replaceChildren(
-      el('p', { class: 'note' }, `${runs} new worlds, each handed to both lanes, several at a time. A square counts the steps of its scenario while it is played, then shows ✓ passed or ✕ did not pass. This takes a few minutes. `, clock),
+      el('p', { class: 'note' }, `${runs} new worlds, each handed to both lanes, several at a time. A square counts the steps of its scenario while it is played, then shows how it ended. This takes a few minutes. `, clock),
       lanes.A.node,
       lanes.B.node,
+      batchLegend(ma === mb),
     );
     batchBox.replaceChildren();
+    follow(stage);
+    // a scenario one lane passed and the other did not is decided there and then; the rest wait for the judging
+    const ended = { A: new Map(), B: new Map() };
+    const clear = (attempt) => {
+      const [x, y] = [ended.A.get(attempt), ended.B.get(attempt)];
+      if (ma === mb || !x || !y || x === 'skip' || y === 'skip' || (x === 'pass') === (y === 'pass')) return;
+      lanes.A.mark(attempt, x === 'pass' ? 'won' : 'lost');
+      lanes.B.mark(attempt, y === 'pass' ? 'won' : 'lost');
+    };
     try {
       const response = await fetch(`${runner.base}/race`, {
         method: 'POST',
@@ -1520,17 +1551,30 @@ async function drawLive(v) {
       let failed = null;
       await readEvents(response, (kind, e) => {
         if (kind === 'step') lanes[e.side].step(e);
-        else if (kind === 'attempt_end') lanes[e.side].end(e);
-        else if (kind === 'batch') batch = e.batch;
+        else if (kind === 'attempt_end') {
+          ended[e.side].set(e.attempt || 1, lanes[e.side].end(e));
+          clear(e.attempt || 1);
+        } else if (kind === 'batch') batch = e.batch;
         else if (kind === 'failed') failed = e.error;
       });
       if (failed || !batch) throw new Error(failed || 'the batch ended without a result');
-      const text = batchReport(batch, offered.name || task);
+      // every scenario as the runner judged it: the lane that won it is ringed
+      if (!batch.same_model) {
+        (batch.scenarios || []).forEach((x, i) => {
+          if (x.winner !== 'A' && x.winner !== 'B' && x.winner !== 'tie') return;
+          lanes.A.mark(i + 1, x.winner === 'tie' ? 'level' : x.winner === 'A' ? 'won' : 'lost');
+          lanes.B.mark(i + 1, x.winner === 'tie' ? 'level' : x.winner === 'B' ? 'won' : 'lost');
+        });
+        lanes.A.tally(batch.a_wins);
+        lanes.B.tally(batch.b_wins);
+      }
+      const right = { a: lanes.A.right(), b: lanes.B.right() };
+      const text = batchReport(batch, offered.name || task, right);
       window.ledgerDemo.lastLiveReport = text;
       unsavedLive = true;
       batchBox.replaceChildren(
         batchBand(batch),
-        ...batchTable(batch),
+        ...batchTable(batch, right),
         el(
           'p',
           null,
@@ -1549,6 +1593,7 @@ async function drawLive(v) {
           ),
         ),
       );
+      follow(batchBox.firstElementChild, 'nearest');
     } catch (error) {
       say.textContent = `The batch did not run: ${error.message}`;
     } finally {
@@ -1574,6 +1619,7 @@ async function drawLive(v) {
     say.textContent = '';
     const lanes = { A: liveLane(a, 'a'), B: liveLane(b, 'b') };
     stage.replaceChildren(el('p', { class: 'note' }, 'A new world is being generated and handed to both models. Nothing below is a replay.'), laneLegend(), lanes.A.node, lanes.B.node);
+    follow(stage);
     try {
       const response = await fetch(`${runner.base}/race`, {
         method: 'POST',
@@ -1620,6 +1666,7 @@ async function drawLive(v) {
             )
           : el('div', { class: 'band even', id: 'live-winner' }, el('p', { class: 'band-kind' }, 'This live race'), el('p', { class: 'headline' }, 'No winner'), el('p', { class: 'small' }, 'Neither model did this scenario better than the other.')),
       );
+      follow($('live-winner'), 'nearest');
       const liveText = liveReport(record, a, b, task, r);
       window.ledgerDemo.lastLiveReport = liveText;
       unsavedLive = true;
@@ -1752,12 +1799,13 @@ function batchBand(x) {
     el('p', { class: 'headline' }, `${shortName(winner)} won ${won} of ${x.pairs} scenarios${x.pairs < x.runs ? ' both played' : ''}`),
     el('p', null, `It did this task better than ${shortName(loser)} (${lost} won${x.ties ? `, ${x.ties} level` : ''}) in this test, with these settings: ${batchSettings(x)}, the same scenario for both each time.`),
     warn,
-    el('p', { class: 'small' }, `Between two equally good models, a split this lopsided would happen about ${percent(x.p_value, x.p_value < 0.1 ? 1 : 0)} of the time.`),
+    el('p', { class: 'small' }, `Between two equally good models, a split this lopsided would happen ${chance(x.p_value)} of the time.`),
   );
 }
 
 // Both sides of a batch as a small table: attempts passed, the faults that showed, money and time.
-function batchTable(x) {
+function batchTable(x, right = null) {
+  const soft = batchRight(x, right);
   const row = (s, label) => {
     const faults = batchFaults(x, s);
     const n = x[`${s}_attempts`];
@@ -1779,6 +1827,7 @@ function batchTable(x) {
       el('thead', null, el('tr', null, ['', 'Attempts passed', 'Cost per attempt', 'Faults (attempts they showed in)', 'Cost in all', 'Time per attempt'].map((h) => el('th', { scope: 'col' }, h)))),
       el('tbody', null, row('a', x.same_model ? `${shortName(x.a)}, lane 1` : shortName(x.a)), row('b', x.same_model ? `${shortName(x.b)}, lane 2` : shortName(x.b))),
     ),
+    soft ? el('p', { class: 'note', id: 'batch-right' }, soft) : null,
     el(
       'p',
       { class: 'note' },
@@ -1792,8 +1841,57 @@ function batchTable(x) {
   ];
 }
 
+// In words: how many of each lane's attempts that did not pass had every decision right. `right` is counted from
+// the attempts as they ended in this browser ({a, b}); a batch read from the runner's list has no such count.
+function batchRight(x, right) {
+  if (!right) return null;
+  const lanes = [
+    ['a', x.same_model ? `${shortName(x.a)}, lane 1` : shortName(x.a)],
+    ['b', x.same_model ? `${shortName(x.b)}, lane 2` : shortName(x.b)],
+  ]
+    .filter(([s]) => right[s])
+    .map(([s, label]) => `${label}: ${right[s]} of the ${x[`${s}_attempts`] - x[`${s}_passed`]} that did not pass`);
+  if (!lanes.length) return null;
+  return `Every decision right, and still not passed (a required step was skipped, such as deciding before looking a record up): ${lanes.join('; ')}. To pass, an attempt needs the right result and the right process.`;
+}
+
 // The squares of a batch in progress: one per scenario on each lane. A square counts the steps of its attempt
 // while it is being played (so there is movement from the first second), then turns into a pass or a fail.
+// An attempt that did not pass can still have got every decision right (the grader's public counts say so): what
+// failed it was then a step of the process, such as deciding before looking a record up. The two are not the same
+// kind of failure, so a batch shows them apart.
+function rightResult(g) {
+  if (!g || typeof g.items !== 'number' || typeof g.correct !== 'number' || !g.items) return false;
+  return g.correct === g.items && !g.wrong && !g.wrong_args && !g.missing && !g.wrong_amounts && !g.duplicate_effects && !g.conflicting;
+}
+const DECISION_COUNTERS = new Set(['wrong', 'wrong_args', 'missing', 'wrong_amounts', 'duplicate_effects', 'conflicting']);
+// The steps such an attempt skipped, by name.
+function stepsSkipped(g) {
+  const named = Object.entries(g || {})
+    .filter(([counter, n]) => n && rules.fault_counters[counter] && !DECISION_COUNTERS.has(counter))
+    .map(([counter]) => rules.fault_counters[counter]);
+  return named.length ? named.join(', ') : 'it did not finish the task';
+}
+
+// What the marks of a batch mean, under its lanes.
+function batchLegend(same) {
+  return el(
+    'p',
+    { class: 'note small', id: 'batch-legend' },
+    el('span', { class: 'bkey pass' }, '✓'),
+    ' passed · ',
+    el('span', { class: 'bkey fail' }, '✕'),
+    ' did not pass: a decision was wrong or left undone · ',
+    el('span', { class: 'bkey soft' }, '!'),
+    ' did not pass, though every decision was right: a required step was skipped, such as deciding before looking a record up · ',
+    el('span', { class: 'bkey skip' }, '–'),
+    ' not played.',
+    same
+      ? ''
+      : ' A ring marks the lane that won that scenario. A scenario is won by passing where the other did not. When both passed, or neither did, it goes to the one that got further, and then to the one that did it with fewer mistakes, less money, fewer tokens and less time. So a model can win a scenario it did not pass.',
+  );
+}
+
 function batchLanes(a, b, runs) {
   const same = a === b;
   const lane = (model, cls, label) => {
@@ -1803,8 +1901,15 @@ function batchLanes(a, b, runs) {
     const steps = new Map(); // attempt -> steps so far
     let done = 0;
     let passed = 0;
+    let soft = 0; // did not pass with every decision right
+    let wins = null; // scenarios won, once the batch has been judged
     let all = 0;
-    const say = () => (count.textContent = `${done} of ${runs} done · ${passed} passed · ${plural(all, 'step')} so far`);
+    const say = () =>
+      (count.textContent =
+        `${done} of ${runs} done · ${passed} passed` +
+        (soft ? ` · ${soft} more had every decision right` : '') +
+        (wins === null ? '' : ` · won ${plural(wins, 'scenario')}`) +
+        ` · ${plural(all, 'step')} so far`);
     return {
       node: el('div', { class: `batch-lane ${cls}` }, el('p', { class: 'batch-lane-name' }, el('strong', null, label), ' ', count), el('div', { class: 'bsqs' }, squares), latest),
       step(e) {
@@ -1819,17 +1924,36 @@ function batchLanes(a, b, runs) {
         latest.textContent = `Scenario ${e.attempt}, step ${n}: ${String(e.tool_name || 'thinking').replaceAll('_', ' ')}`;
         say();
       },
+      // Returns how the attempt ended: 'pass', 'fail', 'skip' (not played).
       end(e) {
         const sq = squares[(e.attempt || 1) - 1];
-        if (!sq) return;
+        if (!sq) return null;
         const what = e.termination === 'not_run' ? 'skip' : e.passed ? 'pass' : 'fail';
-        sq.className = `bsq ${what}`;
-        sq.textContent = { pass: '✓', fail: '✕', skip: '–' }[what];
-        sq.title = `Scenario ${e.attempt}: ${{ pass: 'passed', fail: 'did not pass', skip: 'not played' }[what]}`;
+        const right = what === 'fail' && rightResult(e.grade_details);
+        sq.className = `bsq ${what}${right ? ' soft' : ''}`;
+        sq.textContent = right ? '!' : { pass: '✓', fail: '✕', skip: '–' }[what];
+        sq.title = `Scenario ${e.attempt}: ${
+          right ? `did not pass, though every decision was right (${stepsSkipped(e.grade_details)})` : { pass: 'passed', fail: 'did not pass: a decision was wrong or left undone', skip: 'not played' }[what]
+        }`;
         done += 1;
         passed += what === 'pass' ? 1 : 0;
+        soft += right ? 1 : 0;
+        say();
+        return what;
+      },
+      // Who took this scenario: 'won', 'lost' or 'level'.
+      mark(attempt, how) {
+        const sq = squares[attempt - 1];
+        if (!sq) return;
+        sq.classList.remove('won', 'lost', 'level');
+        sq.classList.add(how);
+        sq.title = sq.title.replace(/ · (won|lost|level: no winner).*$/, '') + { won: ' · won this scenario', lost: ' · lost this scenario', level: ' · level: no winner' }[how];
+      },
+      tally(n) {
+        wins = n;
         say();
       },
+      right: () => soft,
       finish() {
         latest.textContent = '';
       },
@@ -1847,7 +1971,7 @@ function batchLine(x) {
 }
 
 // The report of one live batch, to download.
-function batchReport(x, title) {
+function batchReport(x, title, right = null) {
   const side = (s, label) => {
     const n = x[`${s}_attempts`];
     const faults = batchFaults(x, s);
@@ -1859,7 +1983,7 @@ function batchReport(x, title) {
     ? `\`${x.a}\` on both lanes passed ${passed} of ${attempts} attempts and ended the same way in ${x.same_result} of ${x.pairs} scenarios. With ${attempts} attempts, its real failure rate on this test is unlikely to be above ${percent(failureCeiling(attempts - passed, attempts))}.`
     : x.a_wins === x.b_wins
       ? `Level: \`${x.a}\` and \`${x.b}\` won ${x.a_wins} scenarios each${x.ties ? `, ${x.ties} had no winner` : ''}.`
-      : `\`${x.a_wins > x.b_wins ? x.a : x.b}\` won ${Math.max(x.a_wins, x.b_wins)} of ${x.pairs} scenarios against \`${x.a_wins > x.b_wins ? x.b : x.a}\` (${Math.min(x.a_wins, x.b_wins)} won${x.ties ? `, ${x.ties} level` : ''}). Between two equally good models a split this lopsided would happen about ${percent(x.p_value, 1)} of the time.`;
+      : `\`${x.a_wins > x.b_wins ? x.a : x.b}\` won ${Math.max(x.a_wins, x.b_wins)} of ${x.pairs} scenarios against \`${x.a_wins > x.b_wins ? x.b : x.a}\` (${Math.min(x.a_wins, x.b_wins)} won${x.ties ? `, ${x.ties} level` : ''}). Between two equally good models a split this lopsided would happen ${chance(x.p_value)} of the time.`;
   return [
     `# Live batch report: ${title}`,
     '',
@@ -1875,6 +1999,7 @@ function batchReport(x, title) {
     side('a', x.same_model ? `${x.a}, lane 1` : x.a),
     side('b', x.same_model ? `${x.b}, lane 2` : x.b),
     '',
+    ...(batchRight(x, right) ? [batchRight(x, right), ''] : []),
     `Scenario by scenario: ${x.scenarios.map((sc, i) => `${i + 1} ${sc.winner === 'A' ? 'A' : sc.winner === 'B' ? 'B' : sc.winner === 'tie' ? 'level' : 'not run'}`).join(', ')}.`,
     '',
     `This batch cost $${fixed(x.spent_usd, 4)}. Sealed record \`${x.run_id}\`, seal \`${x.seal}\`.`,
@@ -2236,7 +2361,7 @@ function fightCard(spec, v) {
 
   const kind = { use: 'win', 'only one fit': 'win', 'both fit': 'even', 'neither fit': 'stop', 'too few attempts': 'even' }[v.outcome];
   const versus = {
-    better: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios. A split that lopsided between two equal models would happen about ${percent(v.p_value, 1)} of the time.`,
+    better: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios. A split that lopsided between two equal models would happen ${chance(v.p_value)} of the time.`,
     leaning: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios: ahead, but a split like that happens by chance ${percent(v.p_value)} of the time, so it is not settled.`,
     'no real difference shown': `Head to head they split the ${v.pairs} scenarios ${v.wins[a]} to ${v.wins[b]}.`,
     'not enough evidence': `Head to head they have met on only ${plural(v.pairs, 'scenario')}, fewer than the ${rules.min_pairs} a verdict needs.`,
