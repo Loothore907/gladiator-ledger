@@ -634,7 +634,7 @@ async function main() {
       if ((await live.locator('#live-runs option[disabled]').count()) !== 2) problems.push('the bigger batch sizes are not shown as coming');
       // before any money is spent: what the record says of each model on this task, and what the run should cost
       const before = await live.locator('#live-expect').innerText();
-      if (!/Before you run/.test(before) || (before.match(/recorded attempts on this task/g) || []).length !== 2 || !/should cost about \$/.test(before)) problems.push(`the live panel does not say what to expect before a run: ${JSON.stringify(before)}`);
+      if (!/Before you run/.test(before) || (before.match(/got the right result in \d+ of \d+ recorded attempts on this task/g) || []).length !== 2 || !/should cost about \$/.test(before)) problems.push(`the live panel does not say what to expect before a run: ${JSON.stringify(before)}`);
       if (!(await live.locator('#foot-view').innerText()).includes('real money')) problems.push('the small print of a signed-in page does not say live runs spend real money');
       await live.locator('#live-who').selectOption('a');
       if ((await live.locator('#live-runs').inputValue()) !== '10' || !(await live.locator('#live-go').innerText()).includes('batch of 10')) problems.push('choosing one model on both lanes did not switch to a batch');
