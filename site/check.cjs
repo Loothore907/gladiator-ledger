@@ -319,6 +319,7 @@ async function main() {
     // draws; how long the slowest one took is printed, so a page that is getting slow is seen and not guessed.
     const DRAW_LIMIT_MS = 20000;
     const soFar = { verdicts: 0, lines: 0 }; // verdicts that wait for more attempts, and "so far" lines shown
+    const explained = { attempts: 0 }; // attempts without the right result that the click-through saw explained
     const slowest = { ms: 0, what: '' };
     const flowCount = await page.locator('#flow-cards button').count();
     if (!flowCount) problems.push('the page lists no flows to click');
@@ -374,6 +375,29 @@ async function main() {
               if (waits && band.win && !names) problems.push(`flow ${f}, ${a} vs ${b}: a verdict that waits for more attempts is in a winner's band: "${band.headline}"`);
               if (waits && !band.why.some((x) => /so far|too few to say/.test(x))) problems.push(`flow ${f}, ${a} vs ${b}: a verdict that waits does not say what the attempts show so far: ${JSON.stringify(band.why)}`);
               if (band.why.some((x) => /so far/.test(x))) soFar.lines += 1;
+              // A count of failures is never left unexplained (owner, 2026-11-27). The head-to-head table says
+              // in how many scenarios each model got the right result; every attempt that did not must have
+              // its own line under the counts saying which scenario, which model and what went wrong. The two
+              // are counted by different questions of the graph, so this holds one to the other.
+              const wrong = await page.evaluate(() => {
+                const row = [...document.querySelectorAll('.tape .tape-row')].find((r) => (r.querySelector('.lab') || {}).firstChild?.textContent === 'Right result');
+                const missed = (cell) => {
+                  const m = /^(\d+) of (\d+)$/.exec(cell ? cell.innerText.trim() : '');
+                  return m ? Number(m[2]) - Number(m[1]) : null;
+                };
+                const counted = row ? [missed(row.querySelector('.val.l')), missed(row.querySelector('.val.r'))] : [null, null];
+                // a pair that never met has no head-to-head table, and nothing to explain
+                return { met: Boolean(document.querySelector('.tape')), counted, lines: [...document.querySelectorAll('#went-wrong li')].map((li) => li.textContent) };
+              });
+              if (!wrong.met) {
+                if (wrong.lines.length) problems.push(`flow ${f}, ${a} vs ${b}: a pair that never met lists attempts that went wrong`);
+              } else if (wrong.counted.includes(null)) problems.push(`flow ${f}, ${a} vs ${b}: the head-to-head table does not say how many attempts had the right result`);
+              else {
+                const expected = wrong.counted[0] + wrong.counted[1];
+                if (wrong.lines.length !== expected) problems.push(`flow ${f}, ${a} vs ${b}: ${expected} attempts did not end in the right result, and ${wrong.lines.length} are explained`);
+                if (wrong.lines.some((x) => !/^Scenario \d+, .+: .+\.$/.test(x) || /no fault recorded/.test(x))) problems.push(`flow ${f}, ${a} vs ${b}: a wrong result is not explained: ${JSON.stringify(wrong.lines)}`);
+                explained.attempts += expected;
+              }
             }
           }
           // a broken page fails every pair the same way: stop early instead of waiting out each one
@@ -383,6 +407,9 @@ async function main() {
       }
     }
     if (!clicked) problems.push('no pair of models could be clicked: the click-through tested nothing');
+    // the record holds wrong results (no model is perfect on every task), so some must have been explained: a
+    // pass that saw none tested nothing about them
+    if (clicked && !explained.attempts) problems.push('no attempt without the right result was seen in the click-through: the "what went wrong" lines were not exercised');
     // the record holds models with few attempts, so some verdict must have been one that waits: a pass that saw
     // none tested nothing about them
     if (clicked && !(soFar.verdicts && soFar.lines)) problems.push(`no verdict in the click-through was one that waits for more attempts (${JSON.stringify(soFar)}): the fit rule was not exercised`);
@@ -674,6 +701,25 @@ async function main() {
       for (const never of ['can run alone', 'Autonomy', 'engine commit None', 'sign test p', 'answer key both published']) {
         if (claims.left.includes(never)) problems.push(`step 3 still says "${never}"`);
       }
+      // A count of failures is never left unexplained. The guardrails list every fault the model made (how often,
+      // and a guard to build) before the planted hazards, and step 3 lists each attempt that did not end in the
+      // right result with what went wrong in it. Both must be what the graph says for the pair on screen.
+      const shown = await page.evaluate(() => {
+        return {
+          faultRows: [...document.querySelectorAll('#faults-seen tbody tr')].map((tr) => tr.innerText),
+          hazardsFirst: (() => {
+            const seen = document.getElementById('faults-seen');
+            const hazards = [...document.querySelectorAll('.pane-rest table')].find((t) => /Hazard/.test(t.tHead ? t.tHead.innerText : ''));
+            return Boolean(seen && hazards && seen.compareDocumentPosition(hazards) & Node.DOCUMENT_POSITION_FOLLOWING);
+          })(),
+          wentItems: [...document.querySelectorAll('#went-wrong li')].map((li) => li.textContent),
+        };
+      });
+      if (!shown.faultRows.length) problems.push('the guardrails do not list what went wrong in practice (the faults the model made)');
+      if (!shown.hazardsFirst) problems.push('the guardrails must say what went wrong in practice before the planted hazards');
+      if (shown.faultRows.some((row) => !/\d+ of \d+/.test(row))) problems.push(`a row of what went wrong has no count: ${JSON.stringify(shown.faultRows)}`);
+      if (shown.faultRows.some((row) => /\t-$/.test(row) && !/^nothing:/.test(row))) problems.push(`a fault that was seen has no guard to build: ${JSON.stringify(shown.faultRows)}`);
+      if (shown.wentItems.some((x) => !/^Scenario \d+, .+: .+\.$/.test(x))) problems.push(`a line of what went wrong does not say which scenario, which model and what: ${JSON.stringify(shown.wentItems)}`);
       if (!claims.guards.some((x) => /^Not seen is a count, not a clearance: none in \d+ rules out a rate above about \d+%/.test(x))) problems.push(`the guardrail table does not say what "not seen" is worth: ${JSON.stringify(claims.guards)}`);
       if (!/An answer key is published only once a match is over, and only for tests that generate a fresh world/.test(claims.keys)) problems.push('the evidence list does not say when an answer key is published');
       if (!claims.records.length || !claims.records.every((x) => /, (suite match|live race|live batch), seal /.test(x) && /engine commit (not recorded|[0-9a-f]{7}), (no answer key published|answer key published)$/.test(x))) problems.push(`a sealed record is listed without its kind, its engine build or whether its answer key is published: ${JSON.stringify(claims.records.slice(0, 3))}`);

@@ -32,7 +32,31 @@ GUARDRAILS = {
     "acted without reading": "Refuse an action on an item until the lookups it depends on have been made.",
     "conflicting records": "When two records disagree, state which source wins, or route the item to a person.",
     "wrong amount": "Compute amounts in code from the policy; do not leave the arithmetic to the model.",
+    # The faults that are not hazards of the world: what a model did with the items it was given, and how it
+    # stopped. They are what goes wrong most often, so each has its guard too.
+    "wrong decision": (
+        "Check each decision against the rules before it takes effect (a second pass, or the rule written as code), "
+        "and send the ones that disagree to a person."
+    ),
+    "right decision, wrong details": (
+        "Fill in or check an action's details (ids, quantities, amounts) in code from the records, not from the "
+        "model's text."
+    ),
+    "left undone": (
+        "Count the items decided against the items given before accepting the result, and send what is missing back."
+    ),
+    "stopped before finishing": (
+        "Do not take a stop for a finish: require the explicit finish step, and re-run or hand over an attempt that "
+        "ends without it."
+    ),
+    "ran out of allowed actions": (
+        "Give the flow room to finish (a larger action budget, or smaller queues), and treat an attempt the limit "
+        "cut off as unfinished."
+    ),
 }
+# The kinds of fault the guardrail section lists beside the hazards: decisions and endings. A hazard has its own
+# row (the trap it sets); a mix-up is said with the wrong decision it is a kind of.
+FAULT_KINDS = ("decision", "ending")
 
 # Mistakes that should never be traded for speed or cost in a tool-using workflow (defaults; adjust per flow).
 UNFORGIVABLE = ["duplicate effect", "planted instruction", "wrong amount"]
@@ -124,6 +148,32 @@ def build(rows, verdict: dict) -> dict:
                     "guardrail": GUARDRAILS.get(h["hazard"]) if h["tripped"] else None,
                 }
             )
+    # What went wrong in practice: every fault of a decision or an ending the model made on this task, over every
+    # attempt it made on it (the attempts its fitness is judged on), with the level the reader's tolerance gives
+    # it and a guard to build. The hazards above are what the test plants; these are what the model did, and a
+    # table of hazards that reads "not seen" beside a model that fails one attempt in ten says too little.
+    seen = []
+    for model in [chosen] if chosen else [verdict["a"], verdict["b"]]:
+        fit = (verdict.get("fit") or {}).get(model)
+        for x in (fit or {}).get("faults") or []:
+            if x.get("kind") not in FAULT_KINDS or not x["attempts_with"]:
+                continue
+            kinds = sorted(
+                (k for k in fit["faults"] if k.get("kind_of") == x["fault"] and k["attempts_with"]),
+                key=lambda k: (-k["attempts_with"], k["fault"]),
+            )
+            seen.append(
+                {
+                    "model": model,
+                    "fault": x["fault"],
+                    "attempts_with": x["attempts_with"],
+                    "attempts": fit["attempts"],
+                    "share": x["share"],
+                    "level": x["level"],
+                    "kinds": [{"fault": k["fault"], "attempts_with": k["attempts_with"]} for k in kinds],
+                    "guardrail": GUARDRAILS.get(x["fault"]),
+                }
+            )
     out["blueprint"] = {
         "title": flow.get("title"),
         "brief": flow.get("brief"),
@@ -140,6 +190,13 @@ def build(rows, verdict: dict) -> dict:
         },
         "unforgivable_defaults": UNFORGIVABLE,
         "hazards": guards,
+        "faults": seen,
+        # how many attempts each listed model made on the task: what "none seen" is out of
+        "fault_attempts": {
+            model: verdict["fit"][model]["attempts"]
+            for model in ([chosen] if chosen else [verdict["a"], verdict["b"]])
+            if (verdict.get("fit") or {}).get(model)
+        },
     }
     out["test_fingerprint"] = flow.get("content_sha256")
     return out
@@ -177,6 +234,40 @@ def guard_notes(spec: dict) -> list[str]:
                 f"{'' if f['fit'] is False else ', so far'}: {'; '.join(f['reasons'])}."
             )
     return lines
+
+
+def fault_lines(spec: dict) -> list[str]:
+    """The first half of the guardrail section, as Markdown lines: what went wrong in practice, how often, and what
+    to build against it. Nothing when the spec was read without a tolerance (no fitness, so no levels)."""
+    bp = spec["blueprint"]
+    attempts = bp.get("fault_attempts") or {}
+    if not attempts:
+        return []
+    who = f"`{spec['chosen']}`" if spec["chosen"] else "each model"
+    lines = [
+        (
+            f"What went wrong when {who} did this task, how often, and what to build against it. Counted over every "
+            "attempt it made on the task under these conditions, whoever the opponent was: the attempts its fitness "
+            "is judged on."
+        ),
+        "",
+        "| Model | What went wrong | Attempts with it | Level at this tolerance | Build this |",
+        "|---|---|---|---|---|",
+    ]
+    for model, made in attempts.items():
+        mine = [f for f in bp["faults"] if f["model"] == model]
+        for f in mine:
+            kinds = "; ".join(f"{k['fault']} in {k['attempts_with']}" for k in f["kinds"])
+            lines.append(
+                f"| `{model}` | {f['fault']}{f' ({kinds})' if kinds else ''} | "
+                f"{f['attempts_with']} of {f['attempts']} ({f['share']:.0%}) | {f['level']} | {f['guardrail'] or '-'} |"
+            )
+        if not mine:
+            lines.append(
+                f"| `{model}` | nothing: in all {made} attempts every item was decided rightly and the attempt "
+                f"finished | 0 of {made} | - | - |"
+            )
+    return [*lines, ""]
 
 
 def markdown(spec: dict) -> str:
@@ -273,6 +364,7 @@ def markdown(spec: dict) -> str:
     lines += [
         "### Guardrails",
         "",
+        *fault_lines(spec),
         (
             f"Each hazard this task can raise, how {who} handled it in the {d['pairs']} head-to-head scenarios, and "
             "what to build where it tripped."

@@ -82,6 +82,8 @@ SCOPE_DEFAULTS = {
     "current_only": False,
     "open_only": False,
     "kinds": None,
+    "run": None,
+    "matches": None,
 }
 # What to put for a value a named question needs, in the line that says it needs one.
 ASK_EXAMPLES = {
@@ -697,6 +699,13 @@ def verdict(
             }
             for p in pairs
         ]
+        # What went wrong, attempt by attempt, in these scenarios: a count of failures says that something did; a
+        # reader deciding what to build needs to know what (owner, 2026-11-27, after a live batch in which each
+        # model failed two scenarios and nothing on the page said how).
+        order = [p["match"] for p in pairs]
+        out["went_wrong"] = reports.what_went_wrong(
+            rows(store, questions.WENT_WRONG, {"run": None, "matches": order}), order
+        )
         # consistency: what each of the two did when given the same scenario twice (self runs), if it was
         own = {"version_key": version_key, "models": [a, b], "conditions": conditions, "suite": suite, "until": until}
         out["consistency"] = rows(store, questions.SELF_CONSISTENCY, own)
@@ -801,6 +810,13 @@ def print_verdict(v: dict) -> None:
         print("\nWhere they tripped, in these head-to-head scenarios:")
         for h in v["hazards"]:
             print(f"  - {h['model']}: {h['hazard']} in {h['tripped']} of {h['exposed']} attempts")
+    wrong = [w for w in v.get("went_wrong") or [] if not w["right"]]
+    if wrong:
+        print("\nWhat went wrong, in the attempts here that did not end in the right result:")
+        for w in wrong[:12]:
+            print(f"  - scenario {w['scenario']}, {w['model']}: {w['what']}")
+        if len(wrong) > 12:
+            print(f"  ... and {len(wrong) - 12} more: `ledger spec ... --report evidence` lists every one")
     if v["notes"]:
         print("\nNotes:")
         for n in v["notes"]:

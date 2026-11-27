@@ -363,17 +363,28 @@ One document in four layers:
 - **Decision.** The answer to act on (here: use Haiku; both are fit and it did the task better), each model's
   fitness with its reasons, the pair counts, and the comparison.
 - **Blueprint.** The job and the rules exactly as tested, the tools the flow needs, the settings the result holds
-  for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and a row for every hazard:
-  **needs a guard** where the chosen model fell for it in these matches, with the guard spelled out ("refuse an
-  action on an item until the lookups it depends on have been made"), and **not seen** where it did not, with
-  what that count can rule out (none in 43 scenarios rules out a rate above about 7%). A spec never says a
-  model can run alone.
+  for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and the guardrails, in two tables.
+  First **what went wrong in practice**: every fault the chosen model made on the task (a wrong decision, with
+  the mix-up it was; items left undone; an attempt that stopped before finishing), in how many of its attempts,
+  at the level your tolerance gives it, with a guard to build against it. Then **a row for every hazard the
+  test plants**: **needs a guard** where the model fell for it in these matches, with the guard spelled out
+  ("refuse an action on an item until the lookups it depends on have been made"), and **not seen** where it did
+  not, with what that count can rule out (none in 43 scenarios rules out a rate above about 7%). A model can
+  walk past every planted hazard and still get one attempt in ten wrong, so the hazards alone are never the
+  whole table. A spec never says a model can run alone.
 - **Cost.** What these head-to-head attempts cost each model: per attempt, per right result, per clean run, per
   1,000 runs, how much of the reading was served from the provider's cache, and where each figure comes from
   (the provider's bill, a re-pricing, or the list price).
 - **Evidence.** The sealed match records, each with its kind (suite match, live race, live batch), its seal,
   the engine build it names, and whether its answer key is published beside it, so you know which matches you
   can re-grade yourself.
+
+**What went wrong, scenario by scenario.** A count of failed attempts says that something went wrong, not what.
+The verdict, the evidence report and the page list every attempt that did not end in the right result with what
+it was ("Scenario 14: wrong decision: 1 of 18 items (should ship, did backorder)"; "stopped before finishing;
+left undone: 18 of 18 items"), and a live batch says the same of its own scenarios as soon as it has joined the
+record. It is one question over the graph, attempt to fault, and it can be asked of any sealed record:
+`uv run ledger ask what_went_wrong --param run=20261122-210842-14f765`.
 
 The same content is to be had as data (`--json`, or "Spec as data" on the page), so the document a person reads
 stays short. It says plainly what it is: a result for this task, in a simulated world,

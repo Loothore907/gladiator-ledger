@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, keyOf, recordKind, specJson, sureAt } from './ledger.js';
+import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, keyOf, recordKind, specJson, sureAt, wentWrongLines, whatWentWrong } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -2405,7 +2405,7 @@ async function drawLive(v) {
         lanes.B.tally(batch.b_wins);
       }
       const right = { a: lanes.A.right(), b: lanes.B.right() };
-      const text = batchReport(batch, offered.name || task, right);
+      let text = batchReport(batch, offered.name || task, right);
       window.ledgerDemo.lastLiveReport = text;
       unsavedLive = true;
       batchBox.replaceChildren(
@@ -2433,6 +2433,15 @@ async function drawLive(v) {
       const became = el('p', { class: 'note', id: 'batch-joined', role: 'status', 'aria-live': 'polite' });
       batchBox.append(became);
       await join(batch.run_id, became, ma === mb ? ma : null);
+      // once the batch is in the graph, say what went wrong in each scenario that did not come out right, here
+      // and in the report (while it is not, the table above still names each fault and its count)
+      const went = await wentWrongIn(batch.run_id);
+      const wrongBox = wentWrongBox(went, batch);
+      if (wrongBox && document.body.contains(became)) {
+        became.before(wrongBox);
+        text = batchReport(batch, offered.name || task, right, went);
+        window.ledgerDemo.lastLiveReport = text;
+      }
     } catch (error) {
       if (!refusedBusy(error)) say.textContent = `The batch did not run: ${error.message}`;
     } finally {
@@ -2683,6 +2692,40 @@ function batchTable(x, right = null) {
   ];
 }
 
+// What went wrong in one sealed record (a live batch), attempt by attempt: read from the graph once the record
+// has joined it, by the question the evidence report asks of a verdict's scenarios. A count of failed attempts
+// says that something went wrong; a visitor who has just watched two scenarios fail wants to know what (owner,
+// 2026-11-27). Empty while the record is not in the graph, or when every attempt was a clean run.
+async function wentWrongIn(run) {
+  try {
+    const scope = { run, matches: null };
+    const found = [...(await ask(questionsText.what_went_wrong, scope)), ...(await ask(questionsText.what_went_wrong_self, scope))];
+    return whatWentWrong(found);
+  } catch {
+    return [];
+  }
+}
+
+// The same, drawn under a batch's table: each attempt that did not end in the right result, and in one line the
+// ones whose result was right with a step skipped. On one model's two lanes, the lane is said too.
+function wentWrongBox(went, x) {
+  const wrong = went.filter((w) => !w.right);
+  const skipped = wentWrongLines(went.filter((w) => w.right), '');
+  if (!wrong.length && !skipped.length) return null;
+  const who = (w) => shortName(w.model) + (x.same_model ? ` (lane ${w.side === 'A' ? 1 : 2})` : '');
+  return el(
+    'div',
+    { class: 'went-wrong', id: 'batch-wrong' },
+    wrong.length
+      ? [
+          el('p', { class: 'note' }, 'What went wrong in the attempts that did not end in the right result:'),
+          el('ul', { class: 'notes' }, wrong.map((w) => el('li', null, `Scenario ${w.scenario}, ${who(w)}: ${w.what}.`))),
+        ]
+      : null,
+    skipped.length ? el('p', { class: 'note' }, skipped[0]) : null,
+  );
+}
+
 // In words: how many of each lane's attempts that were not clean runs had every decision right. `right` is counted from
 // the attempts as they ended in this browser ({a, b}); a batch read from the runner's list has no such count.
 function batchRight(x, right) {
@@ -2813,7 +2856,7 @@ function batchLine(x) {
 }
 
 // The report of one live batch, to download.
-function batchReport(x, title, right = null) {
+function batchReport(x, title, right = null, went = null) {
   const side = (s, label) => {
     const n = x[`${s}_attempts`];
     const faults = batchFaults(x, s);
@@ -2842,6 +2885,7 @@ function batchReport(x, title, right = null) {
     side('b', x.same_model ? `${x.b}, lane 2` : x.b),
     '',
     ...(batchRight(x, right) ? [batchRight(x, right), ''] : []),
+    ...(went && went.length ? wentWrongLines(went) : []),
     `Scenario by scenario: ${x.scenarios.map((sc, i) => `${i + 1} ${sc.winner === 'A' ? 'A' : sc.winner === 'B' ? 'B' : sc.winner === 'tie' ? 'level' : 'not run'}`).join(', ')}.`,
     '',
     `This batch cost $${fixed(x.spent_usd, 4)}. Sealed record \`${x.run_id}\`, seal \`${x.seal}\`.`,
@@ -3353,7 +3397,28 @@ function fightCard(spec, v) {
   // verdict, then whose tolerance it was read at and the counts behind it. A visitor who changes a level far
   // down the counts sees what it did to the answer in one line right there, and the band above says it in full.
   const echo = el('p', { class: 'note center', id: 'verdict-echo' }, `At ${v.profile} tolerance, with these levels: ${plainNames(v.headline, ids)}`);
-  return { answer: [card, band, tolerance, el('div', { class: 'tape' }, tape, slipsHead, slips), echo, proof], stage, graphs };
+  // What went wrong, scenario by scenario, in the head-to-head scenarios above: the counts say how often a fault
+  // showed, this says which scenario and what it was. The number is the scenario's place in the graph's rows.
+  const went = v.went_wrong || [];
+  const wrongOnes = went.filter((w) => !w.right);
+  const skippedLine = wentWrongLines(went.filter((w) => w.right), '');
+  const wentWrong =
+    wrongOnes.length || skippedLine.length
+      ? el(
+          'details',
+          { class: 'went-wrong', id: 'went-wrong', open: wrongOnes.length > 0 && wrongOnes.length <= 12 },
+          el(
+            'summary',
+            null,
+            wrongOnes.length
+              ? `What went wrong in the ${plural(wrongOnes.length, 'attempt')} here that did not end in the right result`
+              : 'Every attempt here ended in the right result; some skipped a step',
+          ),
+          wrongOnes.length ? el('ul', { class: 'notes' }, wrongOnes.map((w) => el('li', null, `Scenario ${w.scenario}, ${shortName(w.model)}: ${w.what}.`))) : null,
+          skippedLine.length ? el('p', { class: 'note' }, skippedLine[0]) : null,
+        )
+      : null;
+  return { answer: [card, band, tolerance, el('div', { class: 'tape' }, tape, slipsHead, slips), echo, wentWrong, proof], stage, graphs };
 }
 
 function drawVerdict(spec, v) {
@@ -3404,6 +3469,36 @@ function drawVerdict(spec, v) {
     ),
     bp.modelled_on ? el('p', { class: 'note' }, `The test is modelled on: ${bp.modelled_on}.`) : null,
     el('h4', null, 'Guardrails'),
+    // What went wrong in practice comes first: the faults a model made, how often, and a guard for each. A table
+    // of planted hazards that reads "not seen" beside a model that fails one attempt in ten says too little
+    // (owner, 2026-11-27).
+    Object.keys(bp.fault_attempts || {}).length
+      ? [
+          el(
+            'p',
+            { class: 'note', id: 'faults-seen-note' },
+            `What went wrong when ${spec.chosen ? shortName(spec.chosen) : 'each model'} did this task, how often, and what to build against it. Counted over every attempt it made on the task under these conditions, whoever the opponent was: the attempts its fitness is judged on.`,
+          ),
+          el(
+            'div',
+            { id: 'faults-seen' },
+            table(
+              ['What went wrong', 'Model', 'Attempts with it', 'Level at this tolerance', 'Build this'],
+              Object.entries(bp.fault_attempts).flatMap(([model, made]) => {
+                const mine = bp.faults.filter((f) => f.model === model);
+                if (!mine.length) return [[`nothing: in all ${made} attempts every item was decided rightly and the attempt finished`, shortName(model), `0 of ${made}`, '-', '-']];
+                return mine.map((f) => [
+                  [el('span', { class: 'name' }, f.fault), f.kinds.length ? ` (${f.kinds.map((k) => `${k.fault} in ${k.attempts_with}`).join('; ')})` : null],
+                  shortName(model),
+                  `${f.attempts_with} of ${f.attempts} (${percent(f.share)})`,
+                  f.level,
+                  f.guardrail || '-',
+                ]);
+              }),
+            ),
+          ),
+        ]
+      : null,
     el(
       'p',
       { class: 'note' },

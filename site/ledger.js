@@ -35,6 +35,114 @@ export function chance(p) {
   return p < 0.1 ? `about ${percent(p, 1)}` : `about ${percent(p)}`;
 }
 
+// What one attempt got wrong, in words, from the faults it made (reports.fault_words): how it stopped, then what it
+// did with the items it was given (on how many of them), then the hazards it fell for. A wrong decision names the
+// mix-up it was. A count of failed attempts says that something went wrong; this says what.
+const WRONG_DECISION = 'wrong decision';
+export function faultWords(items, faults) {
+  const mixups = faults.filter((f) => f.kind === 'mix-up');
+  const said = [];
+  for (const kind of ['ending', 'decision', 'trap']) {
+    for (const f of faults) {
+      if (f.kind !== kind) continue;
+      let text;
+      if (kind === 'decision') {
+        text = items ? `${f.fault}: ${f.count} of ${items} items` : `${f.fault}: ${f.count}`;
+        if (f.fault === WRONG_DECISION && mixups.length) {
+          text += ` (${mixups.map((m) => m.fault + (m.count > 1 ? `, ${m.count} times` : '')).join('; ')})`;
+        }
+      } else if (kind === 'trap') {
+        text = f.fault + (f.count > 1 ? ` (${f.count} times)` : '');
+      } else {
+        text = f.fault;
+      }
+      said.push(text);
+    }
+  }
+  return said.length ? said.join('; ') : 'no fault recorded';
+}
+
+// The rows of the question what_went_wrong, gathered attempt by attempt (reports.what_went_wrong). `order`: a
+// verdict's scenarios, as match keys, so `scenario` is the number the verdict gives it; without it, the number
+// the record gives.
+export function whatWentWrong(found, order = null) {
+  const by = new Map();
+  for (const r of found) {
+    const key = `${r.match}\n${r.side}`;
+    if (!by.has(key)) by.set(key, { match: r.match, side: r.side, model: r.model, right: Boolean(r.right), items: r.items, faults: [] });
+    if (r.fault) by.get(key).faults.push({ fault: r.fault, kind: r.kind, count: r.count });
+  }
+  const place = new Map((order || []).map((match, i) => [match, i + 1]));
+  const out = [...by.values()].map((e) => ({
+    match: e.match,
+    scenario: order ? place.get(e.match) : Number(e.match.slice(e.match.lastIndexOf('/') + 1)),
+    side: e.side,
+    model: e.model,
+    right: e.right,
+    faults: e.faults,
+    what: faultWords(e.items, e.faults),
+  }));
+  return out.sort((x, y) => x.scenario - y.scenario || (x.side < y.side ? -1 : x.side > y.side ? 1 : 0));
+}
+
+// The first half of the guardrail section, as Markdown lines (spec.fault_lines): what went wrong in practice, how
+// often, and what to build against it. Nothing when the spec was read without a tolerance.
+export function faultLines(spec) {
+  const bp = spec.blueprint;
+  const attempts = bp.fault_attempts || {};
+  if (!Object.keys(attempts).length) return [];
+  const who = spec.chosen ? `\`${spec.chosen}\`` : 'each model';
+  const lines = [
+    `What went wrong when ${who} did this task, how often, and what to build against it. Counted over every ` +
+      'attempt it made on the task under these conditions, whoever the opponent was: the attempts its fitness ' +
+      'is judged on.',
+    '',
+    '| Model | What went wrong | Attempts with it | Level at this tolerance | Build this |',
+    '|---|---|---|---|---|',
+  ];
+  for (const [model, made] of Object.entries(attempts)) {
+    const mine = bp.faults.filter((f) => f.model === model);
+    for (const f of mine) {
+      const kinds = f.kinds.map((k) => `${k.fault} in ${k.attempts_with}`).join('; ');
+      lines.push(
+        `| \`${model}\` | ${f.fault}${kinds ? ` (${kinds})` : ''} | ` +
+          `${f.attempts_with} of ${f.attempts} (${percent(f.share)}) | ${f.level} | ${f.guardrail || '-'} |`,
+      );
+    }
+    if (!mine.length) {
+      lines.push(
+        `| \`${model}\` | nothing: in all ${made} attempts every item was decided rightly and the attempt ` +
+          `finished | 0 of ${made} | - | - |`,
+      );
+    }
+  }
+  return [...lines, ''];
+}
+
+// What a report says under its scenarios (reports.went_wrong_lines): every attempt that did not end in the right
+// result, with what went wrong in it; and, in one line, the attempts whose result was right with a step skipped.
+export function wentWrongLines(went, tick = '`') {
+  const wrong = went.filter((w) => !w.right);
+  const skipped = went.filter((w) => w.right);
+  const lines = [];
+  if (wrong.length) {
+    lines.push('What went wrong in the attempts that did not end in the right result:', '');
+    for (const w of wrong) lines.push(`- Scenario ${w.scenario}, ${tick}${w.model}${tick}: ${w.what}.`);
+    lines.push('');
+  }
+  if (skipped.length) {
+    const tally = new Map();
+    for (const w of skipped) for (const f of w.faults) if (f.kind !== 'mix-up') tally.set(f.fault, (tally.get(f.fault) || 0) + 1);
+    const said = [...tally.entries()]
+      .sort((p, q) => q[1] - p[1] || (p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : 0))
+      .map(([name, n]) => `${name} in ${n}`)
+      .join('; ');
+    const many = `${skipped.length} ${skipped.length === 1 ? 'attempt' : 'attempts'}`;
+    lines.push(`The right result with a step skipped: ${many}${said ? ` (${said}).` : '.'}`, '');
+  }
+  return lines;
+}
+
 // The head to head in a sentence: the count, and how often two equal models would split like that.
 export function headToHead(d, a, b, tick = '`') {
   let line = `${d.pairs} judged pairs on the same generated worlds: ${tick}${a}${tick} won ${d.wins[a]}, ${tick}${b}${tick} won ${d.wins[b]}, ${d.ties} tied.`;
@@ -337,6 +445,7 @@ export function evidenceMarkdown(v, title) {
       );
     });
     lines.push('');
+    lines.push(...wentWrongLines(v.went_wrong || []));
   }
   lines.push('## Sealed records', '');
   for (const e of v.evidence) lines.push(`- ${recordLine(e)}`);
@@ -1073,6 +1182,9 @@ RETURN mt.key AS match ORDER BY match`;
         suite: p.suite,
         match: p.match,
       }));
+      // what went wrong, attempt by attempt, in these scenarios (cli.verdict)
+      const order = pairs.map((p) => p.match);
+      out.went_wrong = whatWentWrong(await ask(questions.what_went_wrong, { run: null, matches: order }), order);
       out.consistency = await ask(questions.self_consistency, { version_key: versionKey, models: [a, b], conditions, suite, until: null });
       out.fit_on_task = Object.entries(everyone)
         .filter(([, f]) => f.fit)
@@ -1168,6 +1280,31 @@ RETURN mt.key AS match ORDER BY match`;
         });
       }
     }
+    // What went wrong in practice (spec.build): every fault of a decision or an ending the model made on this
+    // task, over every attempt it made on it, with its level at the reader's tolerance and a guard to build.
+    const seen = [];
+    const faultAttempts = {};
+    for (const model of chosen ? [chosen] : [v.a, v.b]) {
+      const fit = (v.fit || {})[model];
+      if (!fit) continue;
+      faultAttempts[model] = fit.attempts;
+      for (const x of fit.faults || []) {
+        if (!rules.fault_kinds.includes(x.kind) || !x.attempts_with) continue;
+        const kinds = fit.faults
+          .filter((k) => (k.kind_of ?? null) === x.fault && k.attempts_with)
+          .sort((p, q) => q.attempts_with - p.attempts_with || byCodePoint(p.fault, q.fault));
+        seen.push({
+          model,
+          fault: x.fault,
+          attempts_with: x.attempts_with,
+          attempts: fit.attempts,
+          share: x.share,
+          level: x.level,
+          kinds: kinds.map((k) => ({ fault: k.fault, attempts_with: k.attempts_with })),
+          guardrail: rules.guardrails[x.fault] ?? null,
+        });
+      }
+    }
     out.blueprint = {
       title: flow.title ?? null,
       brief: flow.brief ?? null,
@@ -1184,6 +1321,8 @@ RETURN mt.key AS match ORDER BY match`;
       },
       unforgivable_defaults: rules.unforgivable,
       hazards: guards,
+      faults: seen,
+      fault_attempts: faultAttempts,
     };
     out.test_fingerprint = flow.content_sha256 ?? null;
     return out;
@@ -1288,6 +1427,7 @@ RETURN mt.key AS match ORDER BY match`;
     lines.push(
       '### Guardrails',
       '',
+      ...faultLines(spec),
       `Each hazard this task can raise, how ${who} handled it in the ${d.pairs} head-to-head scenarios, and ` +
         'what to build where it tripped.',
       '',
