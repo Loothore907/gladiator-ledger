@@ -134,6 +134,13 @@ function filingRunner(filed) {
       const all = [...records.values()].map(listed);
       return json(res, 200, { races: all.filter((x) => !x.runs), batches: all.filter((x) => x.runs) });
     }
+    if (req.url.startsWith('/records/') && req.url.endsWith('/operator')) {
+      const run = req.url.slice('/records/'.length, -'/operator'.length);
+      const key = path.join(DATA, 'records', run, 'operator.json');
+      return records.has(run) && fs.existsSync(key)
+        ? res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }).end(fs.readFileSync(key, 'utf8'))
+        : json(res, 404, { error: "This record's answer key is not published." });
+    }
     if (req.url.startsWith('/records/')) {
       const run = req.url.slice('/records/'.length);
       return records.has(run) ? res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }).end(sealedText(run)) : json(res, 404, { error: 'No such record.' });

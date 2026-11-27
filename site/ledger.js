@@ -15,17 +15,19 @@ export const ended = (right, clean) => (clean ? 'clean run' : right ? 'right, a 
 const KINDS = { 'live-race': 'live race', 'live-batch': 'live batch' };
 export const recordKind = (suite) => KINDS[suite] || 'suite match';
 
-// What a reader can check, said once wherever sealed records are listed: a report must not promise an answer key
-// for a record that was published without one.
+// What a reader can check, said once wherever sealed records are listed. Each record in the list says whether
+// its own answer key is published (recordLine): a report must not promise one for a record published without it.
 export const ANSWER_KEYS =
-  'Every record is sealed, and `ledger verify` checks each seal. A suite match on tests that generate a fresh ' +
-  'world for every attempt has its answer key (its private half) published beside it and checked against the ' +
-  "record's fingerprint, so anyone can re-grade it. A live race or batch is published as its public record " +
-  "only: its answer key stays with the runner, and the record carries that key's fingerprint.";
+  "Every record is sealed, and `ledger verify` checks each seal. Where a record's answer key (its private half) " +
+  'is published beside it, `ledger verify` checks it against the fingerprint the record carries, and anyone ' +
+  'can re-grade that match from it. An answer key is published only once a match is over, and only for tests ' +
+  'that generate a fresh world for every attempt.';
+export const keyOf = (e) => (e.answer_key ? 'answer key published' : 'no answer key published');
 
 // The engine build a record names, or that it names none (the hosted runner does not record one).
 export const engineOf = (commit) => (commit ? `engine commit \`${str(commit).slice(0, 7)}\`` : 'engine commit not recorded');
-export const recordLine = (e) => `\`${e.run}\`, ${recordKind(e.suite)}, seal \`${str(e.seal_sha256).slice(0, 16)}\`, ${engineOf(e.engine_commit)}`;
+export const recordLine = (e) =>
+  `\`${e.run}\`, ${recordKind(e.suite)}, seal \`${str(e.seal_sha256).slice(0, 16)}\`, ${engineOf(e.engine_commit)}, ${keyOf(e)}`;
 
 // How often chance alone gives a split, in words: never "p = 0.0".
 export function chance(p) {
@@ -1034,7 +1036,9 @@ RETURN mt.key AS match ORDER BY match`;
     }
     const hazards = await ask(questions.pair_hazards, params);
     const runs = {};
-    for (const p of pairs) runs[p.run] = { run: p.run, seal_sha256: p.seal, engine_commit: p.engine, suite: p.suite };
+    for (const p of pairs) {
+      runs[p.run] = { run: p.run, seal_sha256: p.seal, engine_commit: p.engine, suite: p.suite, answer_key: Boolean(p.answer_key) };
+    }
     if (profile) {
       // Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
       const versionKey = pairs.map((p) => p.version).sort(byCodePoint).at(-1);

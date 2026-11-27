@@ -25,8 +25,9 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   anyone else) and the public page says so ("coming soon" for everyone else). A live result is labelled live
   and shown beside the record at once. **Live races are real evidence (owner, 2026-11-25: a report that never
   moves however many races are run is a static report):** they are sealed by the same engine on the same locked
-  tests, so they join the record through `ledger import --runner <address>` (public halves only), and from then
-  on verdicts, costs and reports count them like any other match. **One verdict, one set of conditions (owner,
+  tests, so they join the record through `ledger import --runner <address>` (each with its answer key, where
+  the runner hands one out: "Private halves" below), and from then on verdicts, costs and reports count them
+  like any other match. **One verdict, one set of conditions (owner,
   2026-11-26):** a race counts in a verdict only when it was played under that record's conditions (the same
   settings, difficulty and scoring); one played under others stays on file, and the verdict says so and leaves it
   out. A model's fitness for a task counts every attempt it made under those conditions, whoever the opponent was,
@@ -38,8 +39,12 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
 - **Private halves (owner, 2026-11-22):** a match's `operator.json` (the answer key of its generated worlds) is
   published beside its record once the match is over, so anyone can re-grade it. Only for tests that generate a
   fresh world per attempt (`instances: generator`), only through `ledger import` (which checks it against the
-  fingerprint in the record), and **never for a holdout or fixed test**. The graph is still built from `record.json`
-  and Gladiator's `validations/*.json` only.
+  fingerprint in the record), and **never for a holdout or fixed test**. **A live race's too (owner,
+  2026-11-27):** once a race is over the runner hands out its answer key under the same two rules
+  (`/records/<run_id>/operator`), `ledger import --runner` keeps it beside the record, and Ledger live keeps the
+  key of each race it takes in. The graph is still built from `record.json` and Gladiator's `validations/*.json`
+  only: of an answer key it knows one thing, whether it is published beside its record (`Run.answer_key`), and
+  nothing from inside it.
 - **A record informs a choice; it never limits one (owner, 2026-11-24).** Any model the platform can run can be
   chosen, with or without a history, and the page shows whatever record exists. The only limit is availability
   (the runner has the model's key and price). There is one place to choose the two models, and the verdict, the
@@ -57,8 +62,8 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   with a step skipped, or a wrong result: never "passed" or "failed". A scenario was decided on the result, on
   process, on efficiency, or on a tie-break taken without the right result: never on the engine's "success",
   which is two different things to a reader. Chance is said in words, never as "p = 0.0". A hazard with no trips
-  is "not seen", with what that count can rule out: never "can run alone". A record is listed with its kind, and
-  an answer key is promised only for the kind that has one published (a live race's stays with the runner). A
+  is "not seen", with what that count can rule out: never "can run alone". A record is listed with its kind and
+  with whether its own answer key is published: none is promised for a record that has none beside it. A
   fact the record does not hold is "not recorded", never "None". Read through a tolerance a verdict has one bar,
   the tolerance's own, and no second "good enough" beside it. Cost is given per right result and per clean run.
 - **A fit call waits for the count to settle it (owner, 2026-11-27).** "Fit" and "not fit" are said only when the

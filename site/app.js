@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, recordKind, sureAt } from './ledger.js';
+import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, keyOf, recordKind, sureAt } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -3379,6 +3379,7 @@ function drawVerdict(spec, v) {
           `, ${recordKind(e.suite)}, seal `,
           el('code', null, str(e.seal_sha256).slice(0, 16)),
           e.engine_commit ? [', engine commit ', el('code', null, str(e.engine_commit).slice(0, 7))] : ', engine commit not recorded',
+          `, ${keyOf(e)}`,
         ),
       ),
     ),

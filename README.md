@@ -323,9 +323,9 @@ One document in four layers:
 - **Cost.** What these head-to-head attempts cost each model: per attempt, per right result, per clean run, per
   1,000 runs, how much of the reading was served from the provider's cache, and where each figure comes from
   (the provider's bill, a re-pricing, or the list price).
-- **Evidence.** The sealed match records, each with its kind (suite match, live race, live batch), its seal and
-  the engine build it names, and what is published with each kind: a suite match's answer key is, a live
-  race's stays with the runner.
+- **Evidence.** The sealed match records, each with its kind (suite match, live race, live batch), its seal,
+  the engine build it names, and whether its answer key is published beside it, so you know which matches you
+  can re-grade yourself.
 
 It ends with the same content as JSON, and it says plainly what it is: a result for this task, in a simulated world,
 under these settings. A starting point for the real flow, to be tested again once built.
@@ -546,7 +546,10 @@ since on the hosted runner, imported as they are run (`ledger import --runner`).
 sealed validation records of each test version. Beside each suite match sits its **private half**
 (`operator.json`): the answer key of every generated world, published now that the match is over. Each public
 record carries a fingerprint of its private half, so anyone can check that the two belong together and re-grade a
-match themselves. Live races are imported as public records only:
+match themselves. A live race's answer key is published the same way once the race is over: the runner hands it
+out, and the import keeps it beside the record (since 2026-11-27; a race run before the runner did that is here
+as its public record only until its key is fetched). The graph knows which records have one, and every report
+says so record by record:
 
 ```bash
 uv run ledger verify     # every match record's seal checked; every private half checked against its fingerprint

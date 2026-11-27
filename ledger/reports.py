@@ -21,13 +21,14 @@ BASIS = {
 # What kind of sealed record a run is, from its suite. It decides what is published with it (ANSWER_KEYS).
 KINDS = {"live-race": "live race", "live-batch": "live batch"}
 
-# What a reader can check. Said once per document, in these words, wherever sealed records are listed: a report
-# must not promise an answer key for a record that was published without one.
+# What a reader can check. Said once per document, in these words, wherever sealed records are listed. Each
+# record in the list says whether its own answer key is published (record_line): a report must not promise one
+# for a record that was published without it.
 ANSWER_KEYS = (
-    "Every record is sealed, and `ledger verify` checks each seal. A suite match on tests that generate a fresh "
-    "world for every attempt has its answer key (its private half) published beside it and checked against the "
-    "record's fingerprint, so anyone can re-grade it. A live race or batch is published as its public record "
-    "only: its answer key stays with the runner, and the record carries that key's fingerprint."
+    "Every record is sealed, and `ledger verify` checks each seal. Where a record's answer key (its private half) "
+    "is published beside it, `ledger verify` checks it against the fingerprint the record carries, and anyone "
+    "can re-grade that match from it. An answer key is published only once a match is over, and only for tests "
+    "that generate a fresh world for every attempt."
 )
 
 # What a scenario was decided on, in the order a reader cares about. The engine's own rule names stay in the data
@@ -70,8 +71,13 @@ def engine_of(commit) -> str:
 
 
 def record_line(e: dict) -> str:
-    """One sealed record in a list: what kind it is, its seal and the engine build it names."""
-    return f"`{e['run']}`, {record_kind(e.get('suite'))}, seal `{str(e['seal_sha256'])[:16]}`, {engine_of(e['engine_commit'])}"
+    """One sealed record in a list: what kind it is, its seal, the engine build it names, and whether its answer
+    key is published beside it."""
+    key = "answer key published" if e.get("answer_key") else "no answer key published"
+    return (
+        f"`{e['run']}`, {record_kind(e.get('suite'))}, seal `{str(e['seal_sha256'])[:16]}`, "
+        f"{engine_of(e['engine_commit'])}, {key}"
+    )
 
 
 def chance(p: float) -> str:

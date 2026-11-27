@@ -23,7 +23,9 @@ each `Model` it names. A model is joined to a Gladiator model id only when the n
 
 - **Run records** (`runs/<run_id>/record.json`, Gladiator's `docs/RUN_RECORD.md`): one match between two models on
   a suite. The graph is built from this public file only. The private half beside it (`operator.json`, the
-  answer key) is published for checking but is not loaded into the graph.
+  answer key) is published for checking but is not loaded into the graph: the graph knows only whether one is
+  published beside the record and matches its fingerprint (`Run.answer_key`), which is what tells a reader
+  that a match can be re-graded.
 - **Validation records** (`validations/<namespace>/<name>@<version>.json`): the automatic validation of one test
   version, with a reference player and corner-cutting players.
 
@@ -33,7 +35,7 @@ A record whose SHA-256 seal doesn't match its body is skipped and reported.
 
 | Node | Key | Properties | From |
 |---|---|---|---|
-| `Run` | `run_id` | suite, started_unix, record_version, engine_commit, cap_usd, spent_usd, repeats, effort, max_output_tokens, attempt_budget_usd, timeout_s, model_a, model_b, recorded_winner, seal_sha256 | one run record |
+| `Run` | `run_id` | suite, started_unix, record_version, engine_commit, cap_usd, spent_usd, repeats, effort, max_output_tokens, attempt_budget_usd, timeout_s, model_a, model_b, recorded_winner, seal_sha256, answer_key | one run record |
 | `Match` | `run_id/node/attempt` | difficulty, seed, profile, **conditions** (below), **rule** (`success`, `progress`, `efficiency`, `tie`, `excluded`), excluded | one *pair*: both models on the same generated world |
 | `SelfCheck` | `run_id/node/attempt` | difficulty, seed, conditions, excluded, **same** (did the model end the same way both times), model | one scenario played twice by ONE model (a self run). Never a `Match`: nothing about pairs or wins sees it |
 | `SelfAttempt` | `run_id/node/attempt/side` | the same facts as `Attempt` | one of the two times. `(SelfAttempt)-[:IN]->(SelfCheck)`, `-[:BY]->(Model)`, `-[:MADE]->(Fault)`; `(SelfCheck)-[:USED]->(TestVersion)`, `-[:PART_OF]->(Run)`, `-[:BY]->(Model)`. Counted in the model's fitness for the task |

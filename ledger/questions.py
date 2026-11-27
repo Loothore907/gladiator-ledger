@@ -282,6 +282,7 @@ WHERE NOT mt.excluded
   AND ($conditions IS NULL OR mt.conditions = $conditions)
 OPTIONAL MATCH (mt)-[:WON_BY]->(w:Model)
 RETURN mt.key AS match, r.run_id AS run, r.seal_sha256 AS seal, r.engine_commit AS engine, r.suite AS suite,
+       coalesce(r.answer_key, false) AS answer_key,
        tv.key AS version, mt.difficulty AS difficulty, mt.rule AS rule, coalesce(w.name, 'tie') AS winner,
        xa.passed AS a_passed, coalesce(xa.task_correct, xa.passed) AS a_right,
        xb.passed AS b_passed, coalesce(xb.task_correct, xb.passed) AS b_right,

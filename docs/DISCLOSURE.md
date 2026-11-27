@@ -37,7 +37,8 @@ In the Gladiator repositories, during the contest:
 
 ## The data
 `data/` holds 37 sealed public match records from the Nov 22 suite matches, plus the live races and batches run
-since on the hosted race runner (12 as of 05:00 UTC on Nov 26, $1.35 in API usage; public halves only, and counted
+since on the hosted race runner (12 as of 05:00 UTC on Nov 26, $1.35 in API usage; public halves only until
+Nov 27, when the runner began handing out a finished race's answer key; counted
 in verdicts like any other match played under the same conditions; more join as they are run: the page reads each
 one from Ledger's live record as it ends, and `ledger import --runner` archives it in this repository). The 37 cover 12 models ( Anthropic, OpenAI and Google models through their APIs,
 and open-weights models through OpenRouter) and come with 20 validation records. Those suite matches were played on Nov 22, 2026 and

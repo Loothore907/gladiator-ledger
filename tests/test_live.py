@@ -135,10 +135,12 @@ def test_a_record_whose_seal_does_not_match_never_gets_in(tmp_path):
 
 
 class Runner:
-    """A stand-in race runner: the two routes of the real one that Ledger reads (/races and /records/<run_id>)."""
+    """A stand-in race runner: the routes of the real one that Ledger reads (/races, /records/<run_id> and, for
+    a record whose answer key it hands out, /records/<run_id>/operator)."""
 
     def __init__(self):
         self.filed: dict[str, dict] = {}
+        self.keys: dict[str, dict] = {}  # run id -> the answer key handed out for it
         self.asked: list[str] = []
         runner = self
 
@@ -151,6 +153,8 @@ class Runner:
                 if self.path == "/races":
                     listed = {"races": [{"run_id": r} for r in runner.filed], "batches": [{"run_id": "not-a-run-id"}]}
                     body = json.dumps(listed).encode()
+                elif self.path.endswith("/operator") and self.path[len("/records/") : -len("/operator")] in runner.keys:
+                    body = json.dumps(runner.keys[self.path[len("/records/") : -len("/operator")]]).encode()
                 elif self.path.startswith("/records/") and self.path[len("/records/") :] in runner.filed:
                     body = json.dumps(runner.filed[self.path[len("/records/") :]]).encode()
                 else:
@@ -207,8 +211,11 @@ def test_the_service_takes_in_what_the_runner_files_and_hands_a_page_what_it_lac
         listed = get(f"{at}/runs")[1]["runs"]
         assert [r["run_id"] for r in listed] == sorted([*SUITE, new]) and listed[-1]["seal"] == record(new)["sha256"]
         assert get(f"{at}/sync", method="POST")[1]["took_in"] == []  # taken in once
-        # only the runner it was started with is ever asked, and only for the list and for sealed records
-        assert set(runner.asked) == {"/races", f"/records/{new}"}
+        # only the runner it was started with is ever asked, and only for the list, for sealed records and,
+        # once, for the answer key of a record it took in (this runner hands none out: the record stands alone)
+        assert set(runner.asked) == {"/races", f"/records/{new}", f"/records/{new}/operator"}
+        assert runner.asked.count(f"/records/{new}/operator") == 1 and get(f"{at}/health")[1]["answer_keys"] == 2
+        assert get(f"{at}/rows/{new}")[1]["run"]["props"]["answer_key"] is False
 
         # what a page needs to catch up: the rows of that record. Loaded into a store that holds only what the
         # page shipped with, through the statements the page has, they leave the graph the command line builds
@@ -274,3 +281,64 @@ def test_the_service_takes_in_what_the_runner_files_and_hands_a_page_what_it_lac
         server.shutdown()
         server.server_close()
         rec.close()
+
+
+def test_the_service_keeps_the_answer_key_a_runner_hands_out_and_only_the_one_that_was_sealed(tmp_path, monkeypatch):
+    """A live race's answer key is published once the race is over (owner, 2026-11-27). The service asks the runner
+    for the key of each record it takes in, keeps it beside the record when it is the one the record was sealed
+    with, and its graph then says the record can be re-graded: the same graph the command line builds from a
+    data folder that holds the record and its key. (A suite match stands in for the race: its key is on file.)"""
+    monkeypatch.setattr(live, "FRESH_AFTER_S", 0)
+    first, second = SUITE
+    key = json.loads((DATA / "records" / second / "operator.json").read_text(encoding="utf-8"))
+    runner = Runner()
+    state, data = tmp_path / "state", data_folder(tmp_path / "data", [first])
+    held = state / "records" / second / "operator.json"
+
+    def started():
+        return live.LiveRecord(state, data, runner.url, say=quiet)
+
+    def says(rec):
+        return rec.rows_for(second)["run"]["props"]["answer_key"], rec.health()["answer_keys"]
+
+    try:
+        # a runner that hands out no key: the record is taken in and stands alone, and is asked about once
+        runner.filed[second] = record(second)
+        rec = started()
+        assert rec.sync(fresh=True)["took_in"] == [second] and says(rec) == (False, 1)
+        rec.sync(fresh=True)
+        assert runner.asked.count(f"/records/{second}/operator") == 1 and not held.exists()
+        rec.close()
+
+        # the runner now hands out a key that is not the one this record was sealed with: never kept
+        runner.keys[second] = {"A": [], "B": []}
+        rec = started()
+        rec.sync(fresh=True)
+        assert says(rec) == (False, 1) and not held.exists()
+        rec.close()
+
+        # and then the real one: kept beside the record, and said in the store that was already open
+        runner.keys[second] = key
+        rec = started()
+        assert says(rec) == (False, 1)
+        rec.sync(fresh=True)
+        assert (
+            says(rec) == (True, 2)
+            and gladiator.canonical_sha256(json.loads(held.read_text())) == (record(second)["body"]["operator_sha256"])
+        )
+        # what the store now says of each record's answer key is what the command line says, building from a data
+        # folder that holds both records with their keys (the costs differ here only because the suite match
+        # standing in for a race has billed costs beside it in that folder, which a race does not)
+        whole = str(tmp_path / "whole.rl")
+        routes.build(whole, data_folder(tmp_path / "whole", [first, second]))
+        keyed = "MATCH (r:Run) RETURN r.run_id AS run, r.answer_key AS key ORDER BY run"
+        assert rec.rows(keyed) == cli.rows(whole, keyed) == [{"run": r, "key": True} for r in sorted(SUITE)]
+        rec.close()
+
+        # started again, with no runner to ask: the key is on file, and the store says so
+        runner.close()
+        rec = live.LiveRecord(state, data, None, say=quiet)
+        assert says(rec) == (True, 2)
+        rec.close()
+    finally:
+        runner.close()

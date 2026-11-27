@@ -221,9 +221,14 @@ def test_report_wording_says_only_what_the_record_shows():
     assert reports.chance(0.34) == "about 34%"
     # a record that names no engine build says so, and a live race is never said to have its answer key published
     live = {"run": "r9", "suite": "live-race", "seal_sha256": "ab" * 32, "engine_commit": None}
-    assert reports.record_line(live) == "`r9`, live race, seal `abababababababab`, engine commit not recorded"
+    said = "`r9`, live race, seal `abababababababab`, engine commit not recorded, no answer key published"
+    assert reports.record_line(live) == said
+    assert reports.record_line(dict(live, answer_key=True)).endswith(", answer key published")
     assert reports.record_kind("small-tier") == "suite match" and reports.record_kind("live-batch") == "live batch"
-    assert "its answer key stays with the runner" in reports.ANSWER_KEYS
+    # the sentence under a list promises nothing for all records: each line says it for its own
+    assert (
+        "Where a record's answer key" in reports.ANSWER_KEYS and "Every record's answer key" not in reports.ANSWER_KEYS
+    )
 
     # what a scenario was decided on, for a reader: the engine's "success" is a wrong result or a skipped step
     def row(winner, a_right, a_clean, b_right, b_clean):

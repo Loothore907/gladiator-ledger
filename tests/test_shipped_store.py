@@ -21,6 +21,11 @@ def test_shipped_store_matches_shipped_records(tmp_path):
     with relate.connect(str(STORE), read_only=True) as conn:
         runs = sorted(r["id"] for r in conn.execute("MATCH (r:Run) RETURN r.run_id AS id"))
     assert runs == records, "data/ledger.rl is stale: rebuild it with `ledger build` (see README)"
+    # the graph says of each record whether its answer key is published beside it: exactly the ones that are
+    with relate.connect(str(STORE), read_only=True) as conn:
+        keyed = sorted(r["id"] for r in conn.execute("MATCH (r:Run) WHERE r.answer_key RETURN r.run_id AS id"))
+    on_file = sorted(p.parent.name for p in (DATA / "records").rglob("operator.json"))
+    assert keyed == on_file and len(keyed) == checked["private_halves"], "data/ledger.rl is stale (answer keys)"
 
     rebuilt = str(tmp_path / "rebuilt.rl")
     cli.main(
