@@ -128,6 +128,7 @@ def export(data: Path, store: str, out: Path) -> dict:
             {
                 "min_pairs": cli.MIN_PAIRS,
                 "clear_p": cli.CLEAR_P,
+                "level_p": cli.LEVEL_P,
                 "good_enough": cli.GOOD_ENOUGH,
                 "filler": sorted(cli.FILLER),
                 "benchmark": epoch.BENCHMARK,

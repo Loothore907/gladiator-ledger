@@ -601,10 +601,43 @@ function pairingChart(others) {
   const Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
   const me = placed[0];
   const ticks = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5].filter((c) => lx(c) > x0 && lx(c) < x1);
-  // labels sit to the right of their dot; ones that would overlap are nudged down
-  const labels = placed.map((m) => ({ m, x: X(m.cost) + 10, y: Y(m.score.score) + 4 })).sort((p, q) => p.y - q.y);
-  for (let i = 1; i < labels.length; i += 1) for (let j = 0; j < i; j += 1) if (Math.abs(labels[i].x - labels[j].x) < 120 && labels[i].y - labels[j].y < 13) labels[i].y = labels[j].y + 13;
   const cls = (m) => (m.me ? 'me' : m.place.group === 'first' ? 'first' : 'other');
+  // A label sits beside its dot where it covers no other label and no other dot: to the right if it can, then
+  // to the left, then a line lower or higher on either side. The first model and the first-choice pairings are
+  // placed first, so they keep the place nearest their dot. (A width is reckoned from the text: there is nothing
+  // to measure before the picture is drawn. Bold letters are wider.)
+  const words = (m) => shortName(m.model) + (m.me ? ' (first model)' : '');
+  const wide = (m) => words(m).length * (cls(m) === 'other' ? 6.3 : 7) + 4;
+  const dots = placed.map((m) => ({ m, x: X(m.cost), y: Y(m.score.score), r: (m.me ? 8 : 6) + 3 }));
+  // each model's score range is a thin upright line through its dot: a label must not sit on another's
+  const ranges = placed.map((m) => ({ m, x0: X(m.cost) - 3, x1: X(m.cost) + 3, y0: Y(m.score.high), y1: Y(m.score.low) }));
+  const taken = [];
+  const meets = (box, m) =>
+    box.x0 < L + 2 || box.x1 > W - 2 || box.y0 < 2 || box.y1 > H - B - 2 ||
+    taken.some((t) => box.x0 < t.x1 && t.x0 < box.x1 && box.y0 < t.y1 && t.y0 < box.y1) ||
+    dots.some((d) => d.m !== m && box.x0 < d.x + d.r && d.x - d.r < box.x1 && box.y0 < d.y + d.r && d.y - d.r < box.y1);
+  const crosses = (box, m) => ranges.some((t) => t.m !== m && box.x0 < t.x1 && t.x0 < box.x1 && box.y0 < t.y1 && t.y0 < box.y1);
+  const rank = { me: 0, first: 1, other: 2 };
+  const labels = [...dots]
+    .sort((p, q) => rank[cls(p.m)] - rank[cls(q.m)] || p.y - q.y)
+    .map(({ m, x, y }) => {
+      const w = wide(m);
+      // Of the places that cover no label and no dot, the one that costs least: a label is better near its dot
+      // and crossing a thin range line than clear of everything and far from the dot it names.
+      let put = null;
+      for (const dy of [0, 14, -14, 28, -28]) {
+        for (const left of [false, true]) {
+          const x0 = left ? x - 10 - w : x + 10;
+          const box = { x0, x1: x0 + w, y0: y + dy - 8, y1: y + dy + 6 };
+          if (meets(box, m)) continue;
+          const cost = Math.abs(dy) + (left ? 2 : 0) + (crosses(box, m) ? 10 : 0);
+          if (!put || cost < put.cost) put = { box, left, dy, cost };
+        }
+      }
+      put = put || { box: { x0: x + 10, x1: x + 10 + w, y0: y - 8, y1: y + 6 }, left: false, dy: 0 }; // nowhere free: beside its dot
+      taken.push(put.box);
+      return { m, x: put.left ? x - 10 : x + 10, y: y + put.dy + 4, anchor: put.left ? 'end' : 'start' };
+    });
   return el(
     'figure',
     { class: 'pairing-chart', id: 'second-chart' },
@@ -626,7 +659,7 @@ function pairingChart(others) {
           svg('title', null, m.me ? `${shortName(m.model)}: your first model` : `${shortName(m.model)}: ${m.place.text}. Click to choose.`),
         ),
       ),
-      labels.map(({ m, x, y }) => svg('text', { x, y, class: `pc-label ${cls(m)}` }, shortName(m.model) + (m.me ? ' (first model)' : ''))),
+      labels.map(({ m, x, y, anchor }) => svg('text', { x, y, 'text-anchor': anchor, class: `pc-label ${cls(m)}` }, words(m))),
     ),
     el('figcaption', null, `The shaded band is "close to ${shortName(state.a)} on both": published score ranges that overlap, and a cost per attempt within ${CLOSE_COST}×. Filled dots inside it are the first-choice pairings. The picture suggests who to pair; it does not say who does the task better. That is what the match is for.`),
   );
@@ -1831,6 +1864,18 @@ const stored = {
 };
 let sessionPromise;
 let signInOutcome = 'none'; // 'signed' | 'refused' (the runner said no) | 'unreachable' | 'none' (nothing to sign in with)
+let signInSaid = ''; // why the runner said no, in its own words, when it gave a reason about the invitation itself
+// What a sign-in has left, in a sentence. An invitation with a budget of its own (the judging code) is limited by
+// money and by its last day, not by a number of races: the runner says how much is left and until when.
+function allowanceText(session) {
+  if (!session) return '';
+  if (typeof session.left_usd === 'number') {
+    const lastDay = session.until_unix ? new Date((session.until_unix - 1) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }) : null;
+    const until = lastDay ? `, and it works through ${lastDay} (UTC)` : '';
+    return ` This invitation has $${fixed(session.left_usd, 2)} left of $${fixed(session.budget_usd, 2)}${until}. A race sets its cap aside while it runs and is counted at what it cost.`;
+  }
+  return session.races_left === null || session.races_left === undefined ? '' : ` ${plural(session.races_left, 'live race')} left on this sign-in.`;
+}
 function signIn(runner, again = false, typed = null) {
   if (again) sessionPromise = null;
   sessionPromise ||= (async () => {
@@ -1839,9 +1884,14 @@ function signIn(runner, again = false, typed = null) {
       smallPrint();
       return { token: null, races_left: null };
     }
+    signInSaid = '';
     const post = async (ask) => {
       const response = await fetch(`${runner.base}/signin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ask) });
-      return response.ok ? response.json() : null;
+      if (response.ok) return response.json();
+      // An invitation with days of its own is told when it opens or that it has ended: pass that on as said.
+      const said = await response.json().then((x) => String(x.error || ''), () => '');
+      if (said.startsWith('This invitation ')) signInSaid = said;
+      return null;
     };
     const url = new URL(location.href);
     const invite = typed || url.searchParams.get('invite');
@@ -1910,8 +1960,9 @@ async function announceLive() {
     liveModels = new Set(runner.options.models);
     if (state.task) drawFirst();
     if (state.a) drawSecond();
-    const left = session.races_left === null || session.races_left === undefined ? '' : ` ${plural(session.races_left, 'live race')} left on this sign-in.`;
-    show(`You are signed in for live races.${left} Pick a workflow and two models marked "can race live", then press "Race them live".`, false, true);
+    show(`You are signed in for live races.${allowanceText(session)} Pick a workflow and two models marked "can race live", then press "Race them live".`, false, true);
+  } else if (signInOutcome === 'refused' && signInSaid) {
+    show(`${signInSaid} You are seeing the public page; recorded races still play.`, true);
   } else if (signInOutcome === 'refused') {
     show('This invitation link was not accepted by the race runner, so you are seeing the public page. Check that the link is complete and exactly as it was given to you. Recorded races still play.', true);
   } else if (signInOutcome === 'unreachable') {
@@ -2186,16 +2237,18 @@ async function drawLive(v) {
   };
 
   // what is left to spend, by provider, and how many races this sign-in has left
-  const showBudget = (options, left) => {
+  const showBudget = (options, signedIn) => {
     const parts = (options.budgets || []).map((b) => `${providerName(b.provider)} $${fixed(b.left_usd, 2)} of $${fixed(b.limit_usd, 2)}`);
     const out = (options.models_out || []).map(shortName);
+    const unpriced = (options.models_unpriced || []).map(shortName);
     money.replaceChildren(
-      parts.length ? `Live budget left: ${parts.join(' · ')}.` : '',
-      left === null || left === undefined ? '' : ` ${plural(left, 'live race')} left on this sign-in.`,
+      parts.length ? `Live budget left, by provider: ${parts.join(' · ')}.` : '',
+      allowanceText(signedIn),
       out.length ? ` Not on offer now (their provider's budget is used up): ${out.join(', ')}.` : '',
+      unpriced.length ? ` Not on offer just now (their price list could not be read; the runner asks again every two minutes): ${unpriced.join(', ')}.` : '',
     );
   };
-  showBudget(runner.options, session.races_left);
+  showBudget(runner.options, session);
 
   // The live races on file for the two models chosen that the record does not hold yet: each one written up (who
   // passed, what each got wrong), and together a first draft of how the pair compares, shown beside the record.
@@ -2396,7 +2449,7 @@ async function drawLive(v) {
       if (!runnerBusy) watchRunner(); // the runner may still be filing the result: ask before offering the button again
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
-        showBudget(options, renewed ? renewed.races_left : null);
+        showBudget(options, renewed);
         await loadRaces();
         showBatches();
       } catch {
@@ -2481,7 +2534,7 @@ async function drawLive(v) {
       // the budgets and this sign-in's races have moved: read them again
       try {
         const [options, renewed] = await Promise.all([fetch(`${runner.base}/options`).then((x) => x.json()), signIn(runner, true)]);
-        showBudget(options, renewed ? renewed.races_left : null);
+        showBudget(options, renewed);
         await loadRaces();
         await showTally(a, b, r);
       } catch {
@@ -3207,7 +3260,13 @@ function fightCard(spec, v) {
           // a process question the visitor added keeps its level where it was given (How they got there)
           const own = checkOfFault(row.fault);
           if (own) return setCheck(own, event.target.value);
-          state.overrides = { ...state.overrides, [row.fault]: event.target.value };
+          // Choosing the level this tolerance already gives a fault is not a change: it is taken back, so it
+          // does not follow the visitor to the other tolerance as if they had asked for it there.
+          const usual = ledger.levelOf(v.task, row.fault, row.kind_of ?? null, v.profile, null);
+          const next = { ...state.overrides };
+          if (event.target.value === usual) delete next[row.fault];
+          else next[row.fault] = event.target.value;
+          state.overrides = next;
           showVerdict();
         },
       },
@@ -3241,7 +3300,9 @@ function fightCard(spec, v) {
   const versus = {
     better: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios. A split that lopsided between two equal models would happen ${chance(v.p_value)} of the time.`,
     leaning: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios: ahead, but a split like that happens by chance ${percent(v.p_value)} of the time, so it is not settled.`,
-    'no real difference shown': `Head to head they split the ${v.pairs} scenarios ${v.wins[a]} to ${v.wins[b]}.`,
+    'no real difference shown': v.wins[a] === v.wins[b]
+      ? `Head to head they split the ${v.pairs} scenarios ${v.wins[a]} to ${v.wins[b]}.`
+      : `Head to head they split the ${v.pairs} scenarios ${v.wins[a]} to ${v.wins[b]}: two equal models split at least that unevenly ${percent(v.p_value)} of the time, so neither is ahead.`,
     'not enough evidence': `Head to head they have met on only ${plural(v.pairs, 'scenario')}, fewer than the ${rules.min_pairs} a verdict needs.`,
   }[v.verdict];
   // where each model stands when it is not simply fit: not fit, with the reasons, or what its attempts show so far
@@ -3288,7 +3349,11 @@ function fightCard(spec, v) {
     ' · sealed records ', v.evidence.map((e, i) => [i ? ', ' : '', el('code', null, str(e.seal_sha256).slice(0, 12))]),
     ' · check every record yourself: ', el('code', null, 'uv run ledger verify'),
   );
-  return { answer: [tolerance, card, el('div', { class: 'tape' }, tape, slipsHead, slips), band, proof], stage, graphs };
+  // The answer comes first (owner, 2026-11-27, after a review found it two screens down): who played, the
+  // verdict, then whose tolerance it was read at and the counts behind it. A visitor who changes a level far
+  // down the counts sees what it did to the answer in one line right there, and the band above says it in full.
+  const echo = el('p', { class: 'note center', id: 'verdict-echo' }, `At ${v.profile} tolerance, with these levels: ${plainNames(v.headline, ids)}`);
+  return { answer: [card, band, tolerance, el('div', { class: 'tape' }, tape, slipsHead, slips), echo, proof], stage, graphs };
 }
 
 function drawVerdict(spec, v) {
@@ -3536,7 +3601,14 @@ async function recordArrived(caught) {
   smallPrint();
   const n = liveRecord.added.length;
   if (caught.problem && !n) {
-    note.textContent = 'The live record could not be reached just now, so this is the record as this page was published.';
+    // A copy of the page served from a clone is not an outage: the hosted live record answers the published
+    // page only, so a browser on this machine is not let in. Say that, and where the growing record is.
+    const here = ['localhost', '127.0.0.1', '[::1]', ''].includes(location.hostname);
+    const elsewhere = !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])([:/]|$)/.test(liveRecord.address);
+    note.textContent =
+      here && elsewhere
+        ? 'This copy of the page runs from your own machine, and the hosted live record only answers the published page. So this is the record as it ships in the repository: complete up to the last import. Races run since then are on the hosted page.'
+        : 'The live record could not be reached just now, so this is the record as this page was published.';
   } else if (!n) {
     note.textContent = 'Live record: connected. Nothing is newer than this page.';
   } else {

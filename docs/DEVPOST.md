@@ -4,11 +4,15 @@ The form asks for a title, a description of what it does and why it is useful, t
 instructions, a demo, and a statement of the Product capabilities, third-party tools and AI tools used.
 
 ## Title
-Gladiator Ledger: which of these two models does *this* task better?
+Gladiator Ledger: which model does *this* task better?
+
+(52 characters. Devpost's title and tagline fields are short: check each against the form's own counter.)
 
 ## Tagline
-Two models, one task, a prediction put at risk: head-to-head evidence in a Relate graph down to every step, a
-verdict you can check, a live race that joins the graph as it ends, and a spec you can build from.
+Two models, one task: head-to-head evidence in a Relate graph down to every step, a verdict you can check, and
+a live race that joins the graph as it ends.
+
+(155 characters.)
 
 ## What it does
 Two AI models that sit side by side on a leaderboard can behave very differently on your workflow. Ledger answers
@@ -47,11 +51,13 @@ Claude Haiku 5.5 and DeepSeek V4.1 Flash score 0.9 points apart on a published c
 and cost about the same. Over 166 head-to-head scenarios on four workflows (the record at 05:00 UTC on Nov 26,
 2026) the answer changes with the task and with who is asking. Haiku is the settled choice on two workflows.
 DeepSeek gets the right result more often on all four, and on access reviews it is the only one of the two a
-business could run unattended: Haiku made one wrong access decision in 81 attempts. On a refund queue both decide
-every refund correctly, and Haiku wins on process: in 65 of its 95 attempts DeepSeek decided a request without
+business could run unattended: Haiku made one wrong access decision in 81 attempts. On a refund queue both got
+every refund right in all 43 scenarios they shared (over all its 81 refund attempts, whoever the opponent, Haiku
+has one wrong decision), and Haiku wins on process: in 65 of its 95 attempts DeepSeek decided a request without
 ever looking up a record it was told to read. Ledger does not decide whether that matters. It counts it, gives it a
 level you can change, and shows the answer for one person (minor: both are fit) and for a business (serious:
-neither is). When the evidence is thin or level it says "leaning" or names no winner. It calls a model fit or
+neither is). When a lead could still be chance it says "leaning"; when the evidence is thin or the split is one
+two equal models would produce most of the time (20 to 19), it names no winner. It calls a model fit or
 not fit only when its attempts settle that, and until then says what they show so far. When neither model is fit
 it says so and lists the tested models that are.
 
@@ -86,8 +92,11 @@ it says so and lists the tested models that are.
   published after them, the same graph node by node and link by link.
 - **Read-only access for agents over MCP**, including free-form read-only Cypher.
 - **Idempotent loading** (`MERGE` on stable keys behind uniqueness constraints) through two bridges: match records
-  and a published benchmark index. 11 kinds of node and 17 relationships in the shipped store; with the steps
-  (62,374 of them, loaded locally from the same records on first use), 13 and 24.
+  and a published benchmark index. 13 kinds of node and 16 kinds of relationship in the shipped store; with the
+  steps (62,374 of them at the date above, loaded locally from the same records on first use), 15 and 23.
+- **A store a judge can open.** `data/ledger.rl` is committed. `uv run ledger cypher "MATCH ..."` runs any
+  read-only statement over it from the command line, the assistant server takes the same through `read_graph`,
+  and the page shows the statement behind each answer with what came back.
 
 ## Setup
 ```
@@ -96,10 +105,12 @@ cd gladiator-ledger
 uv sync
 uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1
 uv run ledger process refund-queue --a "haiku 5.5" --b deepseek-v4.1   # how each got there, from the steps
+uv run ledger cypher "MATCH (m:Model)<-[:BY]-(a:Attempt) RETURN m.name AS model, count(a) AS attempts ORDER BY attempts DESC"   # the store itself, read-only
 python3 -m http.server --directory site 8000     # the browser page
 ```
 No API keys and no cost. Linux, macOS and Windows. The record grows as live races are run; add
-`--until 2026-11-26T05:00` to a command to get the figures quoted here and in the README exactly.
+`--until 2026-11-26T05:00` to a command to get the figures quoted here and in the README exactly. Live races and
+judge sign-in are on the hosted page; a page served from a clone shows the record as it ships and says so.
 
 ## Before and during the contest (the contest opened Nov 11, 2026)
 | When | What |
@@ -120,10 +131,15 @@ and copies one small scoring file, marked in the source. The full statement is `
   APIs from Anthropic, OpenAI, Google and OpenRouter to play the matches.
 - AI tools: the code, tests and documentation were written by Claude (Anthropic) working as a coding agent under
   the author's direction. The author set the goals and made the product, budget and publishing decisions.
-- Ledger is independent: not affiliated with or endorsed by any model provider.
+- Ledger is independent: not affiliated with, sponsored by or endorsed by Neo4j or any model provider. Relate is
+  named only to say what the project is built on.
 
 ## Links to fill in
 - Repository: https://github.com/Loothore907/gladiator-ledger
 - Working demo: https://ledger.gladiatorbench.com/
-- Live races for judges: (the page's address and the access code for its "Judge sign-in" button; they go in the private testing instructions)
+- Live races for judges: the page's address and the judging code for its "Judge sign-in" button. One code for all
+  judges: it carries its own budget and works from Dec 10 through Dec 17 (UTC), with no count for each judge. It
+  goes in the form's private field for testing instructions if the form has one; if it has none, send it to the
+  hackathon manager through the contest page. Never on a public page.
+- Screenshots for the gallery: `docs/img/` (taken from the page; retake them on the day the video is recorded).
 - Video: (if recorded)

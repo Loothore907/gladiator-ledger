@@ -8,6 +8,11 @@ task, every step recorded. It answers with a claim about **one task**, in two pa
 under your tolerance for mistakes, and which one **did it better** head to head. Then it writes a **spec** you can
 build from. It never ranks models in general, and when the evidence is thin or level it names no winner.
 
+![Step 3 of the page: the verdict for two models on the refund queue, beside the Relate graph of every scenario they both played](docs/img/verdict.png)
+
+*The page on Nov 27, 2026: the answer on the left, and on the right the graph it was read from, one cell for each
+scenario both models played.*
+
 ## Try it in a minute
 **In your browser, nothing to install.** Open **https://ledger.gladiatorbench.com/** and press **Show me an
 example**. The page builds the graph in your tab with Relate's WebAssembly build and walks to the verdict for two
@@ -24,6 +29,33 @@ uv run ledger verify                                                    # every 
 **Through your own AI assistant.** `uv run ledger mcp` serves the same graph, read-only
 ([docs/ASSISTANT.md](docs/ASSISTANT.md)).
 
+### The four things the organisers ask of a README
+**Use case.** Choosing between two AI models for one tool-using workflow, on evidence you can check. The
+relationships that matter: both models' attempts share the same generated world; an attempt is a route of steps
+through that world's linked records; and every fault, verdict and sealed record hangs off those.
+
+**How it uses Relate.**
+- **Mode:** a single file (`data/ledger.rl`) for the command line and the assistant server; in memory
+  (WebAssembly) for the page; a directory store for the live service that is written to as races end.
+- **Why:** a single file ships in the repository and opens read-only with no server, so a clone answers at
+  once. A browser tab has no disk, so the page builds the same graph in memory from the same records. A store
+  that one process keeps open and writes to needs the directory format.
+- **What the graph models:** tests and their versions, sealed match records, matches (one scenario both models
+  played), attempts, models, faults and hazards; and, with the steps loaded, every step of every attempt and
+  every record of each generated world ([docs/SCHEMA.md](docs/SCHEMA.md)).
+
+**Setup and run.** The four commands above. Python 3.12 or newer and [uv](https://github.com/astral-sh/uv); no
+keys, no server, no cost.
+
+**Where the data lives.** The store is `data/ledger.rl` (about 9 MB, committed). The sealed records it is built
+from are in `data/records/`, and `uv run ledger build` makes it again from them. Open it and ask it anything,
+read-only:
+```bash
+uv run ledger cypher "MATCH (m:Model)<-[:BY]-(a:Attempt) RETURN m.name AS model, count(a) AS attempts ORDER BY attempts DESC"
+```
+`--steps` reads the larger store that also holds every step and world record (`data/ledger-steps.rl`, built on
+your machine the first time, about a minute). From Python it is `relate.connect("data/ledger.rl", read_only=True)`.
+
 ### Five things worth a look
 1. **The answer depends on who is asking.** On the page, switch the tolerance from one person to a business, or
    change one fault's level. The same record gives a different answer, with the count behind it.
@@ -33,6 +65,10 @@ uv run ledger verify                                                    # every 
    one scenario both played, and its two halves say how each model ended: a clean run, the right result with a
    step skipped, or a wrong result. Point at one to read what happened; click it and it replays as a race, with
    that scenario's world drawn as a graph of linked records and each model's route on it.
+
+   ![One recorded scenario replayed as a race: each model's steps on a line, with lookups, actions, a timeout and the finish marked](docs/img/replay.png)
+
+   *A cell, clicked: the sealed record played back at the pace it really ran, both models on the same world.*
 3. **A new question, with no new match.** "How they got there" asks a pattern of every step on file, such as
    "decided a refund before it had seen the customer". Give one a level and the verdict is judged with it.
 4. **A live race that joins the record as it ends** (hackathon judges for now: "Judge sign-in" on the page). The
@@ -82,7 +118,7 @@ both models on the same generated world every time
 |---|---|---|---|---|
 | Refund queue | 37 / 6 | 99% / 100% | **Use Haiku**: both are fit, and it did it better | neither is fit |
 | Incident triage | 30 / 11 | 91% / 97% | **Use Haiku**: both are fit, and it did it better | not settled: both are short of the bar so far |
-| Access review | 19 / 22 | 98% / 99% | both fit, no settled lead | **Use DeepSeek**: Haiku is not fit |
+| Access review | 19 / 22 | 98% / 99% | both fit, no real difference between them | **Use DeepSeek**: Haiku is not fit |
 | Inventory transfer | 20 / 19 | 87% / 95% | DeepSeek is fit; Haiku meets the bar so far | Haiku is not fit; DeepSeek is short of the bar so far |
 
 One model is not "better". Haiku won 106 of the 166 scenarios and is the settled choice on two workflows. Yet
@@ -98,7 +134,9 @@ are fit; for a business it is serious and neither is. Ledger makes both calls, s
 "leaning" when a lead could still be chance, and lets you change the rule.
 
 That last point is in the table too. With sixteen scenarios each, DeepSeek led access review and inventory
-transfer 11 to 5, and Ledger called both "leaning, not settled". Twenty-five more scenarios levelled them.
+transfer 11 to 5, and Ledger called both "leaning, not settled". Twenty-five more scenarios levelled them: 19 to
+22 and 20 to 19 are splits two equal models produce most of the time, so Ledger says "no real difference shown"
+and calls neither model ahead.
 
 So is how sure a call is. On inventory transfer Haiku got the right result in 69 of its 79 attempts: 87%, over the
 80% bar. But 79 attempts cannot rule out a true rate just under 80%, so Ledger says "meets the bar so far" and
@@ -140,6 +178,9 @@ the tab.
 ```bash
 python3 -m http.server --directory site 8000    # then open http://localhost:8000
 ```
+A page served from a clone like this is the record as it ships in the repository, and says so at the top: the
+hosted live record and the hosted race runner answer the published page only. Judge sign-in and live races are
+on the hosted page, https://ledger.gladiatorbench.com/.
 
 **The live record: a race counts as it ends.** The page is published with a copy of the record, and an import
 that rebuilds and republishes everything takes about fifteen minutes. `ledger serve` is the same record kept
@@ -244,6 +285,9 @@ pairs already played grows with live races.)
 uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-11-26T05:00
 ```
 ```text
+Played under: standard difficulty, budget scoring, low effort, a $0.12 limit per attempt, an output limit
+of 4096 tokens, a 180-second limit per call. Every count below is under these conditions.
+
 Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better.
                                                                        (output wrapped and shortened here)
 Fit for this task (personal tolerance):
@@ -283,7 +327,9 @@ count, and no model is named to use on a "so far". An unforgivable fault needs n
 fact.
 
 Every attempt the model made on the task under the same conditions counts, whoever the opponent was, so a model's
-fitness for a task reads the same in every verdict. The same fault is not equally serious everywhere: paying a
+fitness for a task reads the same in every verdict played under those conditions. A verdict says which they are
+("Played under: ..."): the mid-tier matches gave each attempt a larger limit, so the same model on the same task
+has a second, smaller count there, and the two are never pooled. The same fault is not equally serious everywhere: paying a
 refund twice breaks a business, paging the on-call twice is an annoyance. Two tolerances ship, and every level can
 be overruled:
 
@@ -302,8 +348,10 @@ efficient. A pass is what the page calls a **clean run**: the right result and e
 head to head does count process, a verdict says how many scenarios were won on it, and a scenario can be lost with
 every decision right. An attempt ends one of three ways, and the page and the reports keep them apart everywhere:
 a clean run, the right result with a step skipped, or a wrong result. The
-result is one of four: **better** (settled), **leaning** (ahead, but it could still be chance), **no real
-difference shown**, or **not enough evidence** (fewer than eight pairs). When neither model is fit, Ledger lists
+result is one of four: **better** (settled: two equal models would split that unevenly less than 5% of the time),
+**leaning** (ahead, but it could still be chance), **no real difference shown** (level, or a split two equal
+models would produce at least half the time: 20 to 19 is not a lead), or **not enough evidence** (fewer than
+eight pairs). When neither model is fit, Ledger lists
 the tested models that are, cheapest first, or says that none is.
 
 ### Step 4. Get the spec
@@ -340,8 +388,9 @@ uv run ledger spec refund-queue --a "haiku 5.5" --b deepseek-v4.1 --until 2026-1
 ```
 The **cost breakdown** adds every scenario's cost for both models. The **evidence report** lists each model's
 fitness with every fault and its count, and every scenario with its winner, how it was decided and its sealed
-record. `--report all --out spec.md` writes `spec.md`, `spec.cost.md` and `spec.evidence.md`. On the page the
-same three are download buttons under the result, and a live race offers its own report, labelled as live.
+record. `--report all --out spec.md` writes `spec.md`, `spec.cost.md` and `spec.evidence.md`, and the spec again
+as data in `spec.json`. On the page the same four are download buttons under the result, and a live race offers
+its own report, labelled as live.
 
 ## How they got there: ask the record a new question
 A verdict says how an attempt ended. A sealed record also keeps every step of it: the tool the model called, on
@@ -436,6 +485,11 @@ Scenario 2 of 43: the same world, two routes  (20261122-070649-4239f8/refund-que
   ...
   Decided differently: 1 of 12 items. Decided before seeing a record the item depends on: A 0, B 4.
 ```
+REQ-0002 was decided differently and both decisions were right, which is why the verdict can still say both got
+the right result in all 43 scenarios. The world changed between the two: at step 10 each model was told that
+this request's customer had just been upgraded to gold. DeepSeek had decided at step 9, by the facts as they
+stood; Haiku decided at step 22, by the new ones. The notice is in the graph too (`TOLD_OF`).
+
 Without `--scenario` it prints one line for each of the 43 scenarios. The questions that ship are
 `decided-before-seeing`, `decided-never-saw`, `decided-unknown-record` (acted on an id that names no record:
 once in the whole record), `retried-without-checking` and `told-then-decided` (was told a record had changed and
@@ -448,7 +502,7 @@ draws one scenario as a graph of its records without a click: a solid line where
 deciding, a dashed one where it read it only afterwards, a red dotted one where it never did. Open a scenario
 and that picture plays along with the race (it is the second command above, drawn). "How they got there", just
 below, is the first command, with a level to set beside each question: the page fetches the steps of that task (a small file per match record), loads
-them into the graph in the tab, which takes about ten seconds, and each count is then one query. The page check
+them into the graph in the tab, which takes ten to twenty seconds, and each count is then one query. The page check
 in CI holds every one of these answers to the command line's.
 
 ## How and why Relate is used
@@ -508,8 +562,9 @@ flowchart LR
   (matches and test validation) and `epoch` (published scores, used only to suggest opponents). Another source of
   the same kinds of evidence plugs in the same way (`uv run ledger ask sources`).
 
-Graph: 11 kinds of node and 17 relationships in the shipped store, and with the steps 13 and 24. See
-[docs/SCHEMA.md](docs/SCHEMA.md).
+Graph: 13 kinds of node and 16 kinds of relationship in the shipped store, and with the steps 15 and 23 (count
+them: `uv run ledger cypher "MATCH (n) UNWIND labels(n) AS kind RETURN kind, count(*) AS nodes ORDER BY kind"`).
+See [docs/SCHEMA.md](docs/SCHEMA.md).
 
 ## More questions the graph answers
 The matches come from [Gladiator](https://github.com/Loothore907/gladiator-core), an open head-to-head evaluation
@@ -536,9 +591,12 @@ incident-triage 1.2.0) pass by the rule they were made under and not by the stri
 **Which results are out of date** (`uv run ledger ask stale_results`). Matches played on a test version that has
 since been replaced. The shipped store holds current versions only, so this is empty today.
 
-Every named question: `uv run ledger ask <name> --json` (`best_under_budget`, `head_to_head`, `hazard_profile`,
-`beat_cycles`, `beats`, `promotion`, `stale_results`, `sources`, `close_to`, `pair_on_task`, `pair_hazards`,
-`find_flow`, `flows`, `flow_as_tested`).
+Every named question: `uv run ledger ask <name> --json`. Seven need nothing more (`hazard_profile`, `beat_cycles`,
+`beats`, `promotion`, `stale_results`, `sources`, `flows`). The other seven are about a model, a pair, a task or a
+budget (`best_under_budget`, `head_to_head`, `close_to`, `pair_on_task`, `pair_hazards`, `find_flow`,
+`flow_as_tested`): asked without one, each says what it needs and prints the line to run, for example
+`uv run ledger ask head_to_head --param a="haiku 5.5" --param b=deepseek-v4.1`. And any question of your own is
+one read-only statement away: `uv run ledger cypher "MATCH ..."`.
 
 ## What's in the data
 `data/records/` holds the sealed public run records (`record.json`) of every match: two models, the same generated
@@ -621,8 +679,9 @@ The contest opened on Nov 11, 2026. Everything in this repository was written af
 - **Who wrote it.** The code, tests and documentation in both projects were written by Claude (Anthropic) working
   as a coding agent under the owner's direction. The owner set the goals and made the product, budget and
   publishing decisions.
-- **Not affiliated.** Ledger is independent. It is not affiliated with, sponsored by or endorsed by Anthropic,
-  OpenAI, Google, OpenRouter or any model maker. Model names appear only to identify what was tested, and the match
+- **Not affiliated.** Ledger is independent. It is not affiliated with, sponsored by or endorsed by Neo4j (Relate
+  is used here as any developer may use it, and is named only to say what the project is built on), Anthropic,
+  OpenAI, Google, OpenRouter, Epoch AI or any model maker. Model names appear only to identify what was tested, and the match
   transcripts in `data/` are AI-generated.
 
 Full statement: [docs/DISCLOSURE.md](docs/DISCLOSURE.md). The organizers' answer on eligibility: [docs/ELIGIBILITY.md](docs/ELIGIBILITY.md).

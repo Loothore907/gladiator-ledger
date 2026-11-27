@@ -384,6 +384,9 @@ def handler_for(live: LiveRecord, origins: set[str]):
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "LedgerLive"
+        # A caller that connects and then sends nothing, or stops reading, is dropped: the host lets only so many
+        # requests in at a time, and a few silent ones must not fill every place.
+        timeout = 30
 
         def log_message(self, *_):  # never a path, a query or a body
             return
