@@ -104,8 +104,10 @@ jobs:
             "tolerated: acted without reading (minor) in 65 of 95" \
             "Head to head: anthropic:claude-haiku-5-5 does this task better" \
             "43 judged pairs" "claude-haiku-5-5 won 37," "deepseek-v4.1-flash-1017 won 6, 0 tied" \
-            "decided: 28 on success, 15 on efficiency" \
-            "In 28 of the 37 scenarios anthropic:claude-haiku-5-5 won, both got the right result: it won them on"; do
+            "0 tied. Between two equally good models a split this lopsided would happen less than 0.1% of the time." \
+            "decided: 28 on process (both got the right result, only the winner ran clean), 15 on efficiency" \
+            "Both got the right result in all 43 scenarios, so every one was decided on process or efficiency" \
+            "anthropic:claude-haiku-5-5 won 37: 28 on process (both got the right result, only it ran clean), 9 on efficiency"; do
             grep -qF "$want" <<< "$shown" || { echo "README step 3 is no longer what the command prints: $want"; exit 1; }
           done
           # the reader's own level for one fault turns the answer round, and so does a business's tolerance

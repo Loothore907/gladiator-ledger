@@ -2,13 +2,109 @@
 // the Cypher is the same text (data/questions.json), and the arithmetic and wording here follow the Python line
 // for line. site/check.cjs compares the results with the answers the Python produced (data/expected.json).
 
-import { fixed, floatRepr, jsonDumps, percent, round, str, sum } from './pyformat.js';
+import { fixed, jsonDumps, percent, round, str, sum } from './pyformat.js';
 
 // One model's attempts on a task in a sentence (policy.result_line): how often the result was right, which is
 // what the bar asks, and in how many of those the process the test sets was followed as well.
 // How an attempt ended, in three words (ledger/reports.py, ended). A clean run is what the test itself calls a
 // pass: the right result and every step it asks for.
 export const ended = (right, clean) => (clean ? 'clean run' : right ? 'right, a step skipped' : 'wrong result');
+
+// ---- wording every document shares (ledger/reports.py) -----------------------------------------------------------
+// What kind of sealed record a run is, from its suite. It decides what is published with it (ANSWER_KEYS).
+const KINDS = { 'live-race': 'live race', 'live-batch': 'live batch' };
+export const recordKind = (suite) => KINDS[suite] || 'suite match';
+
+// What a reader can check, said once wherever sealed records are listed: a report must not promise an answer key
+// for a record that was published without one.
+export const ANSWER_KEYS =
+  'Every record is sealed, and `ledger verify` checks each seal. A suite match on tests that generate a fresh ' +
+  'world for every attempt has its answer key (its private half) published beside it and checked against the ' +
+  "record's fingerprint, so anyone can re-grade it. A live race or batch is published as its public record " +
+  "only: its answer key stays with the runner, and the record carries that key's fingerprint.";
+
+// The engine build a record names, or that it names none (the hosted runner does not record one).
+export const engineOf = (commit) => (commit ? `engine commit \`${str(commit).slice(0, 7)}\`` : 'engine commit not recorded');
+export const recordLine = (e) => `\`${e.run}\`, ${recordKind(e.suite)}, seal \`${str(e.seal_sha256).slice(0, 16)}\`, ${engineOf(e.engine_commit)}`;
+
+// How often chance alone gives a split, in words: never "p = 0.0".
+export function chance(p) {
+  if (p < 0.001) return 'less than 0.1%';
+  return p < 0.1 ? `about ${percent(p, 1)}` : `about ${percent(p)}`;
+}
+
+// The head to head in a sentence: the count, and how often two equal models would split like that.
+export function headToHead(d, a, b, tick = '`') {
+  let line = `${d.pairs} judged pairs on the same generated worlds: ${tick}${a}${tick} won ${d.wins[a]}, ${tick}${b}${tick} won ${d.wins[b]}, ${d.ties} tied.`;
+  if (d.wins[a] !== d.wins[b]) line += ` Between two equally good models a split this lopsided would happen ${chance(d.p_value)} of the time.`;
+  return line;
+}
+
+// What a scenario was decided on, in the order a reader cares about. The engine's own rule names stay in the data
+// (decided_by): its "success" means one side passed and the other did not, which is two different things to a
+// reader (a wrong result, or a right result with a step skipped), so it is never printed.
+const ON = ['result', 'process', 'efficiency', 'no result'];
+export const DECIDED_ON = {
+  result: 'on the result (only the winner got it right)',
+  process: 'on process (both got the right result, only the winner ran clean)',
+  efficiency: 'on efficiency (level on result and process: mistakes, cost, tokens and time decided)',
+  'no result': 'on a tie-break the winner took without the right result',
+};
+export const WON_ON = {
+  result: 'on the result (only it got the right result)',
+  process: 'on process (both got the right result, only it ran clean)',
+  efficiency: 'on efficiency (level on result and process)',
+  'no result': 'on a tie-break, without the right result',
+};
+export const MISTAKE_POINTS =
+  "Mistake points are the engine's count of what went wrong in an attempt: the grader's severity for each wrong " +
+  'or missing decision, 2 for each blind retry after a timeout, 1 for each action taken before reading a record ' +
+  'it depends on, 3 for stopping without calling finish. They feed the efficiency tie-break.';
+
+// What one scenario was decided on, for a reader (reports.decided_on).
+export function decidedOn(r, a) {
+  if (r.winner === 'tie' || !r.winner) return 'tie';
+  const [w, other] = r.winner === a ? ['a', 'b'] : ['b', 'a'];
+  const [wRight, wClean, lRight, lClean] = [r[`${w}_right`], r[`${w}_passed`], r[`${other}_right`], r[`${other}_passed`]].map(Boolean);
+  if (wClean) return lClean ? 'efficiency' : lRight ? 'process' : 'result';
+  if (wRight) return lRight ? 'efficiency' : 'result';
+  return 'no result';
+}
+
+// "45 on process (...), 27 on efficiency (...)": what the scenarios were decided on, in a fixed order.
+export function decidedText(counts, words = DECIDED_ON) {
+  return ON.filter((k) => counts[k])
+    .map((k) => `${counts[k]} ${words[k]}`)
+    .join(', ');
+}
+
+// What no trips in `attempts` attempts can rule out: the rate above which seeing none would be unlikely (under 5%).
+export const ruledOut = (attempts) => (attempts ? 1 - 0.05 ** (1 / attempts) : 1.0);
+
+// What the guardrail table does not say by itself (spec.guard_notes): what "not seen" is worth, and the faults
+// that count against a model's fitness, which is judged over every attempt it made and not only these scenarios.
+export function guardNotes(spec) {
+  const hazards = spec.blueprint.hazards;
+  const lines = [];
+  const unseen = [...new Set(hazards.filter((g) => !g.tripped && g.exposed).map((g) => g.exposed))].sort((x, y) => x - y);
+  if (unseen.length) {
+    const said = unseen.map((n) => `none in ${n} rules out a rate above about ${percent(ruledOut(n))}`).join('; ');
+    lines.push(`- Not seen is a count, not a clearance: ${said}. A hazard that must never happen still needs its guard in the real flow.`);
+  }
+  for (const model of new Set(hazards.map((g) => g.model))) {
+    const f = (spec.fit || {})[model];
+    if (f && f.reasons.length) {
+      lines.push(
+        `- Fitness is judged over every attempt \`${model}\` made on this task (${f.attempts}), and counts ` +
+          `faults that are not hazards of the world too. Against it at this tolerance: ${f.reasons.join('; ')}.`,
+      );
+    }
+  }
+  return lines;
+}
+
+// Python's f"{x:,.0f}": a whole number with thousands separators.
+const grouped = (x) => fixed(x, 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
 export function resultLine(f) {
   return (
@@ -27,6 +123,7 @@ const FLOAT_KEYS = new Set([
   'seconds_per_attempt',
   'mistakes',
   'attempt_budget_usd',
+  'cost_per_right',
   'cost_per_pass',
   'spent',
   'calls_per_attempt',
@@ -43,19 +140,19 @@ const BASIS = {
   mixed: 'mixed: some calls billed and some at list price within one attempt',
 };
 
-const usd = (x, places = 4) => (x === null || x === undefined ? 'none passed' : `$${fixed(x, places)}`);
+const usd = (x, places = 4, none = 'none') => (x === null || x === undefined ? none : `$${fixed(x, places)}`);
 
 export function costLines(models, a, b) {
   const lines = [
-    '| Model | Cost per attempt | Cost per passed attempt | Per 1,000 runs | Per 1,000 passed runs | Source of the cost |',
+    '| Model | Cost per attempt | Cost per right result | Cost per clean run | Per 1,000 runs | Source of the cost |',
     '|---|---|---|---|---|---|',
   ];
   for (const name of [a, b]) {
     const s = models[name];
-    const perPass = s.cost_per_pass;
     lines.push(
-      `| \`${name}\` | ${usd(s.cost_per_attempt)} | ${usd(perPass)} | ${usd(s.cost_per_attempt * 1000, 2)} | ` +
-        `${usd(perPass === null ? null : perPass * 1000, 2)} | ${s.cost_basis.join(', ')} |`,
+      `| \`${name}\` | ${usd(s.cost_per_attempt)} | ${usd(s.cost_per_right, 4, 'none right')} | ` +
+        `${usd(s.cost_per_pass, 4, 'none clean')} | ${usd(s.cost_per_attempt * 1000, 2)} | ` +
+        `${s.cost_basis.join(', ')} |`,
     );
   }
   lines.push(
@@ -67,18 +164,19 @@ export function costLines(models, a, b) {
     const s = models[name];
     const share = s.tokens_in ? s.tokens_cached / s.tokens_in : 0;
     lines.push(
-      `| \`${name}\` | ${fixed(s.calls_per_attempt, 1)} | ${fixed(s.tokens_in, 0)} | ${fixed(s.tokens_cached, 0)} (${percent(share)}) | ` +
-        `${fixed(s.tokens_out, 0)} | ${fixed(s.seconds_per_attempt, 0)} |`,
+      `| \`${name}\` | ${fixed(s.calls_per_attempt, 1)} | ${grouped(s.tokens_in)} | ${grouped(s.tokens_cached)} (${percent(share)}) | ` +
+        `${grouped(s.tokens_out)} | ${fixed(s.seconds_per_attempt, 0)} |`,
     );
   }
   const used = [...new Set([a, b].flatMap((name) => models[name].cost_basis))].sort(byCodePoint);
   lines.push(
     '',
-    '- Cost per passed attempt is everything spent divided by the attempts that passed: what one successful ' +
-      'result costs, failures included.',
+    '- Cost per right result is everything spent divided by the attempts that ended in the right result: ' +
+      'what one right result costs, wrong ones included. Cost per clean run divides by the attempts that also ' +
+      'followed every step the test asks for.',
     '- Token counts are averages per attempt. Re-read tokens are the part of the input a provider served from its ' +
       'cache, which it bills at a fraction of the normal price.',
-    '- The 1,000-run figures are straight multiples of these attempts, not a quote: your prompts, tools and ' +
+    '- The 1,000-run figure is a straight multiple of these attempts, not a quote: your prompts, tools and ' +
       'volume will differ.',
     `- Source of the cost: ${used.map((x) => BASIS[x] || x).join('; ')}.`,
     '',
@@ -102,12 +200,24 @@ export function costMarkdown(v, title) {
   lines.push('## Total spent in these matches', '');
   for (const name of [a, b]) {
     const s = v.models[name];
-    lines.push(`- \`${name}\`: $${fixed(s.spent, 4)} over ${s.attempts} attempts, ${s.passed} passed.`);
+    lines.push(
+      `- \`${name}\`: $${fixed(s.spent, 4)} over ${s.attempts} attempts: ${s.right} ended in the right result, ` +
+        `${s.passed} of them clean runs.`,
+    );
   }
   if (v.rounds && v.rounds.length) {
-    lines.push('', '## Scenario by scenario', '', `| # | \`${a}\` | \`${b}\` | Sealed record |`, '|---|---|---|---|');
+    lines.push(
+      '',
+      '## Scenario by scenario',
+      '',
+      'What each attempt cost and how it ended: a clean run (the right result and every step the test asks ' +
+        'for), the right result with a step skipped, or a wrong result.',
+      '',
+      `| # | \`${a}\` | \`${b}\` | Sealed record |`,
+      '|---|---|---|---|',
+    );
     v.rounds.forEach((r, i) => {
-      const cells = ['a', 'b'].map((side) => `$${fixed(r[`${side}_cost`] || 0, 4)} (${r[`${side}_passed`] ? 'passed' : 'failed'})`);
+      const cells = ['a', 'b'].map((side) => `$${fixed(r[`${side}_cost`] || 0, 4)} (${ended(r[`${side}_right`], r[`${side}_passed`])})`);
       lines.push(`| ${i + 1} | ${cells[0]} | ${cells[1]} | \`${r.run}\` |`);
     });
   }
@@ -140,13 +250,7 @@ export function evidenceMarkdown(v, title) {
       lines.push('');
     }
   }
-  lines.push(
-    '## Head to head',
-    '',
-    `${v.pairs} judged pairs on the same generated worlds: \`${a}\` won ${v.wins[a]}, \`${b}\` won ` +
-      `${v.wins[b]}, ${v.ties} tied (sign test p = ${floatRepr(v.p_value)}).`,
-    '',
-  );
+  lines.push('## Head to head', '', headToHead(v, a, b), '');
   for (const n of v.notes) lines.push(`- ${n}`);
   if (v.notes.length) lines.push('');
   if (v.rounds && v.rounds.length) {
@@ -160,22 +264,15 @@ export function evidenceMarkdown(v, title) {
     v.rounds.forEach((r, i) => {
       const winner = r.winner === 'tie' ? 'tie' : `\`${r.winner}\``;
       lines.push(
-        `| ${i + 1} | ${winner} | ${r.rule} | ${ended(r.a_right, r.a_passed)} | ` +
+        `| ${i + 1} | ${winner} | ${r.on} | ${ended(r.a_right, r.a_passed)} | ` +
           `${ended(r.b_right, r.b_passed)} | \`${r.run}\` |`,
       );
     });
     lines.push('');
   }
   lines.push('## Sealed records', '');
-  for (const e of v.evidence) {
-    lines.push(`- \`${e.run}\`, seal \`${str(e.seal_sha256).slice(0, 16)}\`, engine commit \`${str(e.engine_commit).slice(0, 7)}\``);
-  }
-  lines.push(
-    '',
-    "Each record's public half and private answer key are published; `ledger verify` checks every seal, and " +
-      'anyone can re-grade a match from them.',
-    '',
-  );
+  for (const e of v.evidence) lines.push(`- ${recordLine(e)}`);
+  lines.push('', ANSWER_KEYS, '');
   return lines.join('\n');
 }
 
@@ -332,6 +429,7 @@ export function createLedger(ask, questions, rules, loadSteps = async () => ({ m
       right,
       right_rate: right / n,
       cost_per_attempt: spent / n,
+      cost_per_right: right ? spent / right : null,
       cost_per_pass: passed ? spent / passed : null,
       spent,
       cost_basis: [...new Set(pairs.map((p) => str(p[`${s}_basis`])))].sort(byCodePoint),
@@ -729,12 +827,15 @@ RETURN mt.key AS match ORDER BY match`;
     a,
     b,
     suite = null,
-    bar = rules.good_enough,
+    bar = null,
     minPairs = rules.min_pairs,
     profile = null,
     overrides = null,
     checks = null,
   ) {
+    // One verdict has one bar: the reader's when one is given, else the tolerance's own, else the default.
+    const askedBar = bar;
+    bar = askedBar ?? (profile ? policy.profiles[profile].bar : rules.good_enough);
     const test = testId(workflow);
     const version = await currentVersion(test);
     // the page always reads the whole record: `until` (the command line's --until) stays empty here
@@ -786,25 +887,35 @@ RETURN mt.key AS match ORDER BY match`;
     }
     const each = Object.values(stats);
     for (const s of each) s.good_enough = s.right_rate >= bar;
-    if (better && !stats[better].good_enough) {
-      notes.push(
-        `${better} did better here, but got the right result in only ${percent(stats[better].right_rate)} of ` +
-          `attempts (bar ${percent(bar)}): better than the other one is not the same as good enough.`,
-      );
-    }
-    if (!each.some((s) => s.good_enough)) notes.push(`Neither model reaches the bar of ${percent(bar)} right results on this task.`);
-    // a scenario won by passing where the other did not, although both got the right result, was won on process
-    for (const [model, other, won] of [
-      [a, 'b', winsA],
-      [b, 'a', winsB],
-    ]) {
-      const onProcess = pairs.filter((p) => p.winner === model && p.rule === 'success' && p[`${other}_right`]).length;
-      if (onProcess) {
+    // Read through a tolerance, the fitness lines say who clears the bar, over every attempt each model made:
+    // a second answer here, over the pair's scenarios only, could contradict them.
+    if (!profile) {
+      if (better && !stats[better].good_enough) {
         notes.push(
-          `In ${onProcess} of the ${won} scenarios ${model} won, both got the right result: it won them on ` +
-            'process, by following the steps the test asks for where the other did not.',
+          `${better} did better here, but got the right result in only ${percent(stats[better].right_rate)} of ` +
+            `attempts (bar ${percent(bar)}): better than the other one is not the same as good enough.`,
         );
       }
+      if (!each.some((s) => s.good_enough)) notes.push(`Neither model reaches the bar of ${percent(bar)} right results on this task.`);
+    }
+    // What the scenarios were decided on, in a reader's words: a scenario can be won with both results right.
+    for (const p of pairs) p.on = decidedOn(p, a);
+    const decidedOnCounts = {};
+    for (const p of pairs) decidedOnCounts[p.on] = (decidedOnCounts[p.on] || 0) + 1;
+    if (pairs.length && pairs.every((p) => p.a_right && p.b_right)) {
+      notes.push(
+        `Both got the right result in all ${pairs.length} scenarios, so every one was decided on process or ` +
+          'efficiency, never on a wrong result.',
+      );
+    }
+    for (const [model, won] of [
+      [a, winsA],
+      [b, winsB],
+    ]) {
+      if (!won) continue;
+      const mine = {};
+      for (const p of pairs) if (p.winner === model) mine[p.on] = (mine[p.on] || 0) + 1;
+      notes.push(`${model} won ${won}: ${decidedText(mine, WON_ON)}.`);
     }
     const efforts = new Set(each.map((s) => JSON.stringify(s.effort)));
     if (efforts.size > 1 || each.some((s) => s.effort.length > 1)) {
@@ -825,7 +936,7 @@ RETURN mt.key AS match ORDER BY match`;
     if (profile) {
       // Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
       const versionKey = pairs.map((p) => p.version).sort(byCodePoint).at(-1);
-      const everyone = await fitness(test, versionKey, conditions, suite, profile, overrides, null, checks);
+      const everyone = await fitness(test, versionKey, conditions, suite, profile, overrides, askedBar, checks);
       out.profile = profile;
       if (checks && Object.keys(checks.levels || {}).length) out.own_checks = { levels: checks.levels, needs: checks.kinds ?? null };
       out.fit = { [a]: everyone[a], [b]: everyone[b] };
@@ -833,6 +944,7 @@ RETURN mt.key AS match ORDER BY match`;
       out.rounds = pairs.map((p) => ({
         winner: p.winner,
         rule: p.rule,
+        on: p.on,
         a_passed: p.a_passed,
         b_passed: p.b_passed,
         a_right: Boolean(p.a_right),
@@ -857,6 +969,7 @@ RETURN mt.key AS match ORDER BY match`;
       ties,
       p_value: round(pValue, 4),
       decided_by: decidedBy,
+      decided_on: decidedOnCounts,
       models: stats,
       hazards: hazards.filter((h) => h.tripped),
       evidence: Object.values(runs).sort((x, y) => byCodePoint(x.run, y.run)),
@@ -877,7 +990,7 @@ RETURN mt.key AS match ORDER BY match`;
     const judged = 'outcome' in v; // the verdict was read through fitness
     const chosen = (judged ? v.use : v.better) ?? null;
     const decision = {};
-    for (const k of ['verdict', 'better', 'a', 'b', 'pairs', 'wins', 'ties', 'p_value', 'decided_by', 'bar', 'notes']) {
+    for (const k of ['verdict', 'better', 'a', 'b', 'pairs', 'wins', 'ties', 'p_value', 'decided_by', 'decided_on', 'bar', 'notes']) {
       decision[k] = v[k] ?? null;
     }
     const out = {
@@ -930,7 +1043,8 @@ RETURN mt.key AS match ORDER BY match`;
           exposed: h.exposed,
           tripped: h.tripped,
           unforgivable: rules.unforgivable.includes(h.hazard),
-          autonomy: h.tripped === 0 ? 'can run alone' : 'needs a guard',
+          // never "can run alone": no trips in N attempts is a count, not a clearance
+          seen: h.tripped ? 'needs a guard' : 'not seen',
           guardrail: h.tripped ? (rules.guardrails[h.hazard] ?? null) : null,
         });
       }
@@ -1004,24 +1118,26 @@ RETURN mt.key AS match ORDER BY match`;
     } else {
       lines.push(headline, '');
     }
+    lines.push(`- ${headToHead(d, a, b)}`);
+    if (Object.keys(d.decided_on).length) lines.push(`- Decided: ${decidedText(d.decided_on)}.`);
+    lines.push('');
+    // Read through a tolerance, fitness is said above, over every attempt each model made: a second "good
+    // enough" here, over the pair's scenarios only, could contradict it.
+    const judged = Boolean(d.headline);
     lines.push(
-      `- ${d.pairs} judged pairs on the same generated worlds: \`${a}\` won ${d.wins[a]}, \`${b}\` won ` +
-        `${d.wins[b]}, ${d.ties} tied (sign test p = ${floatRepr(d.p_value)}).`,
-      `- Decided by: ${decidedText(d.decided_by)}.`,
-      '',
-      '| Model | Right result | Passed (result and process) | Cost per attempt | Seconds per attempt | ' +
-        `Mistakes per attempt | Good enough (bar ${percent(d.bar)}) |`,
-      '|---|---|---|---|---|---|---|',
+      '| Model | Right result | Clean runs (result and process) | Cost per attempt | Seconds per attempt | ' +
+        `Mistake points per attempt |${judged ? '' : ` Good enough (bar ${percent(d.bar)}) |`}`,
+      `|---|---|---|---|---|---|${judged ? '' : '---|'}`,
     );
     for (const name of [a, b]) {
       const s = models[name];
       lines.push(
         `| \`${name}\` | ${s.right} of ${s.attempts} | ${s.passed} of ${s.attempts} | $${fixed(s.cost_per_attempt, 4)} | ` +
-          `${fixed(s.seconds_per_attempt, 0)} | ${fixed(s.mistakes, 1)} | ${s.good_enough ? 'yes' : 'no'} |`,
+          `${fixed(s.seconds_per_attempt, 0)} | ${fixed(s.mistakes, 1)} |${judged ? '' : ` ${s.good_enough ? 'yes' : 'no'} |`}`,
       );
     }
     lines.push('');
-    lines = lines.concat(d.notes.map((n) => `- ${n}`), d.notes.length ? [''] : []);
+    lines = lines.concat(d.notes.map((n) => `- ${n}`), [`- ${MISTAKE_POINTS}`, '']);
 
     const bp = spec.blueprint;
     const st = bp.settings;
@@ -1051,21 +1167,23 @@ RETURN mt.key AS match ORDER BY match`;
     if (bp.modelled_on) lines.push(`The test is modelled on: ${bp.modelled_on}.`, '');
     const who = spec.chosen ? `\`${spec.chosen}\`` : 'each model';
     lines.push(
-      '### Guardrails and autonomy',
+      '### Guardrails',
       '',
-      `Each hazard this task can raise, how ${who} handled it, and what to build where it tripped.`,
+      `Each hazard this task can raise, how ${who} handled it in the ${d.pairs} head-to-head scenarios, and ` +
+        'what to build where it tripped.',
       '',
-      '| Model | Hazard | Tripped | Autonomy | Build this |',
+      '| Model | Hazard | Tripped | Reading | Build this |',
       '|---|---|---|---|---|',
     );
     for (const g of bp.hazards) {
       const flag = g.unforgivable ? ' (unforgivable)' : '';
       lines.push(
-        `| \`${g.model}\` | ${g.hazard}${flag} | ${g.tripped} of ${g.exposed} | ${g.autonomy} | ${g.guardrail || '-'} |`,
+        `| \`${g.model}\` | ${g.hazard}${flag} | ${g.tripped} of ${g.exposed} | ${g.seen} | ${g.guardrail || '-'} |`,
       );
     }
+    const guarded = guardNotes(spec);
+    lines.push('', ...guarded, ...(guarded.length ? [''] : []));
     lines.push(
-      '',
       `Unforgivable by default for a tool-using workflow: ${bp.unforgivable_defaults.join(', ')}. ` +
         'Change the list to fit your flow.',
       '',
@@ -1077,14 +1195,12 @@ RETURN mt.key AS match ORDER BY match`;
       '## 4. Evidence',
       '',
       `- Test version: \`${spec.version}\` (package fingerprint \`${str(spec.test_fingerprint)}\`).`,
-      '- Sealed match records (public half and private answer key both published; check with `ledger verify`):',
+      '- Sealed match records:',
     );
-    for (const e of spec.evidence) {
-      lines.push(
-        `  - \`${e.run}\`, seal \`${str(e.seal_sha256).slice(0, 16)}\`, engine commit \`${str(e.engine_commit).slice(0, 7)}\``,
-      );
-    }
+    for (const e of spec.evidence) lines.push(`  - ${recordLine(e)}`);
     lines.push(
+      '',
+      ANSWER_KEYS,
       '',
       'This spec claims only what was measured: this task, in a simulated world, under these settings. Treat it as ' +
         'the starting point for the real flow, and test again once it is built.',
@@ -1100,7 +1216,7 @@ RETURN mt.key AS match ORDER BY match`;
   }
 
   async function spec(workflow, a, b, profile = null, overrides = null) {
-    const found = await verdict(workflow, a, b, null, rules.good_enough, rules.min_pairs, profile, overrides);
+    const found = await verdict(workflow, a, b, null, null, rules.min_pairs, profile, overrides);
     return build({ ...found, suite: null });
   }
 
@@ -1149,10 +1265,3 @@ RETURN mt.key AS match ORDER BY match`;
   };
 }
 
-// "12 on efficiency, 3 on success": the rules that decided the pairs, most common first.
-export function decidedText(decidedBy) {
-  return Object.entries(decidedBy)
-    .sort((x, y) => y[1] - x[1])
-    .map(([rule, n]) => `${n} on ${rule}`)
-    .join(', ');
-}

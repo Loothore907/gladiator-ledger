@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps } from './ledger.js';
+import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, recordKind } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -187,7 +187,7 @@ window.ledgerDemo = {
   opponents: async (model, openOnly) => (await ledgerReady).ledger.opponents(model, Boolean(openOnly)),
   verdict: async (task, a, b, profile = null, overrides = null) => {
     const { ledger, rules } = await ledgerReady;
-    return ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, overrides);
+    return ledger.verdict(task, a, b, null, null, rules.min_pairs, profile, overrides);
   },
   spec: async (task, a, b, profile = null, overrides = null) => (await ledgerReady).ledger.spec(task, a, b, profile, overrides),
   specMarkdownJudged: async (task, a, b, profile, overrides = null) => {
@@ -207,7 +207,7 @@ window.ledgerDemo = {
   // the cost breakdown and the evidence report for one judged pair, as the command line writes them
   reports: async (task, a, b, profile, overrides = null) => {
     const { ledger, rules } = await ledgerReady;
-    const v = await ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, overrides);
+    const v = await ledger.verdict(task, a, b, null, null, rules.min_pairs, profile, overrides);
     const built = await ledger.build({ ...v, suite: null });
     const title = (built.blueprint || {}).title || built.task;
     return { cost: costMarkdown(v, title), evidence: evidenceMarkdown(v, title) };
@@ -222,7 +222,7 @@ window.ledgerDemo = {
   route: async (task, a, b, scenario = null) => (await ledgerReady).ledger.route(task, a, b, scenario),
   verdictChecked: async (task, a, b, profile, levels) => {
     const { ledger, rules } = await ledgerReady;
-    return ledger.verdict(task, a, b, null, rules.good_enough, rules.min_pairs, profile, null, { levels, kinds: null });
+    return ledger.verdict(task, a, b, null, null, rules.min_pairs, profile, null, { levels, kinds: null });
   },
   stepsLoaded: async () => ({ scenarios: worldsLoaded.size, missing: worldsMissing.size }),
   // what the live record has given this tab, once the look that is under way has ended
@@ -416,9 +416,6 @@ function drawTrail() {
   const pair = state.a ? shortName(state.a) + (state.b ? ` vs ${shortName(state.b)}` : '') : null;
   $('trail-text').textContent = [state.flow ? state.flow.title : null, pair].filter(Boolean).join(' · ');
 }
-
-// How often a split would happen by chance, in words: never "about 0.0%".
-const chance = (p) => (p < 0.001 ? 'less than 0.1%' : `about ${percent(p, 1)}`);
 
 // Bring what was just started, or has just finished, into view, and move the keyboard's focus with it.
 function follow(node, block = 'start') {
@@ -750,7 +747,7 @@ async function showVerdict(scroll = false, keep = null, ringRun = null) {
   const mine = ++turn;
   const overrides = Object.keys(state.overrides).length ? state.overrides : null;
   const checks = Object.keys(state.checks).length ? { levels: state.checks, kinds: null } : null;
-  const judged = await ledger.verdict(state.task, state.a, state.b, null, rules.good_enough, rules.min_pairs, state.profile, overrides, checks);
+  const judged = await ledger.verdict(state.task, state.a, state.b, null, null, rules.min_pairs, state.profile, overrides, checks);
   // where the kept panel is in the window, and the picture above it: both are put back so the page does not jump
   const held = keep && document.body.contains(keep) ? { top: keep.getBoundingClientRect().top, graph: $('pair-graph') } : null;
   if (judged.verdict === 'no data') {
@@ -1523,7 +1520,6 @@ function runWhen(run) {
   const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(String(run));
   return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[4]}:${m[5]}` : String(run);
 }
-const runKind = (suite) => (suite === 'live-race' ? 'live race' : suite === 'live-batch' ? 'live batch' : 'suite match');
 
 // The picture is drawn top down: the test version, then one row per sealed match record (a Run) with one cell per
 // scenario both models played in it (a Match), then the two models. A cell's two halves are the two attempts of
@@ -1551,7 +1547,7 @@ async function evidenceGraph(v, ring = null, justRan = false) {
   const cell = ({ r, index }, row) => {
     const who = r.winner === v.a ? 'a' : r.winner === v.b ? 'b' : 'tie';
     const text =
-      `Scenario ${index + 1} of ${n}, in the ${runKind(row.suite)} of ${runWhen(row.run)} UTC: ` +
+      `Scenario ${index + 1} of ${n}, in the ${recordKind(row.suite)} of ${runWhen(row.run)} UTC: ` +
       `${who === 'tie' ? 'a tie' : `taken by ${shortName(r.winner)} (${whyTaken(r, v.a).text})`}. ` +
       `${shortName(v.a)}: ${ended(r.a_right, r.a_passed)}. ${shortName(v.b)}: ${ended(r.b_right, r.b_passed)}.`;
     return el(
@@ -1565,7 +1561,7 @@ async function evidenceGraph(v, ring = null, justRan = false) {
     el(
       'div',
       { class: 'grow', 'data-run': row.run },
-      el('div', { class: 'grun', title: `Sealed record ${row.run}` }, el('b', null, runWhen(row.run)), ` · ${runKind(row.suite)}`, el('br'), el('span', { class: 'gcount' }, plural(row.cells.length, 'scenario'), row.cells.some((c) => c.index === ring) ? (justRan ? ' · just run' : ' · being watched') : '')),
+      el('div', { class: 'grun', title: `Sealed record ${row.run}` }, el('b', null, runWhen(row.run)), ` · ${recordKind(row.suite)}`, el('br'), el('span', { class: 'gcount' }, plural(row.cells.length, 'scenario'), row.cells.some((c) => c.index === ring) ? (justRan ? ' · just run' : ' · being watched') : '')),
       el('div', { class: 'gcells' }, row.cells.map((c) => cell(c, row))),
     );
   const liveRow = live.length
@@ -3049,7 +3045,7 @@ function liveReport(record, a, b, title, v) {
     'An attempt ends one of three ways: a clean run (the right result and every step the test asks for, which is ' +
       'what the test itself calls a pass), the right result with a step skipped, or a wrong result.',
     '',
-    '| Model | Result | Cost | Calls | Tokens read | Tokens written | Seconds | How it ended |',
+    '| Model | Result | Cost | Calls | Tokens read | Tokens written | Seconds | How the session ended |',
     '|---|---|---|---|---|---|---|---|',
   ];
   let spent = 0;
@@ -3062,7 +3058,7 @@ function liveReport(record, a, b, title, v) {
     spent += r.cost_usd || 0;
     lines.push(
       `| \`${name}\` | ${ended(r.passed || rightResult(r.grade_details), r.passed)} | $${fixed(r.cost_usd || 0, 4)} | ${r.calls ?? '-'} | ${r.input_tokens ?? '-'} | ` +
-        `${r.output_tokens ?? '-'} | ${fixed(r.wall_s || 0, 0)} | ${r.termination || '-'} |`,
+        `${r.output_tokens ?? '-'} | ${fixed(r.wall_s || 0, 0)} | ${r.termination === 'session_ended' ? 'ended normally' : rules.ending_faults[r.termination] || r.termination || '-'} |`,
     );
   }
   lines.push(
@@ -3330,21 +3326,28 @@ function drawVerdict(spec, v) {
       el('li', null, `Difficulty level: ${one(st.difficulty)}; action budget ${st.action_budget || 'not recorded'}`),
     ),
     bp.modelled_on ? el('p', { class: 'note' }, `The test is modelled on: ${bp.modelled_on}.`) : null,
-    el('h4', null, 'Guardrails and autonomy'),
+    el('h4', null, 'Guardrails'),
     el(
       'p',
       { class: 'note' },
-      `Each hazard this task can raise, how ${spec.chosen ? shortName(spec.chosen) : 'each model'} handled it, and what to build where it tripped.`,
+      `Each hazard this task can raise, how ${spec.chosen ? shortName(spec.chosen) : 'each model'} handled it in the ${d.pairs} head-to-head scenarios, and what to build where it tripped.`,
     ),
     table(
-      ['Hazard', 'Model', 'Tripped', 'Autonomy', 'Build this'],
+      ['Hazard', 'Model', 'Tripped', 'Reading', 'Build this'],
       bp.hazards.map((g) => [
         [el('span', { class: 'name' }, g.hazard), g.unforgivable ? [' ', el('span', { class: 'tag' }, 'unforgivable')] : null],
         shortName(g.model),
         `${g.tripped} of ${g.exposed}`,
-        g.autonomy,
+        g.seen,
         g.guardrail || '-',
       ]),
+    ),
+    // what the table does not say by itself: what "not seen" is worth, and what counts against fitness (the
+    // spec's own lines, with the models' short names)
+    el(
+      'ul',
+      { class: 'notes', id: 'guard-notes' },
+      guardNotes(spec).map((line) => el('li', null, plainNames(line.slice(2).replaceAll('`', ''), [d.a, d.b]))),
     ),
     el(
       'p',
@@ -3363,13 +3366,13 @@ function drawVerdict(spec, v) {
           null,
           'Sealed match record ',
           el('code', null, e.run),
-          ', seal ',
+          `, ${recordKind(e.suite)}, seal `,
           el('code', null, str(e.seal_sha256).slice(0, 16)),
-          ', engine commit ',
-          el('code', null, str(e.engine_commit).slice(0, 7)),
+          e.engine_commit ? [', engine commit ', el('code', null, str(e.engine_commit).slice(0, 7))] : ', engine commit not recorded',
         ),
       ),
     ),
+    el('p', { class: 'note', id: 'answer-keys' }, ANSWER_KEYS.replaceAll('`', '')),
     el(
       'p',
       { class: 'note' },
@@ -3394,8 +3397,8 @@ function drawVerdict(spec, v) {
       'p',
       { class: 'note' },
       'Three documents for this pair, each the same Markdown the ledger command line writes: the spec (what to build, with a ' +
-        'machine-readable copy at the end), the cost breakdown (per attempt, per successful result, per 1,000 runs, scenario by ' +
-        'scenario) and the evidence report (fit, every fault with its count, every scenario and its sealed record).',
+        'machine-readable copy at the end), the cost breakdown (per attempt, per right result, per clean run, per 1,000 runs, ' +
+        'scenario by scenario) and the evidence report (fit, every fault with its count, every scenario and its sealed record).',
     ),
   ];
   $('verdict-body').replaceChildren(panes(top, fight.graphs, bottom));
@@ -3452,7 +3455,7 @@ async function showExample() {
       }
     }
     found.sort((x, y) => y.pairs - x.pairs);
-    const judge = (c, profile) => ledger.verdict(c.flow.test, c.a, c.b, null, rules.good_enough, rules.min_pairs, profile, {});
+    const judge = (c, profile) => ledger.verdict(c.flow.test, c.a, c.b, null, null, rules.min_pairs, profile, {});
     const namesOne = (v) => ['use', 'only one fit'].includes(v.outcome);
     const movedBy = async (c, personal) => (await judge(c, 'enterprise')).headline !== personal.headline;
     // a tie on paper: both have a published score and the two ranges overlap

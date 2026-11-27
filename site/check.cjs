@@ -631,6 +631,27 @@ async function main() {
     for (const id of ['download-spec', 'download-cost', 'download-evidence', 'download-all']) {
       if (example && !(await page.locator(`#${id}`).count())) problems.push(`the result offers no ${id} button`);
     }
+    // What the screen may claim (the reports are held to the command line's text above; this is the page's own
+    // blueprint and evidence). A hazard with no trips is "not seen", with what that count can rule out, never a
+    // clearance. A record is listed with its kind, and an answer key is promised only where one is published.
+    // Nothing the record does not hold is printed as "None".
+    if (example) {
+      const claims = await page.evaluate(() => ({
+        left: document.querySelector('.pane-rest').innerText,
+        guards: [...document.querySelectorAll('#guard-notes li')].map((n) => n.textContent),
+        keys: (document.getElementById('answer-keys') || {}).textContent || '',
+        records: [...document.querySelectorAll('ul.evidence li')].map((n) => n.textContent).filter((x) => x.startsWith('Sealed match record')),
+        notes: [...document.querySelectorAll('#verdict-body ul.notes:not(#guard-notes) li')].map((n) => n.textContent),
+      }));
+      for (const never of ['can run alone', 'Autonomy', 'engine commit None', 'sign test p', 'answer key both published']) {
+        if (claims.left.includes(never)) problems.push(`step 3 still says "${never}"`);
+      }
+      if (!claims.guards.some((x) => /^Not seen is a count, not a clearance: none in \d+ rules out a rate above about \d+%/.test(x))) problems.push(`the guardrail table does not say what "not seen" is worth: ${JSON.stringify(claims.guards)}`);
+      if (!/A live race or batch is published as its public record only: its answer key stays with the runner/.test(claims.keys)) problems.push('the evidence list does not say which records have an answer key published');
+      if (!claims.records.length || !claims.records.every((x) => /, (suite match|live race|live batch), seal /.test(x) && /engine commit (not recorded|[0-9a-f]{7})$/.test(x))) problems.push(`a sealed record is listed without its kind or its engine build: ${JSON.stringify(claims.records.slice(0, 3))}`);
+      if (!claims.notes.some((x) => / won \d+: \d+ on (the result|process|efficiency|a tie-break)/.test(x))) problems.push(`the notes do not say what each model's wins were won on: ${JSON.stringify(claims.notes)}`);
+      if (claims.notes.some((x) => /it won them on process|good enough/.test(x))) problems.push('the notes still carry the old wording');
+    }
     if (!example) problems.push('the example button did not end on a drawn verdict');
     else if (!(await page.locator('#verdict-band').getAttribute('class')).includes('win')) {
       problems.push('the example button did not end on a verdict that names a model to use (the data has one)');

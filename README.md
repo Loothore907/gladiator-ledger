@@ -252,12 +252,16 @@ Fit for this task (personal tolerance):
 
 Head to head: anthropic:claude-haiku-5-5 does this task better
   43 judged pairs on the same generated worlds: anthropic:claude-haiku-5-5 won 37,
-  openrouter:deepseek/deepseek-v4.1-flash-1017 won 6, 0 tied (sign test p = 0.0)
-  decided: 28 on success, 15 on efficiency
+  openrouter:deepseek/deepseek-v4.1-flash-1017 won 6, 0 tied. Between two equally good models a split
+  this lopsided would happen less than 0.1% of the time.
+  decided: 28 on process (both got the right result, only the winner ran clean), 15 on efficiency
+  (level on result and process: mistakes, cost, tokens and time decided)
 
 Notes:
-  - In 28 of the 37 scenarios anthropic:claude-haiku-5-5 won, both got the right result: it won them on
-    process, by following the steps the test asks for where the other did not.
+  - Both got the right result in all 43 scenarios, so every one was decided on process or efficiency,
+    never on a wrong result.
+  - anthropic:claude-haiku-5-5 won 37: 28 on process (both got the right result, only it ran clean),
+    9 on efficiency (level on result and process).
 ```
 **Fit comes first, and it has two parts.** The **result**: in enough of its attempts, every decision was right and
 nothing was left undone. That is the bar. The **process**: how it got there, read from the faults it made. Each
@@ -299,13 +303,17 @@ One document in four layers:
 - **Decision.** The answer to act on (here: use Haiku; both are fit and it did the task better), each model's
   fitness with its reasons, the pair counts, and the comparison.
 - **Blueprint.** The job and the rules exactly as tested, the tools the flow needs, the settings the result holds
-  for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and for every hazard an autonomy call:
-  **can run alone** where the chosen model never fell for it in these matches, **needs a guard** where it did,
-  with the guard spelled out ("refuse an action on an item until the lookups it depends on have been made").
-- **Cost.** What these head-to-head attempts cost each model: per attempt, per *passed* attempt (failures
-  included), per 1,000 runs, how much of the reading was served from the provider's cache, and where each
-  figure comes from (the provider's bill, a re-pricing, or the list price).
-- **Evidence.** The sealed match records, the test's fingerprint and the engine version.
+  for (reasoning effort, output limit, a hard budget of $0.12 per attempt), and a row for every hazard:
+  **needs a guard** where the chosen model fell for it in these matches, with the guard spelled out ("refuse an
+  action on an item until the lookups it depends on have been made"), and **not seen** where it did not, with
+  what that count can rule out (none in 43 scenarios rules out a rate above about 7%). A spec never says a
+  model can run alone.
+- **Cost.** What these head-to-head attempts cost each model: per attempt, per right result, per clean run, per
+  1,000 runs, how much of the reading was served from the provider's cache, and where each figure comes from
+  (the provider's bill, a re-pricing, or the list price).
+- **Evidence.** The sealed match records, each with its kind (suite match, live race, live batch), its seal and
+  the engine build it names, and what is published with each kind: a suite match's answer key is, a live
+  race's stays with the runner.
 
 It ends with the same content as JSON, and it says plainly what it is: a result for this task, in a simulated world,
 under these settings. A starting point for the real flow, to be tested again once built.
