@@ -120,7 +120,7 @@ own API key"). The race runner is Gladiator, the open engine the matches were pl
 ```
 git clone https://github.com/Loothore907/gladiator-core && cd gladiator-core && uv sync
 cp .env.example .env        # fill in ONE line: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY
-uv run gladiator serve      # this machine only; says which models it can offer
+uv run gladiator serve --track suites/mid_tier.yaml=1.00   # this machine only; says which models it can offer
 ```
 and in a second terminal, in gladiator-ledger:
 ```

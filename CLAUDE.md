@@ -62,7 +62,15 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   (the runner has the model's key and price). There is one place to choose the two models, and the verdict, the
   graph and the live race are all about that pair. Honesty comes from the same world, settings and judge for
   both, and from saying how much evidence there is. The hosted live list stays to small models for the demo and
-  grows as capability does.
+  grows as capability does. **Where the visitor pays (owner, 2026-11-27): the short list was there because the
+  owner paid for every race, so with a visitor's own key it is no gate.** What is left is not about money. A test
+  gives each attempt a hard budget, and a model that runs out is recorded as not finishing, so a big model under
+  the small budget is cut off, not beaten. So: a pair is raced under the budget its record was played under,
+  where the runner has it and it fits both, and with no record under the smallest both fit (`conditionsFor` in
+  `site/app.js`; the runner's `tracks` and `placed`, from gladiator-core's `providers/placement.yaml`); the page
+  says which and why, and shows the cap, before the button is pressed. Nothing is blocked for being untried: a
+  model that has never raced here is marked "not yet tried here". The offer is every direct-provider model that
+  fits a budget and the OpenRouter models on record; the rest of OpenRouter's list comes later.
 - **Published scores only pick opponents.** The `epoch` bridge loads Epoch AI's Capabilities Index (CC BY 4.0,
   credited in `data/epoch/README.md`). Never rank or recommend by a published score, and join an Epoch name to a
   Gladiator model id only when it is an exact match (`MODEL_IDS` in `ledger/bridges/epoch.py`).

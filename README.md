@@ -54,15 +54,21 @@ the most, because the record already holds a verdict for each of its pairs:
 |---|---|---|
 | `OPENROUTER_API_KEY=...` | DeepSeek V4.1 Flash, MiniMax M3.1 Flash, Qwen 3.8 27B, GLM-5.3 | 48 to 64 scenarios for every pair, over the four workflows: a verdict, which your race joins |
 | `GEMINI_API_KEY=...` (Google) | Gemini 3.1 Flash-Lite, Gemini 3.5 Flash-Lite | 12 scenarios: your race joins them, and the verdict says the evidence is still thin |
-| `ANTHROPIC_API_KEY=...` | Claude Haiku 5.5, Claude Sonnet 5.5 | 12 scenarios, played with a larger cost limit per attempt ($0.40, not $0.12). Start the runner with `--suite suites/mid_tier.yaml` and your race is played under that limit and joins them; without it the race is run, filed and shown, and the verdict says it was played under other conditions and leaves it out |
+| `ANTHROPIC_API_KEY=...` | Claude Haiku 5.5, Claude Sonnet 5.5 | 12 scenarios, played under the larger budget a mid-tier model needs ($0.40 an attempt, not $0.12): your race is played under it too, and joins them |
 | `OPENAI_API_KEY=...` | GPT-6 Luna, GPT-6.1 Terra | none: the two have never met, so your race is the first evidence, and the page says so |
 
 ```bash
-uv run gladiator serve
+uv run gladiator serve --track suites/mid_tier.yaml=1.00
 ```
 It says which models it can offer and stays running, on this machine only (`http://127.0.0.1:8787`). With two
 keys in `.env` you can race across providers: the pair in the table further down, Claude Haiku 5.5 against
 DeepSeek V4.1 Flash, needs the Anthropic and the OpenRouter key.
+
+`--track` gives the runner a second budget. Each attempt of a test has a hard budget, and a model that runs
+out of it is recorded as not finishing. Small models are raced under $0.12 an attempt (a race costs $0.25 at
+most); a pair with a mid-tier model in it under $0.40 (a race costs $1.00 at most), which is the budget such a
+model can finish within and the one its recorded matches were played under. The page picks the budget for the
+pair, says which and why, and shows the cap before you press anything.
 
 **2. Ledger's page and its live record,** in a second terminal, in this repository's folder:
 
