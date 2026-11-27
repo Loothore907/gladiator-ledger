@@ -386,9 +386,12 @@ async function main() {
                   return m ? Number(m[2]) - Number(m[1]) : null;
                 };
                 const counted = row ? [missed(row.querySelector('.val.l')), missed(row.querySelector('.val.r'))] : [null, null];
-                return { counted, lines: [...document.querySelectorAll('#went-wrong li')].map((li) => li.textContent) };
+                // a pair that never met has no head-to-head table, and nothing to explain
+                return { met: Boolean(document.querySelector('.tape')), counted, lines: [...document.querySelectorAll('#went-wrong li')].map((li) => li.textContent) };
               });
-              if (wrong.counted.includes(null)) problems.push(`flow ${f}, ${a} vs ${b}: the head-to-head table does not say how many attempts had the right result`);
+              if (!wrong.met) {
+                if (wrong.lines.length) problems.push(`flow ${f}, ${a} vs ${b}: a pair that never met lists attempts that went wrong`);
+              } else if (wrong.counted.includes(null)) problems.push(`flow ${f}, ${a} vs ${b}: the head-to-head table does not say how many attempts had the right result`);
               else {
                 const expected = wrong.counted[0] + wrong.counted[1];
                 if (wrong.lines.length !== expected) problems.push(`flow ${f}, ${a} vs ${b}: ${expected} attempts did not end in the right result, and ${wrong.lines.length} are explained`);
