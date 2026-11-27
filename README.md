@@ -8,6 +8,11 @@ task, every step recorded. It answers with a claim about **one task**, in two pa
 under your tolerance for mistakes, and which one **did it better** head to head. Then it writes a **spec** you can
 build from. It never ranks models in general, and when the evidence is thin or level it names no winner.
 
+![Step 3 of the page: the verdict for two models on the refund queue, beside the Relate graph of every scenario they both played](docs/img/verdict.png)
+
+*The page on Nov 27, 2026: the answer on the left, and on the right the graph it was read from, one cell for each
+scenario both models played.*
+
 ## Try it in a minute
 **In your browser, nothing to install.** Open **https://ledger.gladiatorbench.com/** and press **Show me an
 example**. The page builds the graph in your tab with Relate's WebAssembly build and walks to the verdict for two
@@ -60,6 +65,10 @@ your machine the first time, about a minute). From Python it is `relate.connect(
    one scenario both played, and its two halves say how each model ended: a clean run, the right result with a
    step skipped, or a wrong result. Point at one to read what happened; click it and it replays as a race, with
    that scenario's world drawn as a graph of linked records and each model's route on it.
+
+   ![One recorded scenario replayed as a race: each model's steps on a line, with lookups, actions, a timeout and the finish marked](docs/img/replay.png)
+
+   *A cell, clicked: the sealed record played back at the pace it really ran, both models on the same world.*
 3. **A new question, with no new match.** "How they got there" asks a pattern of every step on file, such as
    "decided a refund before it had seen the customer". Give one a level and the verdict is judged with it.
 4. **A live race that joins the record as it ends** (hackathon judges for now: "Judge sign-in" on the page). The
