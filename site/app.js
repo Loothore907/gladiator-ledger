@@ -1718,6 +1718,12 @@ async function drawWorldGraph(v, ring = null, justRan = false) {
 let runnerPromise;
 let wantsRunner = false; // set when the visitor asks to sign in from the page
 let hostedRunner = false; // a runner is named for this page (published with it, or in its address): the sign-in button is for it
+// A race the visitor pays for with their own API key, on a runner that takes one (`own_keys` in its /options, and
+// in data/live.json so the page can offer it without contacting the runner first). The keys typed in are kept
+// here and nowhere else: not in storage, not in the address, gone when the tab is closed or reloaded. They leave
+// the tab only inside the request that starts a race.
+let keyMode = false;
+const myKeys = new Map(); // provider -> key
 const OWN_KEY_README = 'https://github.com/Loothore907/gladiator-ledger#race-two-models-live-with-your-own-api-key';
 const askedRunner = new URLSearchParams(location.search).get('runner');
 let basePromise;
@@ -1940,7 +1946,11 @@ function smallPrint() {
         } A verdict counts the races played under its own conditions: one you start at another difficulty or scoring is kept on file, and the verdict says so and leaves it out.`
       : `Every verdict on this page rests on recorded matches: finished, sealed and replayable here. The page reads them locally in this browser tab, needs no key and sends nothing you type anywhere.${
           liveRecord.address ? ' Matches newer than the page are fetched from Ledger’s live record, a plain read of public records, and join the same graph in this tab.' : ''
-        } This view cannot start a match. A live race calls paid model APIs, so it runs on a separate Gladiator runner: on your own machine with your own API key (two commands, in the README)${hostedRunner ? ', or on the hosted runner by invitation (Sign in, at the top)' : ''}.`;
+        } ${
+          keyMode
+            ? 'A live race you start here with your own API key is different: it is sent, with that key, to a Gladiator runner, which calls the real models and spends real money from your key, up to the cap shown beside the button. What goes to the runner is the task, the two models, the settings and the key; the runner uses the key for that one race and does not store it.'
+            : `This view cannot start a match. A live race calls paid model APIs, so it runs on a separate Gladiator runner: on your own machine with your own API key (two commands, in the README)${hostedRunner ? ', or on the hosted runner by invitation (Sign in, at the top)' : ''}.`
+        }`;
 }
 
 async function announceLive() {
@@ -2065,34 +2075,73 @@ async function drawLive(v) {
   // No race can be started from this page as it stands: say where one can. A live race calls paid model APIs, so
   // it runs with the visitor's own key on their own machine; the hosted runner, where one is published, is by
   // invitation.
-  const closed = () =>
+  const closed = (canKey = false) =>
     el(
       'p',
       { class: 'note', id: 'live-soon' },
-      'A live race calls paid model APIs, so it runs on your own machine with your own API key: two commands, in the README under ',
+      canKey
+        ? 'A live race calls paid model APIs, so it is paid for with your own API key. Here, the hosted runner plays it with a key you paste in (the button below). Or on your own machine, where the key never leaves it: two commands, in the README under '
+        : 'A live race calls paid model APIs, so it runs on your own machine with your own API key: two commands, in the README under ',
       el('a', { href: OWN_KEY_README, target: '_blank', rel: 'noopener' }, '“Race two models live, with your own API key”'),
-      `. ${hostedRunner ? 'The hosted runner behind this page is by invitation (Sign in, at the top of the page). ' : ''}Every scenario above is a real recorded race you can replay.`,
+      `. ${hostedRunner ? (canKey ? 'Races on the runner’s own budget are by invitation (Sign in, at the top of the page). ' : 'The hosted runner behind this page is by invitation (Sign in, at the top of the page). ') : ''}Every scenario above is a real recorded race you can replay.`,
+    );
+  // Where the runner takes a visitor's own key, that is offered beside it: one button, and nothing is sent
+  // anywhere until it is pressed.
+  const ownKeyOffer = () =>
+    el(
+      'p',
+      { class: 'note', id: 'live-own-key' },
+      el(
+        'button',
+        {
+          type: 'button',
+          id: 'live-own-key-go',
+          class: 'small',
+          onclick: () => {
+            keyMode = true;
+            wantsRunner = true;
+            runnerPromise = null; // look the runner up again, this time contacting it
+            smallPrint();
+            drawLive(v);
+          },
+        },
+        'Race them here with my own API key',
+      ),
+      ' Your key pays, for that one race, and it is not stored. What happens to it is said in full before you paste it.',
     );
   if (!runner) {
-    box.replaceChildren(title, closed());
+    const canKey = Boolean((await published()).own_keys) && !askedRunner;
+    box.replaceChildren(title, closed(canKey), canKey ? ownKeyOffer() : null);
     return;
   }
   if (!runner.options) {
     box.replaceChildren(title, el('p', { class: 'note' }, `The race runner at ${runner.base} is not answering. Recorded races still play.`));
     return;
   }
-  const session = await signIn(runner);
+  let session = await signIn(runner);
   if ($('live') !== box) return;
-  if (!session) {
-    // not signed in: nothing to press and nothing to type
-    box.replaceChildren(title, closed());
+  const ownOffer = runner.options.own_keys || null; // what the runner offers for a race with the visitor's key
+  const byKey = !session && keyMode && Boolean(ownOffer);
+  if (!session && !byKey) {
+    // not signed in: nothing to type here, and one button where the runner takes a visitor's own key
+    box.replaceChildren(title, closed(Boolean(ownOffer)), ownOffer ? ownKeyOffer() : null);
     return;
   }
+  if (byKey) session = { token: null, races_left: null };
   const task = spec_task(v.task);
   const offered = runner.options.tasks.find((t) => t.id === task);
-  const models = runner.options.models;
+  const models = byKey ? ownOffer.models : runner.options.models;
+  if (byKey && !(liveModels && models.length === liveModels.size && models.every((m) => liveModels.has(m)))) {
+    // the cards in step 2 can now say which models a key can race
+    liveModels = new Set(models);
+    if (state.task) drawFirst();
+    if (state.a) drawSecond();
+  }
   if (!offered || models.length < 2) {
-    box.replaceChildren(title, el('p', { class: 'note' }, !offered ? 'This runner does not offer this task.' : 'The live budgets are used up for now. Recorded races still play.'));
+    box.replaceChildren(
+      title,
+      el('p', { class: 'note' }, !offered ? 'This runner does not offer this task.' : byKey ? 'This runner has no models on offer for a race with your own key just now. Recorded races still play.' : 'The live budgets are used up for now. Recorded races still play.'),
+    );
     return;
   }
   // The live race is between the two models chosen in step 2: the page has one place to choose a pair, and every
@@ -2106,7 +2155,7 @@ async function drawLive(v) {
       el(
         'p',
         { class: 'note', id: 'live-absent' },
-        `${missing.map(shortName).join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on the live list, so this pair cannot be raced live. `,
+        `${missing.map(shortName).join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not on the ${byKey ? 'list this runner offers for a race with your own key' : 'live list'}, so this pair cannot be raced live. `,
         'To race live, pick two models marked "can race live" in step 2: ',
         models.map(shortName).join(', '),
         '.',
@@ -2120,7 +2169,7 @@ async function drawLive(v) {
   const pick = (label, select) => el('label', { class: 'pick' }, el('span', null, label), select);
   // Batches, where the runner offers them: the same test many times in one go, by the pair or by one of the two
   // on both lanes. The bigger sizes are shown as what is coming, never as something to press.
-  const sizes = runner.options.batches || [];
+  const sizes = byKey ? [] : runner.options.batches || []; // with the visitor's own key a race is one scenario
   const runsPick = el(
     'select',
     { id: 'live-runs', 'aria-label': 'How many scenarios' },
@@ -2137,6 +2186,32 @@ async function drawLive(v) {
     el('option', { value: 'b' }, `${shortName(v.b)} on both lanes: how steady is it?`),
   );
   const batchBox = el('div', { id: 'live-batch' });
+  // With the visitor's own key: one field for each provider the two models need, and what happens to the key.
+  const needed = byKey ? [...new Set([a, b].map((m) => m.split(':')[0]))] : [];
+  const keyFields = needed.map((name) => {
+    const field = el('input', { type: 'password', id: `live-key-${name}`, class: 'live-key', autocomplete: 'off', spellcheck: 'false', 'aria-label': `Your ${providerName(name)} API key` });
+    field.value = myKeys.get(name) || '';
+    field.addEventListener('input', () => {
+      myKeys.set(name, field.value.trim());
+      ready();
+    });
+    return el('label', { class: 'pick' }, el('span', null, `Your ${providerName(name)} API key`), field);
+  });
+  const keyBox = byKey
+    ? el(
+        'div',
+        { class: 'live-keys', id: 'live-keys' },
+        el(
+          'p',
+          { class: 'note' },
+          el('strong', null, 'Your own API key pays for this race.'),
+          ` It goes to the race runner (${new URL(runner.base).host}) with the race and nowhere else. The runner checks it with ${needed.map(providerName).join(' and ')}, uses it for this one race and drops it: it does not store or log it, and it is not in the record. This page keeps it in this tab only, until you close or reload it. If you can, use a key with a small spending limit, and delete it afterwards. Rather not paste a key into a web page? The same race runs on your own machine: `,
+          el('a', { href: OWN_KEY_README, target: '_blank', rel: 'noopener' }, 'two commands, in the README'),
+          '.',
+        ),
+        keyFields,
+      )
+    : null;
   // What the record already says about each of the two on this task, whoever they played: how often it passed and
   // what an attempt cost. A model far below the pass rate the task needs is flagged before any money is spent,
   // and the same figures give the expected cost of the run about to start.
@@ -2220,9 +2295,10 @@ async function drawLive(v) {
   let runnerBusy = false;
   let asking = 0; // the next time the runner is asked, while it is busy
   const ready = () => {
-    go.disabled = running || runnerBusy;
+    go.disabled = running || runnerBusy || needed.some((name) => !myKeys.get(name));
     busyNote.hidden = running || !runnerBusy;
   };
+  ready();
   const watchRunner = async (refused = false) => {
     if (!document.body.contains(go) || running) return;
     let busy = refused;
@@ -2260,6 +2336,12 @@ async function drawLive(v) {
     const parts = (options.budgets || []).map((b) => `${providerName(b.provider)} $${fixed(b.left_usd, 2)} of $${fixed(b.limit_usd, 2)}`);
     const out = (options.models_out || []).map(shortName);
     const unpriced = (options.models_unpriced || []).map(shortName);
+    if (byKey) {
+      // none of the runner's budgets is touched: what bounds the race is its cap, and how many one visitor may start
+      const mine = options.own_keys || ownOffer;
+      money.replaceChildren(`One race can cost $${fixed(mine.cap_usd_per_race, 2)} at most, paid from your own key and from no budget of this runner. It starts ${mine.per_hour} such races an hour for one visitor.`);
+      return;
+    }
     // what the runner may spend: its cap on one race, and what is left of its limit on everything, where it has one
     const cap = options.cap_usd_per_race ? `One race can cost $${fixed(options.cap_usd_per_race, 2)} at most. ` : '';
     const total = options.total ? `This runner will spend $${fixed(options.total.left_usd, 2)} more at most, of $${fixed(options.total.limit_usd, 2)} in all. ` : '';
@@ -2508,7 +2590,8 @@ async function drawLive(v) {
       const response = await fetch(`${runner.base}/race`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task, a, b, difficulty: level.value, profile: profile.value, token: session.token || '' }),
+        // with the visitor's own key the request carries the key of each provider needed, and no sign-in
+        body: JSON.stringify({ task, a, b, difficulty: level.value, profile: profile.value, ...(byKey ? { keys: Object.fromEntries(needed.map((name) => [name, myKeys.get(name)])) } : { token: session.token || '' }) }),
       });
       if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
       let record = null;
@@ -2567,7 +2650,10 @@ async function drawLive(v) {
       mine.set(facts.run_id, facts);
       await join(facts.run_id, became, null, true);
     } catch (error) {
-      if (!refusedBusy(error)) say.textContent = `The live race did not run: ${error.message}`;
+      if (!refusedBusy(error)) {
+        say.textContent = `The live race did not run: ${error.message}`;
+        if (byKey) stage.replaceChildren(); // nothing was started: no empty lanes left as if a race were under way
+      }
     } finally {
       running = false;
       ready();
@@ -2587,6 +2673,7 @@ async function drawLive(v) {
     title,
     el('p', { class: 'live-pair', id: 'live-pair' }, el('strong', null, shortName(a)), ' vs ', el('strong', null, shortName(b)), el('span', { class: 'note' }, ' · the two models chosen in step 2')),
     prior,
+    keyBox,
     el('div', { class: 'race-controls' }, sizes.length ? [pick('Who plays', whoPick), pick('How many', runsPick)] : null, pick('Difficulty', level), pick('Scoring', profile), go),
     what,
     busyNote,

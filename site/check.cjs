@@ -36,7 +36,8 @@ function serve() {
     // This check is about the page's own copy of the record, and must reach nothing outside this folder: the
     // page is served without the address of the hosted live record (site/check-live.cjs checks the page with
     // one, on this machine). The runner's address stays: the page must not contact it unasked, and that is checked.
-    if (name === '/data/live.json') return res.end(JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), record: undefined }));
+    // `server.live`: what the page is published with for one part of the check (a runner that takes a visitor's own key)
+    if (name === '/data/live.json') return res.end(JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), record: undefined, ...(server.live || {}) }));
     res.end(fs.readFileSync(file));
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
@@ -80,6 +81,7 @@ function fakeRunner(models, extra) {
   const run = []; // the live races this stand-in has 'run', as the real runner lists them
   const batches = []; // and its batches
   const server = http.createServer((req, res) => {
+    server.calls = (server.calls || 0) + 1; // every request, so the check can tell that none was made
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
     if (req.url === '/options') {
       const tasks = ['refund-queue', 'access-review', 'incident-triage', 'inventory-transfer'].map((id) => ({ id, name: id, levels: ['easy', 'standard'] }));
@@ -87,7 +89,9 @@ function fakeRunner(models, extra) {
       // `server.own`: a runner on a person's own machine with their own key, as `gladiator serve` starts one with
       // no options. It asks for no sign-in, and has a cap on one race and one limit on everything it may spend.
       if (server.own) return json(res, 200, { tasks, models: [...models, extra], models_out: [], models_unpriced: [], budgets: [], total: { limit_usd: 5, left_usd: 5 - (server.ownSpent || 0) }, cap_usd_per_race: 0.25, profiles: ['balanced', 'budget', 'latency'], batches: [], batch_pass_rate: 0.8, needs_code: false });
-      return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }], batch_pass_rate: 0.8 }) });
+      // `server.takesKeys`: a hosted runner that also plays a race its visitor pays for, with the key in the request
+      const own_keys = server.takesKeys ? { models: [...models, extra], cap_usd_per_race: 0.4, per_hour: 12 } : null;
+      return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, own_keys, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }], batch_pass_rate: 0.8 }) });
     }
     if (req.url === '/races') return json(res, 200, { races: run, batches });
     // the real runner plays one race at a time and says when it is busy; `server.busy` makes this one say so
@@ -104,7 +108,10 @@ function fakeRunner(models, extra) {
         return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
       }
       server.asked = ask;
-      if (!server.own && ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
+      if (server.takesKeys && ask.keys) {
+        // a key its provider refuses stops the race before anything is run: a plain answer, in the runner's words
+        if (server.refuseKey) return json(res, 403, { error: server.refuseKey });
+      } else if (!server.own && ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
       if (server.busy) return json(res, 409, { error: 'The runner is busy with another race or a test being checked. Try again in a minute.' });
       if (ask.runs > 1) {
         // a batch: each attempt as it ends, then the facts of the whole batch. Side A fails its third attempt.
@@ -1212,6 +1219,80 @@ async function main() {
         runner.refuse = null;
         await own.context().close();
         runner.own = false;
+      }
+
+      // A hosted runner that takes a visitor's own key. The page offers it with one button and contacts nobody
+      // until it is pressed; then a field for each provider the pair needs, the button off until each is filled,
+      // what happens to the key said beside it, and the key sent with the race and kept nowhere else.
+      {
+        runner.takesKeys = true;
+        const KEYS = { [pair.a.split(':')[0]]: 'sk-test-first-key-0000000000000000aaaa', [pair.b.split(':')[0]]: 'sk-test-second-key-000000000000000bbbb' };
+        const signinsBefore = (runner.signins || []).length;
+        // published with that runner: nothing in the address, and nothing asked of the runner before the button
+        server.live = { runner: runnerUrl, own_keys: true };
+        const keyed = await (await browser.newContext()).newPage();
+        keyed.on('pageerror', (e) => problems.push(`own-key page error: ${e.message}`));
+        await keyed.goto(`${origin}${BASE}`);
+        const before = runner.calls || 0;
+        await pickPair(keyed);
+        await keyed.waitForSelector('#live-own-key-go', { timeout: 5000 }).catch(() => problems.push('a page published with a runner that takes a visitor’s key does not offer it'));
+        if ((runner.calls || 0) !== before) problems.push('the runner was contacted before the visitor asked to race with their own key');
+        if (await keyed.locator('#live-go, #live input').count()) problems.push('a key is asked for before the visitor chose to race with their own');
+        const offer = await keyed.locator('#live-soon').innerText();
+        if (!offer.includes('with a key you paste in') || !offer.includes('your own machine')) problems.push(`the note does not offer both ways to race with one's own key: ${JSON.stringify(offer)}`);
+        await keyed.locator('#live-own-key-go').click();
+        await keyed.waitForSelector('#live-keys input', { timeout: 8000 }).catch(() => problems.push('choosing to race with one’s own key did not ask for it'));
+        const fields = Object.keys(KEYS).length;
+        if ((await keyed.locator('#live-keys input[type="password"]').count()) !== fields) problems.push(`the key box does not have one hidden field for each of the ${fields} provider(s) the pair needs`);
+        if (!(await keyed.locator('#live-go').isDisabled())) problems.push('the race button is on before a key is typed');
+        const told = await keyed.locator('#live-keys').innerText();
+        for (const part of [new URL(runnerUrl).host, 'does not store or log it', 'not in the record', 'this tab only', 'small spending limit', 'your own machine']) {
+          if (!told.includes(part)) problems.push(`what happens to the key is not said (${JSON.stringify(part)}): ${JSON.stringify(told.slice(0, 300))}`);
+        }
+        const limits = await keyed.locator('#live-budget').innerText();
+        for (const part of ['$0.40 at most', 'paid from your own key', '12 such races an hour']) if (!limits.includes(part)) problems.push(`the limits of an own-key race lack ${JSON.stringify(part)}: ${JSON.stringify(limits)}`);
+        if (limits.includes('OpenRouter $')) problems.push('an own-key race is shown the runner’s own budgets, which it does not touch');
+        if ((await keyed.locator('#live-runs, #live-who').count()) !== 0) problems.push('an own-key race offers batches, which the runner does not play with a visitor’s key');
+        const names = Object.keys(KEYS);
+        await keyed.fill(`#live-key-${names[0]}`, `  ${KEYS[names[0]]}  `);
+        if (fields > 1 && !(await keyed.locator('#live-go').isDisabled())) problems.push('the race button is on with only one of two keys typed');
+        for (const name of names.slice(1)) await keyed.fill(`#live-key-${name}`, KEYS[name]);
+        if (await keyed.locator('#live-go').isDisabled()) problems.push('the race button stays off with every key typed');
+        // a key its provider refuses: the runner's words, no lanes left on screen, nothing else changed
+        runner.refuseKey = `${names[0]} did not accept this key (AuthenticationError, HTTP 401).`;
+        await keyed.locator('#live-go').click();
+        await keyed.waitForFunction((said) => document.getElementById('live-result').innerText.includes(said), runner.refuseKey, { timeout: 8000 }).catch(() => problems.push('a refused key is not reported in the runner’s words'));
+        if (await keyed.locator('#live-stage > *').count()) problems.push('a refused key left lanes on screen, as if a race were under way');
+        runner.refuseKey = null;
+        await keyed.locator('#live-go').click();
+        await keyed.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('a race with the visitor’s own key never reported a result'));
+        // the keys went with the race, trimmed, for the providers needed and no sign-in with them
+        if (JSON.stringify(runner.asked.keys) !== JSON.stringify(KEYS)) problems.push(`the race carried ${JSON.stringify(Object.keys(runner.asked.keys || {}))} as its keys, not one for each provider of the pair`);
+        if (runner.asked.token || runner.asked.invite || runner.asked.code) problems.push('an own-key race carried a sign-in');
+        if ((runner.signins || []).length !== signinsBefore) problems.push('the page tried to sign in for an own-key race');
+        // and they are nowhere else: not stored, not in the address, not on the page, not in the report
+        const kept = await keyed.evaluate((keys) => {
+          const stores = JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]);
+          const shown = document.body.innerText + location.href + document.documentElement.outerHTML + (window.ledgerDemo.lastLiveReport || '');
+          return keys.filter((k) => stores.includes(k) || shown.includes(k)).length;
+        }, Object.values(KEYS));
+        if (kept) problems.push('a key the visitor typed is kept in storage, the address, the page or the report');
+        if (!(await keyed.locator('#foot-view').innerText()).includes('does not store it')) problems.push('the small print of an own-key race does not say what happens to the key');
+        // a reload forgets them: the page is the public one again
+        await keyed.reload();
+        await pickPair(keyed);
+        await keyed.waitForSelector('#live-own-key-go', { timeout: 5000 }).catch(() => problems.push('after a reload the page still holds the visitor’s keys'));
+        if (await keyed.locator('#live-keys input').count()) problems.push('after a reload the key box is still open');
+        await keyed.context().close();
+        server.live = null;
+        // and a runner that does not take keys is never offered that way
+        runner.takesKeys = false;
+        const plain = await browser.newPage();
+        await plain.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+        await pickPair(plain);
+        await plain.waitForSelector('#live-soon', { timeout: 5000 });
+        if (await plain.locator('#live-own-key-go').count()) problems.push('a runner that takes no visitor keys is offered as one that does');
+        await plain.close();
       }
 
       // An invitation the runner does not accept is said so at the top: never a silent fall back to the public page.

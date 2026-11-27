@@ -32,6 +32,17 @@ machine with your own API key, and where the two commands are; a hosted runner i
 evidence. It counts in the verdict once its record has been imported (`ledger import --runner`, which the
 `Import live races` workflow runs) and this folder's data has been rebuilt from it.
 
+**A race paid for with the visitor's own API key.** A hosted runner may take one (`gladiator serve --own-keys`;
+`own_keys` in its `/options`). The page then offers "Race them here with my own API key" in the live panel: a
+hidden field for each provider the two chosen models need, what happens to the key said in full beside it, and
+the race button off until each field is filled. The key goes to the runner inside the request that starts the
+race and is kept nowhere else: in this tab's memory only, never in storage or the address, gone on a reload.
+Such a race is one scenario (no batches), needs no sign-in and touches none of the runner's budgets; the panel
+shows its cap and how many one visitor may start in an hour. A key the provider refuses comes back as the
+runner's own sentence, with nothing run. For a published runner the page learns that it takes keys from
+`"own_keys": true` in `data/live.json`, so it can offer the button without contacting the runner first; nothing
+is sent until the button is pressed. Without that entry the published page does not offer it.
+
 **The live record.** Or at once, where the page reads a live record: Ledger's own small service (`ledger serve`,
 `ledger/live.py`) that keeps the whole record in one Relate store and takes in each race as the runner files it.
 Open the page with `?record=<address>` for one on your own machine, or set `record` in `data/live.json`. On load
