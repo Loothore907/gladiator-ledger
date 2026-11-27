@@ -51,6 +51,18 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   Gladiator model id only when it is an exact match (`MODEL_IDS` in `ledger/bridges/epoch.py`).
 - **Relate is the store and the query engine, not an export target.** Questions are Cypher over the graph.
 - **No made-up winners.** Thin evidence or a level head-to-head means no pick is named, the same as in Gladiator.
+- **A report says only what the count shows** (a review of every output on 2026-11-27, after the owner asked that
+  claims and evidence be handled correctly). The wording rules live in one place (`ledger/reports.py`, mirrored in
+  `site/ledger.js`) and every document and screen uses them. An attempt ended as a clean run, the right result
+  with a step skipped, or a wrong result: never "passed" or "failed". A scenario was decided on the result, on
+  process, on efficiency, or on a tie-break taken without the right result: never on the engine's "success",
+  which is two different things to a reader. Chance is said in words, never as "p = 0.0". A hazard with no trips
+  is "not seen", with what that count can rule out: never "can run alone". A record is listed with its kind, and
+  an answer key is promised only for the kind that has one published (a live race's stays with the runner). A
+  fact the record does not hold is "not recorded", never "None". Read through a tolerance a verdict has one bar,
+  the tolerance's own, and no second "good enough" beside it. Cost is given per right result and per clean run.
+  Still the owner's to decide: whether a fit or not-fit call should wait for more than the 8 attempts it needs
+  today.
 - **Fitness is decided by the fault levels (owner, 2026-11-26).** The bar asks for the right result (every
   decision right, nothing left undone), not for the test's own pass, which also asks for its process. How a model
   got there is judged only by its faults, each at the level the reader gives it, so a fault the reader calls minor

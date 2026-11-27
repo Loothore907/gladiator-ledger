@@ -60,9 +60,14 @@ def test_on_the_refund_queue_the_readers_level_for_one_fault_decides():
     assert skipped["attempts_with"] == deepseek["attempts"] - deepseek["passed"] and skipped["level"] == "minor"
     assert deepseek["fit"] is True and haiku["fit"] is True
     assert v["outcome"] == "use" and v["use"] == HAIKU  # both fit, and head to head Haiku did it better
-    # most of those wins were on process, and the verdict says so
-    won_on_process = [n for n in v["notes"] if "it won them on process" in n and n.startswith("In ")]
-    assert len(won_on_process) == 1 and HAIKU in won_on_process[0]
+    # every scenario had both results right, most of Haiku's wins were on process, and the verdict says so
+    assert any(n.startswith("Both got the right result in all") for n in v["notes"])
+    won = next(n for n in v["notes"] if n.startswith(f"{HAIKU} won "))
+    assert "on process (both got the right result, only it ran clean)" in won
+    assert v["decided_on"]["process"] > v["decided_on"]["efficiency"] and "result" not in v["decided_on"]
+    assert sum(v["decided_on"].values()) == v["pairs"]
+    # read through a tolerance there is one bar, the tolerance's own, and no second "good enough" note beside it
+    assert v["bar"] == v["fit"][HAIKU]["bar"] and not any("bar of" in n or "good enough" in n for n in v["notes"])
     # a reader who will not accept a skipped lookup gets the opposite answer, for both
     strict = cli.verdict(STORE, *ask, profile="personal", overrides={SKIPPED: "unforgivable"}, until=UNTIL)
     assert strict["fit"][DEEPSEEK]["fit"] is False and strict["fit"][HAIKU]["fit"] is False

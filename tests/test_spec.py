@@ -130,10 +130,12 @@ def test_spec_has_a_decision_a_blueprint_and_evidence_from_the_matches_it_rests_
 
     by_hazard = {h["hazard"]: h for h in bp["hazards"]}
     retry = by_hazard["ambiguous timeout (retried without checking)"]
-    assert (retry["tripped"], retry["exposed"], retry["autonomy"]) == (2, 10, "needs a guard")
+    assert (retry["tripped"], retry["exposed"], retry["seen"]) == (2, 10, "needs a guard")
     assert "check whether the action took effect" in retry["guardrail"]
     clean = by_hazard["duplicate effect"]
-    assert clean["autonomy"] == "can run alone" and clean["guardrail"] is None and clean["unforgivable"]
+    # no trips is reported as a count, never as a clearance
+    assert clean["seen"] == "not seen" and clean["guardrail"] is None and clean["unforgivable"]
+    assert "autonomy" not in clean
     assert {h["model"] for h in bp["hazards"]} == {"p:a"}  # guardrails are for the chosen model
 
     assert [e["run"] for e in built["evidence"]] == ["r1"] and built["test_fingerprint"] == "cd" * 32
@@ -148,6 +150,13 @@ def test_spec_has_a_decision_a_blueprint_and_evidence_from_the_matches_it_rests_
     ):
         assert part in text
     assert json.loads(text.split("```json\n")[1].split("\n```")[0])["chosen"] == "p:a"
+    # what the spec may not say: a clearance from a count, a chance printed as "p = 0.0", a missing fact as "None",
+    # or an answer key promised for every record
+    said = text.split("## Machine-readable")[0]
+    for never in ("can run alone", "sign test p", "`None`", "private answer key both published", "Passed ("):
+        assert never not in said
+    assert "Not seen is a count, not a clearance: none in 10 rules out a rate above about 26%" in said
+    assert reports.ANSWER_KEYS in said and "Mistake points are" in said
 
 
 def test_spec_names_no_model_when_the_match_does_not_settle_it(tmp_path, capsys):
@@ -179,13 +188,18 @@ def test_cost_and_evidence_reports_are_written_from_the_same_verdict_as_the_spec
     a = found["models"]["p:a"]
     assert cost.startswith("# Cost breakdown: Refund queue")
     assert f"${a['cost_per_attempt']:.4f}" in cost and f"${a['cost_per_attempt'] * 1000:.2f}" in cost
-    assert f"${a['spent']:.4f} over {a['attempts']} attempts" in cost
+    assert f"${a['spent']:.4f} over {a['attempts']} attempts: {a['right']} ended in the right result" in cost
+    # an attempt is never "failed" for a skipped step: each row says how it ended, in the page's three words
+    assert "(failed)" not in cost and "(passed)" not in cost and "Cost per right result" in cost
+    assert a["cost_per_right"] is None or abs(a["cost_per_right"] * a["right"] - a["spent"]) < 1e-12
     # one row per judged pair, each naming its sealed record
     assert cost.count("| `r1` |") == found["pairs"]
 
     evidence = reports.evidence_markdown(found, "Refund queue")
     assert evidence.startswith("# Evidence report: Refund queue") and found["headline"] in evidence
     assert evidence.count("| `r1` |") == found["pairs"] and "## Sealed records" in evidence
+    assert reports.ANSWER_KEYS in evidence and "sign test p" not in evidence
+    assert {r["on"] for r in found["rounds"]} <= {"result", "process", "efficiency", "no result", "tie"}
     for name in ("p:a", "p:b"):
         for fault in found["fit"][name]["faults"]:
             assert f"| {fault['fault']} | {fault['level']} | {fault['attempts_with']} of" in evidence
@@ -199,3 +213,31 @@ def test_cost_and_evidence_reports_are_written_from_the_same_verdict_as_the_spec
     assert out.read_text(encoding="utf-8").startswith("# Spec:")
     assert (tmp_path / "plan.cost.md").read_text(encoding="utf-8") == cost
     assert (tmp_path / "plan.evidence.md").read_text(encoding="utf-8") == evidence
+
+
+def test_report_wording_says_only_what_the_record_shows():
+    # how often chance gives a split is said in words, never as "p = 0.0"
+    assert reports.chance(0.0) == "less than 0.1%" and reports.chance(0.0312) == "about 3.1%"
+    assert reports.chance(0.34) == "about 34%"
+    # a record that names no engine build says so, and a live race is never said to have its answer key published
+    live = {"run": "r9", "suite": "live-race", "seal_sha256": "ab" * 32, "engine_commit": None}
+    assert reports.record_line(live) == "`r9`, live race, seal `abababababababab`, engine commit not recorded"
+    assert reports.record_kind("small-tier") == "suite match" and reports.record_kind("live-batch") == "live batch"
+    assert "its answer key stays with the runner" in reports.ANSWER_KEYS
+
+    # what a scenario was decided on, for a reader: the engine's "success" is a wrong result or a skipped step
+    def row(winner, a_right, a_clean, b_right, b_clean):
+        return {"winner": winner, "a_right": a_right, "a_passed": a_clean, "b_right": b_right, "b_passed": b_clean}
+
+    assert reports.decided_on(row("p:a", True, True, True, False), "p:a") == "process"
+    assert reports.decided_on(row("p:a", True, True, False, False), "p:a") == "result"
+    assert reports.decided_on(row("p:b", True, True, True, True), "p:a") == "efficiency"
+    assert reports.decided_on(row("p:b", True, False, True, False), "p:a") == "efficiency"
+    assert reports.decided_on(row("p:a", True, False, False, False), "p:a") == "result"
+    assert reports.decided_on(row("p:a", False, False, True, False), "p:a") == "no result"
+    assert reports.decided_on(row("tie", True, True, True, True), "p:a") == "tie"
+    assert reports.decided_text({"efficiency": 2, "process": 5}).startswith("5 on process (")
+
+    # no trips in N attempts is a count: what it rules out shrinks as N grows and is never nothing
+    assert round(spec.ruled_out(72), 3) == 0.041 and round(spec.ruled_out(9), 2) == 0.28
+    assert spec.ruled_out(1000) > 0

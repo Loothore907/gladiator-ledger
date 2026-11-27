@@ -81,7 +81,7 @@ What it means here. Nothing was re-run and no record changed.
 - **What those results were earned on.** On these two workflows, ignoring a change notice often went unpunished. A
   model that ignores such notices will have looked better here than it would on the fixed versions. Ledger does not
   count this obstacle as a hazard of its own (where ignoring a notice did matter, it shows as a wrong decision), so
-  no "can run alone" call in a spec rests on it.
+  no guardrail row in a spec rests on it.
 - **The validation question.** `ledger ask promotion` still reports both versions as validated with no failed
   checks. It reads the validation records as sealed, and those were made under the earlier rule. By the rule
   Gladiator uses now, the two versions are not valid at the standard level.

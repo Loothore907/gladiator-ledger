@@ -3,10 +3,10 @@
 A spec is one readable document in four layers, each a path through the graph:
   1. Decision   which of the two models did this task better, how sure that is, and whether it is good enough.
   2. Blueprint  the task as it was tested (brief, rules, tools), the settings the result was earned under, what a
-                run costs, and a guardrail for every hazard the chosen model tripped on, with which steps it can
-                run alone and which need a guard.
-  3. Cost       what the head-to-head attempts cost: per attempt, per passed attempt, and where the figure
-                comes from (ledger/reports.py, which also writes the full cost and evidence reports).
+                run costs, and a guardrail for every hazard the chosen model tripped on. A hazard it did not
+                trip on is reported as not seen, with what that count can and cannot rule out: never as safe.
+  3. Cost       what the head-to-head attempts cost: per attempt, per right result, per clean run, and where
+                the figure comes from (ledger/reports.py, which also writes the full cost and evidence reports).
   4. Evidence   the sealed match records, the exact test version and the engine commit behind every line.
 
 It claims only what was measured: the task as tested, in a simulated world, under these settings. It is a starting
@@ -55,7 +55,20 @@ def build(rows, verdict: dict) -> dict:
         "version": verdict["version"],
         "decision": {
             k: verdict.get(k)
-            for k in ("verdict", "better", "a", "b", "pairs", "wins", "ties", "p_value", "decided_by", "bar", "notes")
+            for k in (
+                "verdict",
+                "better",
+                "a",
+                "b",
+                "pairs",
+                "wins",
+                "ties",
+                "p_value",
+                "decided_by",
+                "decided_on",
+                "bar",
+                "notes",
+            )
         },
         "models": verdict.get("models") or {},
         "chosen": chosen,
@@ -100,7 +113,8 @@ def build(rows, verdict: dict) -> dict:
                     "exposed": h["exposed"],
                     "tripped": h["tripped"],
                     "unforgivable": h["hazard"] in UNFORGIVABLE,
-                    "autonomy": "can run alone" if h["tripped"] == 0 else "needs a guard",
+                    # never "can run alone": no trips in N attempts is a count, not a clearance
+                    "seen": "needs a guard" if h["tripped"] else "not seen",
                     "guardrail": GUARDRAILS.get(h["hazard"]) if h["tripped"] else None,
                 }
             )
@@ -125,9 +139,37 @@ def build(rows, verdict: dict) -> dict:
     return out
 
 
+def ruled_out(attempts: int) -> float:
+    """What no trips in `attempts` attempts can rule out: the rate above which seeing none would be unlikely (under
+    5%). None in 72 rules out rates above about 4%; none in 9 only rates above about 28%."""
+    return 1 - 0.05 ** (1 / attempts) if attempts else 1.0
+
+
 def _one(values) -> str:
     values = [v for v in (values or []) if v is not None]
     return ", ".join(str(v) for v in values) if values else "not recorded"
+
+
+def guard_notes(spec: dict) -> list[str]:
+    """What the guardrail table does not say by itself, as Markdown lines: what "not seen" is worth, and the faults
+    that count against a model's fitness, which is judged over every attempt it made and not only these scenarios."""
+    hazards = spec["blueprint"]["hazards"]
+    lines = []
+    unseen = sorted({g["exposed"] for g in hazards if not g["tripped"] and g["exposed"]})
+    if unseen:
+        said = "; ".join(f"none in {n} rules out a rate above about {ruled_out(n):.0%}" for n in unseen)
+        lines.append(
+            f"- Not seen is a count, not a clearance: {said}. A hazard that must never happen still needs its "
+            "guard in the real flow."
+        )
+    for model in dict.fromkeys(g["model"] for g in hazards):
+        f = (spec.get("fit") or {}).get(model)
+        if f and f["reasons"]:
+            lines.append(
+                f"- Fitness is judged over every attempt `{model}` made on this task ({f['attempts']}), and counts "
+                f"faults that are not hazards of the world too. Against it at this tolerance: {'; '.join(f['reasons'])}."
+            )
+    return lines
 
 
 def markdown(spec: dict) -> str:
@@ -168,29 +210,30 @@ def markdown(spec: dict) -> str:
     else:
         lines += [headline, ""]
     lines += [
-        (
-            f"- {d['pairs']} judged pairs on the same generated worlds: `{a}` won {d['wins'][a]}, `{b}` won "
-            f"{d['wins'][b]}, {d['ties']} tied (sign test p = {d['p_value']})."
-        ),
-        "- Decided by: "
-        + ", ".join(f"{n} on {rule}" for rule, n in sorted(d["decided_by"].items(), key=lambda x: -x[1]))
-        + ".",
+        f"- {reports.head_to_head(d, a, b)}",
+        *([f"- Decided: {reports.decided_text(d['decided_on'])}."] if d["decided_on"] else []),
         "",
+    ]
+    # Read through a tolerance, fitness is said above, over every attempt each model made: a second "good enough"
+    # here, over the pair's scenarios only, could contradict it.
+    judged = bool(d.get("headline"))
+    lines += [
         (
-            "| Model | Right result | Passed (result and process) | Cost per attempt | Seconds per attempt | "
-            f"Mistakes per attempt | Good enough (bar {d['bar']:.0%}) |"
+            "| Model | Right result | Clean runs (result and process) | Cost per attempt | Seconds per attempt | "
+            "Mistake points per attempt |" + ("" if judged else f" Good enough (bar {d['bar']:.0%}) |")
         ),
-        "|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|" + ("" if judged else "---|"),
     ]
     for name in (a, b):
         s = models[name]
         lines.append(
             f"| `{name}` | {s['right']} of {s['attempts']} | {s['passed']} of {s['attempts']} | "
             f"${s['cost_per_attempt']:.4f} | "
-            f"{s['seconds_per_attempt']:.0f} | {s['mistakes']:.1f} | {'yes' if s['good_enough'] else 'no'} |"
+            f"{s['seconds_per_attempt']:.0f} | {s['mistakes']:.1f} |"
+            + ("" if judged else f" {'yes' if s['good_enough'] else 'no'} |")
         )
     lines.append("")
-    lines += [f"- {n}" for n in d["notes"]] + ([""] if d["notes"] else [])
+    lines += [f"- {n}" for n in d["notes"]] + [f"- {reports.MISTAKE_POINTS}", ""]
 
     bp = spec["blueprint"]
     st = bp["settings"]
@@ -219,21 +262,25 @@ def markdown(spec: dict) -> str:
         lines += [f"The test is modelled on: {bp['modelled_on']}.", ""]
     who = f"`{spec['chosen']}`" if spec["chosen"] else "each model"
     lines += [
-        "### Guardrails and autonomy",
+        "### Guardrails",
         "",
-        f"Each hazard this task can raise, how {who} handled it, and what to build where it tripped.",
+        (
+            f"Each hazard this task can raise, how {who} handled it in the {d['pairs']} head-to-head scenarios, and "
+            "what to build where it tripped."
+        ),
         "",
-        "| Model | Hazard | Tripped | Autonomy | Build this |",
+        "| Model | Hazard | Tripped | Reading | Build this |",
         "|---|---|---|---|---|",
     ]
     for g in bp["hazards"]:
         flag = " (unforgivable)" if g["unforgivable"] else ""
         lines.append(
-            f"| `{g['model']}` | {g['hazard']}{flag} | {g['tripped']} of {g['exposed']} | {g['autonomy']} | "
+            f"| `{g['model']}` | {g['hazard']}{flag} | {g['tripped']} of {g['exposed']} | {g['seen']} | "
             f"{g['guardrail'] or '-'} |"
         )
+    guarded = guard_notes(spec)
+    lines += ["", *guarded, *([""] if guarded else [])]
     lines += [
-        "",
         "Unforgivable by default for a tool-using workflow: " + ", ".join(bp["unforgivable_defaults"]) + ". "
         "Change the list to fit your flow.",
         "",
@@ -245,13 +292,12 @@ def markdown(spec: dict) -> str:
         "## 4. Evidence",
         "",
         f"- Test version: `{spec['version']}` (package fingerprint `{spec.get('test_fingerprint')}`).",
-        "- Sealed match records (public half and private answer key both published; check with `ledger verify`):",
+        "- Sealed match records:",
     ]
+    lines += [f"  - {reports.record_line(e)}" for e in spec["evidence"]]
     lines += [
-        f"  - `{e['run']}`, seal `{str(e['seal_sha256'])[:16]}`, engine commit `{str(e['engine_commit'])[:7]}`"
-        for e in spec["evidence"]
-    ]
-    lines += [
+        "",
+        reports.ANSWER_KEYS,
         "",
         (
             "This spec claims only what was measured: this task, in a simulated world, under these settings. Treat it as "

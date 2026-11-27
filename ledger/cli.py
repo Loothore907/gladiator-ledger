@@ -492,7 +492,8 @@ def _side(pairs: list[dict], side: str) -> dict:
         "right": right,
         "right_rate": right / n,
         "cost_per_attempt": spent / n,
-        # what a successful result really costs, failures included (None when nothing passed)
+        # what one right result costs, wrong ones included; and what one clean run (the test's own pass) costs
+        "cost_per_right": spent / right if right else None,
         "cost_per_pass": spent / passed if passed else None,
         "spent": spent,
         "cost_basis": sorted({str(p[f"{side}_basis"]) for p in pairs}),
@@ -513,7 +514,7 @@ def verdict(
     b: str,
     suite: str | None = None,
     all_versions: bool = False,
-    bar: float = GOOD_ENOUGH,
+    bar: float | None = None,
     min_pairs: int = MIN_PAIRS,
     profile: str | None = None,
     overrides: dict | None = None,
@@ -523,7 +524,10 @@ def verdict(
     """A task claim: which of two models did THIS task better when they played the same worlds, how sure that is,
     and whether either is good enough. Only the pairs where these two met count. Never a claim about a model in
     general, and no winner is named on thin evidence or a level score. `checks`: the reader's own process
-    questions, counted from the steps and judged at the reader's levels (see fitness)."""
+    questions, counted from the steps and judged at the reader's levels (see fitness). One verdict has one bar:
+    `bar` when the reader gives one, else the tolerance's own, else GOOD_ENOUGH when no tolerance is read."""
+    asked_bar = bar
+    bar = asked_bar if asked_bar is not None else policy.PROFILES[profile]["bar"] if profile else GOOD_ENOUGH
     test = test_id(workflow)
     version = None if all_versions else current_version(store, test)
     params = {"test_id": test, "a": a, "b": b, "suite": suite, "version_key": version, "until": until}
@@ -570,22 +574,35 @@ def verdict(
             )
     for s in stats.values():
         s["good_enough"] = s["right_rate"] >= bar
-    if better and not stats[better]["good_enough"]:
-        notes.append(
-            f"{better} did better here, but got the right result in only {stats[better]['right_rate']:.0%} of "
-            f"attempts (bar {bar:.0%}): better than the other one is not the same as good enough."
-        )
-    if not any(s["good_enough"] for s in stats.values()):
-        notes.append(f"Neither model reaches the bar of {bar:.0%} right results on this task.")
-    # a scenario won by passing where the other did not, although both got the right result, was won on process
-    for model, side, other in ((a, "a", "b"), (b, "b", "a")):
-        on_process = sum(1 for p in pairs if p["winner"] == model and p["rule"] == "success" and p[f"{other}_right"])
-        won = wins_a if side == "a" else wins_b
-        if on_process:
+    # Read through a tolerance, the fitness lines say who clears the bar, over every attempt each model made:
+    # a second answer here, over the pair's scenarios only, could contradict them.
+    if not profile:
+        if better and not stats[better]["good_enough"]:
             notes.append(
-                f"In {on_process} of the {won} scenarios {model} won, both got the right result: it won them on "
-                "process, by following the steps the test asks for where the other did not."
+                f"{better} did better here, but got the right result in only {stats[better]['right_rate']:.0%} of "
+                f"attempts (bar {bar:.0%}): better than the other one is not the same as good enough."
             )
+        if not any(s["good_enough"] for s in stats.values()):
+            notes.append(f"Neither model reaches the bar of {bar:.0%} right results on this task.")
+    # What the scenarios were decided on, in a reader's words (reports.decided_on): a scenario can be won with
+    # both results right, and the count says how many were.
+    for p in pairs:
+        p["on"] = reports.decided_on(p, a)
+    decided_on = {}
+    for p in pairs:
+        decided_on[p["on"]] = decided_on.get(p["on"], 0) + 1
+    if pairs and all(p["a_right"] and p["b_right"] for p in pairs):
+        notes.append(
+            f"Both got the right result in all {len(pairs)} scenarios, so every one was decided on process or "
+            "efficiency, never on a wrong result."
+        )
+    for model, won in ((a, wins_a), (b, wins_b)):
+        if won:
+            mine = {}
+            for p in pairs:
+                if p["winner"] == model:
+                    mine[p["on"]] = mine.get(p["on"], 0) + 1
+            notes.append(f"{model} won {won}: {reports.decided_text(mine, reports.WON_ON)}.")
     efforts = {tuple(s["effort"]) for s in stats.values()}
     if len(efforts) > 1 or any(len(e) > 1 for e in efforts):
         notes.append("The two models did not play under one identical effort setting in every pair.")
@@ -598,7 +615,9 @@ def verdict(
     if profile:
         # Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
         version_key = max(p["version"] for p in pairs)
-        everyone = fitness(store, test, version_key, conditions, suite, profile, overrides, until=until, checks=checks)
+        everyone = fitness(
+            store, test, version_key, conditions, suite, profile, overrides, asked_bar, until=until, checks=checks
+        )
         out["profile"] = profile
         if checks and checks.get("levels"):
             out["own_checks"] = {"levels": checks["levels"], "needs": checks.get("kinds")}
@@ -609,7 +628,8 @@ def verdict(
         out["rounds"] = [
             {
                 "winner": p["winner"],
-                "rule": p["rule"],
+                "rule": p["rule"],  # the engine's own rule name
+                "on": p["on"],  # what it was decided on, for a reader (reports.decided_on)
                 "a_passed": p["a_passed"],
                 "b_passed": p["b_passed"],
                 # the right result (every decision right, nothing left undone), whether or not the test's own
@@ -648,6 +668,7 @@ def verdict(
         ties=ties,
         p_value=round(p_value, 4),
         decided_by=decided_by,
+        decided_on=decided_on,
         models=stats,
         hazards=[h for h in hazards if h["tripped"]],
         evidence=sorted(runs.values(), key=lambda r: r["run"]),
@@ -701,23 +722,27 @@ def print_verdict(v: dict) -> None:
             if not others:
                 print("      none: no tested model is fit for this task under this tolerance")
     print(f"\n{'Head to head' if v.get('headline') else 'Verdict'}: {line}")
-    print(
-        f"  {v['pairs']} judged pairs on the same generated worlds: {a} won {v['wins'][a]}, {b} won {v['wins'][b]}, "
-        f"{v['ties']} tied (sign test p = {v['p_value']})"
-    )
-    how = ", ".join(f"{n} on {rule}" for rule, n in sorted(v["decided_by"].items(), key=lambda kv: -kv[1]))
-    print(f"  decided: {how}")
+    print(f"  {reports.head_to_head(v, a, b, tick='')}")
+    if v["decided_on"]:
+        print(f"  decided: {reports.decided_text(v['decided_on'])}")
     width = max(len(a), len(b), 5)
-    print(f"\n  {'model':{width}}  right   passed   $/attempt  sec/attempt  mistakes  good enough (bar {v['bar']:.0%})")
+    # read through a tolerance, fitness is said above, over every attempt: no second "good enough" here
+    judged = bool(v.get("headline"))
+    print(
+        f"\n  {'model':{width}}  right   clean    $/attempt  sec/attempt  mistake points"
+        + ("" if judged else f"  good enough (bar {v['bar']:.0%})")
+    )
     for name in (a, b):
         s = v["models"][name]
         print(
             f"  {name:{width}}  {s['right']:>2}/{s['attempts']:<3}  {s['passed']:>2}/{s['attempts']:<3}  "
             f"{money(s['cost_per_attempt']):>9}  "
-            f"{s['seconds_per_attempt']:11.0f}  {s['mistakes']:8.1f}  {'yes' if s['good_enough'] else 'no'}"
+            f"{s['seconds_per_attempt']:11.0f}  {s['mistakes']:14.1f}"
+            + ("" if judged else f"  {'yes' if s['good_enough'] else 'no'}")
         )
+    print("  right: the right result. clean: the right result and every step the test asks for (the test's own pass).")
     if v["hazards"]:
-        print("\nWhere they tripped on this task:")
+        print("\nWhere they tripped, in these head-to-head scenarios:")
         for h in v["hazards"]:
             print(f"  - {h['model']}: {h['hazard']} in {h['tripped']} of {h['exposed']} attempts")
     if v["notes"]:
@@ -726,7 +751,10 @@ def print_verdict(v: dict) -> None:
             print(f"  - {n}")
     print("\nEvidence (sealed match records):")
     for e in v["evidence"]:
-        print(f"  - {e['run']}  seal {str(e['seal_sha256'])[:12]}  engine {str(e['engine_commit'])[:7]}")
+        engine = str(e["engine_commit"])[:7] if e["engine_commit"] else "not recorded"
+        print(
+            f"  - {e['run']}  {reports.record_kind(e.get('suite'))}  seal {str(e['seal_sha256'])[:12]}  engine {engine}"
+        )
 
 
 def step_scope(store: str, workflow: str, a=None, b=None, suite=None, until=None) -> dict | None:
@@ -907,16 +935,19 @@ def print_recommendation(r: dict) -> None:
         print(f"No winner named: {r['verdict']}")
     if r.get("models"):
         width = max(38, *(len(m["model"]) for m in r["models"]))
-        print(f"\n  {'model':{width}} pairs  won  ties  passed  $/attempt  $/clean  mistakes")
+        print(f"\n  {'model':{width}} pairs  won  ties   clean  $/attempt  $/clean  mistake points")
         for m in r["models"]:
             flag = "" if m["within_budget"] else "  (over budget)"
             print(
                 f"  {m['model']:{width}} {m['attempts']:5} {m['pair_wins']:4} {m['ties']:5} {m['passed']:7}  "
-                f"{money(m['cost_per_attempt']):>9} {money(m['cost_per_clean']):>8} {m['mistakes']:9.1f}{flag}"
+                f"{money(m['cost_per_attempt']):>9} {money(m['cost_per_clean']):>8} {m['mistakes']:15.1f}{flag}"
             )
     if r.get("head_to_head"):
         h = r["head_to_head"]
-        print(f"\nHead to head vs {h['vs']}: {h['wins']}-{h['losses']} (sign test p = {h['p_value']})")
+        split = f"{h['wins']}-{h['losses']}"
+        if h["wins"] != h["losses"]:
+            split += f". Between two equally good models a split this lopsided would happen {reports.chance(h['p_value'])} of the time"
+        print(f"\nHead to head vs {h['vs']}: {split}")
     if r.get("caveats"):
         print("\nCaveats:")
         for c in r["caveats"]:
@@ -1005,7 +1036,10 @@ def main(argv=None):
     v.add_argument("--until", help=UNTIL_HELP)
     v.add_argument("--all-versions", action="store_true", help="also count pairs on older versions of the test")
     v.add_argument(
-        "--bar", type=float, default=GOOD_ENOUGH, help="share of attempts with the right result that is good enough"
+        "--bar",
+        type=float,
+        default=None,
+        help="share of attempts with the right result that is good enough (default: the tolerance's own bar)",
     )
     v.add_argument("--min-pairs", type=int, default=MIN_PAIRS)
     v.add_argument(
@@ -1101,7 +1135,10 @@ def main(argv=None):
     sp.add_argument("--suite", help="only pairs played in this suite")
     sp.add_argument("--until", help=UNTIL_HELP)
     sp.add_argument(
-        "--bar", type=float, default=GOOD_ENOUGH, help="share of attempts with the right result that is good enough"
+        "--bar",
+        type=float,
+        default=None,
+        help="share of attempts with the right result that is good enough (default: the tolerance's own bar)",
     )
     sp.add_argument("--out", type=Path, help="write the spec to this file (Markdown) instead of printing it")
     sp.add_argument("--json", action="store_true", help="print the spec as JSON only")

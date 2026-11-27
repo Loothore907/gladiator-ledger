@@ -199,7 +199,7 @@ def build(store: str) -> MCPServer:
         model_b: str,
         tolerance: str = policy.DEFAULT_PROFILE,
         own_levels: dict[str, str] | None = None,
-        good_enough_bar: float = cli.GOOD_ENOUGH,
+        good_enough_bar: float | None = None,
         own_checks: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Fit first, then head to head. `headline` is the answer to act on and `use` the model to use (null when
@@ -231,11 +231,11 @@ def build(store: str) -> MCPServer:
         model_b: str,
         tolerance: str = policy.DEFAULT_PROFILE,
         own_levels: dict[str, str] | None = None,
-        good_enough_bar: float = cli.GOOD_ENOUGH,
+        good_enough_bar: float | None = None,
         report: str = "spec",
     ) -> str:
         """One Markdown document in four layers: the decision, the blueprint (the job and rules as tested, the
-        tools, the settings the result holds for, a guardrail and an autonomy call for each hazard), the cost
+        tools, the settings the result holds for, a guardrail for each hazard it tripped on), the cost
         and the evidence. Ends with the same content as JSON. `report` picks the document: "spec" (default),
         "cost" (the cost breakdown, scenario by scenario), "evidence" (fitness with every fault, every
         scenario and its sealed record) or "all" (the three, one after another)."""
