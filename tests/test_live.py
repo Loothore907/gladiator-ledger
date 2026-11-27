@@ -9,6 +9,7 @@ enough for the page's own graph to become that same graph.
 import json
 import shutil
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -368,3 +369,90 @@ def test_the_service_keeps_the_answer_key_a_runner_hands_out_and_only_the_one_th
         rec.close()
     finally:
         runner.close()
+
+
+def test_one_command_serves_the_page_beside_the_record_and_prints_the_address_that_joins_them(tmp_path):
+    """`ledger serve --runner <address> --page` is the second of the two commands for a live race on a person's own
+    machine: the record service, the page beside it, and one address to open. Run here as that person runs it."""
+    import os
+    import subprocess
+    import sys
+
+    site = DATA.parent / "site"
+    data = data_folder(tmp_path / "data", SUITE)
+    runner = Runner()
+    asked = [
+        *(sys.executable, "-m", "ledger.cli", "serve", "--runner", runner.url),
+        *("--state", str(tmp_path / "state"), "--data", str(data), "--site", str(site)),
+        *("--port", "0", "--page", "0"),
+    ]
+    service = subprocess.Popen(
+        asked,
+        cwd=DATA.parent,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        said = []
+        for line in service.stdout:
+            said.append(line)
+            if line.strip().startswith("http://localhost:"):
+                break
+        address = said[-1].strip() if said else ""
+        assert address.startswith("http://localhost:"), "no address to open was printed:\n" + "".join(said)
+        page_at, _, query = address.partition("/?")
+        named = dict(part.split("=", 1) for part in query.split("&"))
+        # the address names this runner and this record, so the page a clone serves reaches no hosted one
+        assert named["runner"] == runner.url and named["record"].startswith("http://127.0.0.1:")
+        # the page itself, and what it cannot do without: its script and Relate's WebAssembly build
+        with urllib.request.urlopen(f"{page_at}/", timeout=20) as response:
+            assert response.status == 200 and "Gladiator Ledger" in response.read().decode()
+        wasm = next(p for p in sorted((site / "vendor").rglob("*.wasm")))
+        with urllib.request.urlopen(f"{page_at}/{wasm.relative_to(site).as_posix()}", timeout=20) as response:
+            assert response.headers["Content-Type"] == "application/wasm"
+        # nothing outside the page's folder is served
+        with pytest.raises(urllib.error.HTTPError) as outside:
+            urllib.request.urlopen(f"{page_at}/../pyproject.toml", timeout=20)
+        assert outside.value.code == 404
+        # the record lets that page read it, by either name this machine goes by, and no other page
+        for origin in (page_at, page_at.replace("localhost", "127.0.0.1")):
+            status, health, headers = get(f"{named['record']}/health", origin=origin)
+            assert status == 200 and health["records"] == 2 and health["runner"] == runner.url
+            assert headers.get("Access-Control-Allow-Origin") == origin
+        assert "Access-Control-Allow-Origin" not in get(f"{named['record']}/health", origin="https://other.example")[2]
+        # a race filed by the runner is taken in, as on a hosted record (the service looks at its runner again
+        # a couple of seconds after its last look, not sooner)
+        runner.file(LIVE[-1])
+        took, tries = [], 0
+        while not took and tries < 30:
+            took = get(f"{named['record']}/sync", method="POST")[1]["took_in"]
+            tries += 1
+            if not took:
+                time.sleep(0.5)
+        assert took == [LIVE[-1]]
+        assert LIVE[-1] in [r["run_id"] for r in get(f"{named['record']}/runs")[1]["runs"]]
+    finally:
+        service.terminate()
+        service.wait(timeout=30)
+        runner.close()
+
+
+def test_the_page_is_not_served_from_a_folder_that_has_none(tmp_path):
+    with pytest.raises(SystemExit) as stopped:
+        live.page_server(tmp_path, 0)
+    assert "index.html" in str(stopped.value)
+
+
+def test_a_port_that_is_taken_is_said_in_plain_words_with_what_to_do(tmp_path, monkeypatch):
+    (tmp_path / "index.html").write_text("<title>a page</title>", encoding="utf-8")
+
+    def taken(*_):  # what the system says when something else already listens on the port
+        raise OSError(98, "Address already in use")
+
+    monkeypatch.setattr(live, "ThreadingHTTPServer", taken)
+    with pytest.raises(SystemExit) as stopped:
+        live.page_server(tmp_path, 8000)
+    said = str(stopped.value)
+    assert "port 8000" in said and "Address already in use" in said and "--page 8001" in said

@@ -84,6 +84,9 @@ function fakeRunner(models, extra) {
     if (req.url === '/options') {
       const tasks = ['refund-queue', 'access-review', 'incident-triage', 'inventory-transfer'].map((id) => ({ id, name: id, levels: ['easy', 'standard'] }));
       const budgets = [{ provider: 'openrouter', limit_usd: 30, left_usd: 30 - (3 - races) * 0.0055 }, { provider: 'google', limit_usd: 20, left_usd: 0.1 }];
+      // `server.own`: a runner on a person's own machine with their own key, as `gladiator serve` starts one with
+      // no options. It asks for no sign-in, and has a cap on one race and one limit on everything it may spend.
+      if (server.own) return json(res, 200, { tasks, models: [...models, extra], models_out: [], models_unpriced: [], budgets: [], total: { limit_usd: 5, left_usd: 5 - (server.ownSpent || 0) }, cap_usd_per_race: 0.25, profiles: ['balanced', 'budget', 'latency'], batches: [], batch_pass_rate: 0.8, needs_code: false });
       return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }], batch_pass_rate: 0.8 }) });
     }
     if (req.url === '/races') return json(res, 200, { races: run, batches });
@@ -101,7 +104,7 @@ function fakeRunner(models, extra) {
         return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
       }
       server.asked = ask;
-      if (ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
+      if (!server.own && ask.token !== 'session-1') return json(res, 403, { error: 'You are not signed in for live races, or the sign-in has expired.' });
       if (server.busy) return json(res, 409, { error: 'The runner is busy with another race or a test being checked. Try again in a minute.' });
       if (ask.runs > 1) {
         // a batch: each attempt as it ends, then the facts of the whole batch. Side A fails its third attempt.
@@ -125,7 +128,19 @@ function fakeRunner(models, extra) {
         send('batch', { batch });
         return res.end();
       }
+      if (server.refuse) {
+        // the provider refuses the key this runner holds: neither attempt is run, nothing is spent, and the
+        // race is still sealed and filed, as the real runner does
+        res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
+        const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
+        send('match_start', { models: { A: ask.a, B: ask.b } });
+        const none = { passed: false, cost_usd: 0, calls: 0, wall_s: 0, termination: 'not_run', error: server.refuse, grade_details: {} };
+        for (const side of ['A', 'B']) send('attempt_end', { side, passed: false, termination: 'not_run', error: server.refuse });
+        send('record', { record: { sha256: '0123456789abcdef', body: { run_id: 'live-refused-1', live: true, verdict: { winner: null }, contestants: { A: { results: [none] }, B: { results: [none] } } } }, operator: {} });
+        return res.end();
+      }
       races -= 1;
+      if (server.own) server.ownSpent = (server.ownSpent || 0) + 0.0055; // what this race cost, off its one limit
       run.push({ run_id: `live-check-${run.length + 1}`, seal: 'abcdef0123456789', task: ask.task, a: ask.a, b: ask.b, winner: ask.a, a_passed: true, b_passed: false, a_cost_usd: 0.0021, b_cost_usd: 0.0034, ...(server.old ? {} : { a_details: { items: 1, correct: 1, wrong: 0, mistakes: {}, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } }, b_details: { items: 1, correct: 0, wrong: 1, mistakes: { 'ALR-1': 'close->escalate' }, outcome_tools: { close: 'close_alert', escalate: 'escalate_alert' } }, a_termination: 'session_ended', b_termination: 'no_action', a_seconds: 6, b_seconds: 5 }) });
       res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8' });
       const send = (kind, value) => res.write(`event: ${kind}\ndata: ${JSON.stringify({ event: kind, ...value })}\n\n`);
@@ -828,6 +843,24 @@ async function main() {
         const who = query ? 'with a runner but no invitation' : 'with no runner';
         await live.waitForSelector('#live-soon', { timeout: 5000 }).catch(() => problems.push(`${who}, the page does not say live races are not open yet`));
         if (await live.locator('#live-go, #live input').count()) problems.push(`${who}, the page still offers a live race or asks for a code`);
+        // It says where a live race can be run: on the visitor's own machine with their own key, with a link to
+        // the commands. Nobody is told to ask for a code, and a sign-in is named only where there is one.
+        const closed = await live.locator('#live-soon').innerText();
+        if (!closed.includes('your own API key')) problems.push(`${who}, the page does not say a live race runs with the visitor's own key: ${JSON.stringify(closed)}`);
+        if (/judges?\b/i.test(closed) || /judges?\b/i.test(await live.locator('#foot-view').innerText())) problems.push(`${who}, the page still says live races are for judges`);
+        const link = await live.locator('#live-soon a').getAttribute('href').catch(() => null);
+        if (!link || !link.endsWith('#race-two-models-live-with-your-own-api-key')) problems.push(`${who}, the page does not link to the README's own-key commands: ${link}`);
+        else {
+          // the link is to a heading that is really in the README
+          const heading = link.split('#')[1];
+          const headings = fs.readFileSync(path.join(path.dirname(ROOT), 'README.md'), 'utf8').split('\n').filter((line) => /^#+ /.test(line)).map((line) => line.replace(/^#+ /, '').toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/ /g, '-'));
+          if (!headings.includes(heading)) problems.push(`the page links to a README heading that is not there: #${heading}`);
+        }
+        // either way a runner is named for this page (in its address, or the one it was published with), and
+        // that one is by invitation: the sign-in button is there, and the note says what it is for
+        if (!closed.includes('by invitation')) problems.push(`${who}, the page does not say the hosted runner is by invitation`);
+        if (!(await live.locator('#judge-open').isVisible())) problems.push(`${who}, the page offers no sign-in button for the runner it names`);
+        else if (!(await live.locator('#judge-open').innerText()).includes('by invitation')) problems.push(`${who}, the sign-in button does not say it is by invitation`);
         await live.close();
       }
       if ((runner.signins || []).length) problems.push('a visitor with no invitation was sent to the runner to sign in');
@@ -1129,6 +1162,56 @@ async function main() {
         if (!(await first.evaluate(() => window.ledgerDemo.lastLiveReport)).includes('no match between these two')) problems.push('the live report of a first race does not say there was no record');
         await first.close();
         runner.more = [];
+      }
+
+      // A runner on the visitor's own machine, with their own key: it asks for no sign-in, so the race button is
+      // there with nothing typed, the page says whose runner it is using, and what a race can cost is on screen
+      // before it is pressed.
+      {
+        runner.own = true;
+        const signinsBefore = (runner.signins || []).length;
+        const own = await (await browser.newContext()).newPage();
+        own.on('pageerror', (e) => problems.push(`own-runner page error: ${e.message}`));
+        await own.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+        await own.waitForFunction(() => document.getElementById('live-banner').innerText.includes('Live races are on'), null, { timeout: 15000 }).catch(() => problems.push('a runner that asks for no sign-in is not announced at the top of the page'));
+        const banner = await own.locator('#live-banner').innerText();
+        if (!banner.includes(runnerUrl) || !banner.includes('no sign-in')) problems.push(`the banner does not say which runner the page is using, or that it needs no sign-in: ${JSON.stringify(banner)}`);
+        if (banner.includes('signed in')) problems.push('a visitor using their own runner is told they are signed in');
+        if (await own.locator('#judge-open').isVisible()) problems.push('a sign-in button is shown for a runner that asks for none');
+        if (await own.locator('#judge-out').count()) problems.push('a sign-out button is shown for a runner that asks for no sign-in');
+        await pickPair(own);
+        await own.waitForSelector('#live-go', { timeout: 5000 }).catch(() => problems.push('a runner that asks for no sign-in did not open live races'));
+        const limits = await own.locator('#live-budget').innerText();
+        for (const part of ['One race can cost $0.25 at most', '$5.00 more at most, of $5.00 in all']) {
+          if (!limits.includes(part)) problems.push(`the run box of an own runner lacks ${JSON.stringify(part)}: ${JSON.stringify(limits)}`);
+        }
+        const print = await own.locator('#foot-view').innerText();
+        for (const part of ['asks for no sign-in', 'real money', 'the API key that runner holds']) if (!print.includes(part)) problems.push(`the small print of a page using an own runner lacks ${JSON.stringify(part)}`);
+        if (print.includes('your sign-in')) problems.push('the small print says a sign-in is sent to a runner that asks for none');
+        await own.locator('#live-go').click();
+        await own.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('a race on an own runner never reported a result'));
+        if (runner.asked.token || runner.asked.invite || runner.asked.code) problems.push(`a race on a runner that asks for no sign-in carried one: ${JSON.stringify(runner.asked)}`);
+        if ((runner.signins || []).length !== signinsBefore) problems.push('the page tried to sign in to a runner that asks for no sign-in');
+        // what is left has moved with the race
+        await own.waitForFunction(() => document.getElementById('live-budget').innerText.includes('$4.99 more at most'), null, { timeout: 8000 }).catch(() => problems.push('what the own runner has left to spend was not read again after the race'));
+        // The provider refuses the key (mistyped, no credit, or not allowed this model): neither model is run.
+        // That is not a result. The page says the race was not played, gives the provider's words, says nothing
+        // is counted, and on an own runner says what to check. It never words it as two wrong results.
+        runner.refuse = "anthropic AuthenticationError: Error code: 401 - {'type': 'error', 'error': {'type': 'authentication_error', 'message': 'invalid x-api-key'}}";
+        await own.locator('#live-go').click();
+        await own.waitForSelector('#live-outcome[data-kind="not-judged"]', { timeout: 10000 }).catch(() => problems.push('a race the provider refused is not shown as a race that could not be judged'));
+        const refusedBox = await own.locator('#live-outcome').innerText().catch(() => '');
+        for (const part of ['Not played', 'was not run', 'invalid x-api-key', 'counts for nothing', '.env']) {
+          if (!refusedBox.includes(part)) problems.push(`the box of a refused race lacks ${JSON.stringify(part)}: ${JSON.stringify(refusedBox.slice(0, 400))}`);
+        }
+        for (const part of ['right result', 'unusual for it', 'won']) if (refusedBox.includes(part)) problems.push(`a race that was not played is worded as a result (${JSON.stringify(part)})`);
+        const refusedSaid = await own.locator('#live-result').innerText();
+        if (!refusedSaid.includes('could not be judged')) problems.push(`the line under a refused race does not say it could not be judged: ${JSON.stringify(refusedSaid)}`);
+        if (/other conditions|had no winner/.test(refusedSaid)) problems.push(`the line under a refused race gives another reason: ${JSON.stringify(refusedSaid)}`);
+        if ((await own.locator('#live-stage .lane .now').allInnerTexts()).filter((t) => t.includes('invalid x-api-key')).length !== 2) problems.push('the lanes of a refused race do not both show what the provider said');
+        runner.refuse = null;
+        await own.context().close();
+        runner.own = false;
       }
 
       // An invitation the runner does not accept is said so at the top: never a silent fall back to the public page.

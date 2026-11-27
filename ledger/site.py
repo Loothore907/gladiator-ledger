@@ -141,6 +141,9 @@ def export(data: Path, store: str, out: Path) -> dict:
                 # grader counter -> fault name, so the page can name the faults of a live race the same way
                 "fault_counters": {**gladiator.HAZARDS, **gladiator.DECISION_FAULTS},
                 "ending_faults": gladiator.ENDING_FAULTS,
+                # endings outside the model's control: the pair is kept and never judged, so a page showing a
+                # live race must not word one as a result
+                "not_judged": sorted(gladiator.EXCLUDED),
                 "policy": {
                     "levels": list(policy.LEVELS),
                     "profiles": policy.PROFILES,

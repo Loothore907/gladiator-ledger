@@ -19,10 +19,22 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   disclosure statement. `ledger/scoring.py` is the one copied file so far.
 - **Ledger reads Gladiator's output and never runs a match itself.** It may *request* one from a Gladiator runner
   (owner, 2026-11-23, for the live demo): the runner is Gladiator's, holds the keys and enforces the caps; Ledger
-  shows the race and files the sealed record it gets back. Live runs are open to the hackathon judges only for now
-  (signed in once: the page's "Judge sign-in" button and an access code, or an invitation link that carries it;
-  owner, 2026-11-24: nobody should have to build an address by hand. No code per run, and no run button for
-  anyone else) and the public page says so ("coming soon" for everyone else). A live result is labelled live
+  shows the race and files the sealed record it gets back. **Judges get no access code (the hackathon manager,
+  on the contest forum, 2026-11-27, answering the owner's question: "Please don't use a shared access code.
+  Judges will supply their own API keys for any feature that calls a paid model", read from a config or
+  environment variable, with the README saying which provider and model and where the key goes; the video must
+  show a live run working).** So a live race is run by whoever wants one, on their own machine with their own
+  key: `gladiator serve` in a gladiator-core checkout (one provider's key in `.env` is enough) and
+  `ledger serve --runner <address> --page` here, which serves the page beside the live record and prints the
+  one address to open (README, "Race two models live, with your own API key"). Such a runner asks for no
+  sign-in, and the page says which runner it is using. A race in which a model was never run (its provider
+  refused the key, the account had no credit, the key may not use that model) or was cut off from outside is
+  said as that, with the provider's words: "not played" or "could not be judged", counted for nothing, and
+  never worded as a wrong result (`notJudged` in `site/app.js`, from `EXCLUDED` in
+  `ledger/bridges/gladiator.py`). The hosted runner is by invitation (signed in once: the
+  page's "Sign in (by invitation)" button and an access code, or an invitation link that carries it; owner,
+  2026-11-24: nobody should have to build an address by hand. No code per run, and no run button for anyone
+  else), and the public page says where a live race can be run instead. A live result is labelled live
   and shown beside the record at once. **Live races are real evidence (owner, 2026-11-25: a report that never
   moves however many races are run is a static report):** they are sealed by the same engine on the same locked
   tests, so they join the record through `ledger import --runner <address>` (each with its answer key, where

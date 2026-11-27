@@ -31,7 +31,8 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from functools import partial
+from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import relate
@@ -451,16 +452,73 @@ def handler_for(live: LiveRecord, origins: set[str]):
     return Handler
 
 
-def serve(state: Path, data: Path | None, runner: str | None, host: str, port: int, origins: list[str]) -> None:
-    """Run the service until it is stopped."""
+def page_server(site: Path, port: int) -> ThreadingHTTPServer:
+    """The page's own folder, served to this machine only: the static files of `site/`, exactly what
+    `python -m http.server --directory site` would serve. It reads nothing else and takes nothing in."""
+    if not (site / "index.html").is_file():
+        raise SystemExit(f"No page to serve: {site / 'index.html'} is not there (run this from a clone of Ledger).")
+
+    class Page(SimpleHTTPRequestHandler):
+        def log_message(self, *_):  # the page's own files, hundreds of them: nothing worth a line each
+            return
+
+    try:
+        return ThreadingHTTPServer(("127.0.0.1", port), partial(Page, directory=str(site)))
+    except OSError as error:  # most often: something else on this machine already listens there
+        raise SystemExit(
+            f"The page cannot be served on port {port} of this machine ({error.strerror or error}). "
+            f"Give another one: --page {port + 1}"
+        ) from None
+
+
+def page_address(page_port: int, record_port: int, runner: str | None) -> str:
+    """The address that opens the page reading this record, and racing on this runner when there is one. Each is
+    named in the address itself, so the page a clone serves never reaches a hosted record or runner."""
+    asks = ([("runner", runner.rstrip("/"))] if runner else []) + [("record", f"http://127.0.0.1:{record_port}")]
+    return f"http://localhost:{page_port}/?" + "&".join(f"{name}={value}" for name, value in asks)
+
+
+def serve(
+    state: Path,
+    data: Path | None,
+    runner: str | None,
+    host: str,
+    port: int,
+    origins: list[str],
+    page_port: int | None = None,
+    site: Path = Path("site"),
+) -> None:
+    """Run the service until it is stopped. With `page_port`, the page is served beside it (this machine only)
+    and may read it, and the address to open is printed."""
+    page = page_server(site, page_port) if page_port is not None else None
+    allowed = set(origins)
+    if page:
+        at = page.server_address[1]
+        allowed |= {f"http://localhost:{at}", f"http://127.0.0.1:{at}"}
+        print("[live] loading the record with every step (the first start takes about a minute)", flush=True)
     live = LiveRecord(state, data, runner)
-    live.sync(fresh=True)
-    server = ThreadingHTTPServer((host, port), handler_for(live, set(origins)))
+    looked = live.sync(fresh=True)
+    server = ThreadingHTTPServer((host, port), handler_for(live, allowed))
     print(f"[live] listening on {host}:{server.server_address[1]}; runner: {runner or 'none'}", flush=True)
+    if page:
+        threading.Thread(target=page.serve_forever, daemon=True).start()
+        if runner and looked.get("problem"):
+            print(
+                f"[live] the runner at {runner} is not answering yet ({looked['problem']}). Start it, then reload "
+                "the page: the record is asked for again each time.",
+                flush=True,
+            )
+        print(
+            f"\nOpen this in your browser:\n\n    {page_address(page.server_address[1], server.server_address[1], runner)}\n",
+            flush=True,
+        )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        if page:
+            page.shutdown()
+            page.server_close()
         live.close()

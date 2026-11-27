@@ -29,6 +29,74 @@ uv run ledger verify                                                    # every 
 **Through your own AI assistant.** `uv run ledger mcp` serves the same graph, read-only
 ([docs/ASSISTANT.md](docs/ASSISTANT.md)).
 
+**A live race, with your own API key.** The one part that calls a paid model:
+[Race two models live](#race-two-models-live-with-your-own-api-key), just below. Everything else here needs no key.
+
+## Race two models live, with your own API key
+Everything above reads finished matches. This races two models now, on a scenario generated that minute, and adds
+the result to the record. It is the only part of the entry that calls a paid model API, so it runs on your own
+machine with your own key. Two terminals, two commands and one address.
+
+**1. The race runner, with your key.** The runner is [Gladiator](https://github.com/Loothore907/gladiator-core),
+the open engine every match here was played on. Clone it beside this repository, not inside it. It reads the key
+from a file named `.env` in its folder (or from an environment variable of the same name):
+
+```bash
+git clone https://github.com/Loothore907/gladiator-core && cd gladiator-core && uv sync
+```
+```bash
+cp .env.example .env
+```
+(On Windows: `copy .env.example .env`.) Open `.env` and fill in **one** line. Any one of the four is enough; if you can choose, an OpenRouter key shows
+the most, because the record already holds a verdict for each of its pairs:
+
+| The line in `.env` | The models that key can race | What the record holds for those pairs (Nov 27, 2026) |
+|---|---|---|
+| `OPENROUTER_API_KEY=...` | DeepSeek V4.1 Flash, MiniMax M3.1 Flash, Qwen 3.8 27B, GLM-5.3 | 48 to 64 scenarios for every pair, over the four workflows: a verdict, which your race joins |
+| `GEMINI_API_KEY=...` (Google) | Gemini 3.1 Flash-Lite, Gemini 3.5 Flash-Lite | 12 scenarios: your race joins them, and the verdict says the evidence is still thin |
+| `ANTHROPIC_API_KEY=...` | Claude Haiku 5.5, Claude Sonnet 5.5 | 12 scenarios, played with a larger cost limit per attempt ($0.40, not $0.12). Start the runner with `--suite suites/mid_tier.yaml` and your race is played under that limit and joins them; without it the race is run, filed and shown, and the verdict says it was played under other conditions and leaves it out |
+| `OPENAI_API_KEY=...` | GPT-6 Luna, GPT-6.1 Terra | none: the two have never met, so your race is the first evidence, and the page says so |
+
+```bash
+uv run gladiator serve
+```
+It says which models it can offer and stays running, on this machine only (`http://127.0.0.1:8787`). With two
+keys in `.env` you can race across providers: the pair in the table further down, Claude Haiku 5.5 against
+DeepSeek V4.1 Flash, needs the Anthropic and the OpenRouter key.
+
+**2. Ledger's page and its live record,** in a second terminal, in this repository's folder:
+
+```bash
+uv run ledger serve --runner http://127.0.0.1:8787 --page
+```
+The first start loads every step on file into a Relate store (about a minute) and then prints the address to
+open:
+
+```text
+http://localhost:8000/?runner=http://127.0.0.1:8787&record=http://127.0.0.1:8790
+```
+
+**3. Race.** On that page pick a workflow, then two models marked **can race live**, and press **Race them
+live**. The page first says what the record expects of the pair, then shows both models working through the same
+new world step by step, then says whether the result was in line with the record. A few seconds after the race
+ends it is in the graph: one more cell in the evidence, its world drawn under the rows, and the verdict read again
+with it.
+
+- **What it costs.** A race between two of the small models has cost about one cent on the matches on file, and
+  one with Claude Sonnet 5.5 in it about six. The runner sets limits before anything starts, and the page shows
+  them beside the button: $0.25 for a race at most and $5.00 in all, after which it starts nothing more.
+- **Where the key goes.** It stays in `.env` on your machine and is sent to its own provider by the runner, and
+  nowhere else. Ledger never sees it: the page and the record service hold no key and ask the runner for a race.
+- **Nothing is published.** The race is filed on your machine (`gladiator-core/race_state/`, and Ledger's copy
+  under `live-state/`). The hosted page and its record are not touched.
+- **If the provider refuses the key** (mistyped, out of credit, or not allowed that model), neither model is run
+  and nothing is spent. The page says the race was not played, with the provider's own words, and counts it for
+  nothing: it is never worded as two wrong results.
+- **Without a key** the runner does not start, and says which keys it looks for. To see the mechanics for
+  nothing, `uv run gladiator serve --model scripted:golden --model scripted:invalid` starts it with two stand-in
+  players that call nobody. They cannot do these workflows, so both end with a wrong result, but the race, its
+  sealed record and its arrival in the graph are the real thing.
+
 ### The four things the organisers ask of a README
 **Use case.** Choosing between two AI models for one tool-using workflow, on evidence you can check. The
 relationships that matter: both models' attempts share the same generated world; an attempt is a route of steps
@@ -71,9 +139,10 @@ your machine the first time, about a minute). From Python it is `relate.connect(
    *A cell, clicked: the sealed record played back at the pace it really ran, both models on the same world.*
 3. **A new question, with no new match.** "How they got there" asks a pattern of every step on file, such as
    "decided a refund before it had seen the customer". Give one a level and the verdict is judged with it.
-4. **A live race that joins the record as it ends** (hackathon judges for now: "Judge sign-in" on the page). The
-   record says what it expects, a brand-new scenario is raced, and seconds later the race is one more cell in
-   the graph and the verdict has been read again with it.
+4. **A live race that joins the record as it ends**
+   ([with your own API key](#race-two-models-live-with-your-own-api-key), on your own machine). The record says
+   what it expects, a brand-new scenario is raced, and seconds later the race is one more cell in the graph and
+   the verdict has been read again with it.
 5. **Check it.** `uv run ledger verify` checks every sealed record, and every figure in this README reproduces
    with the `--until` printed next to it.
 
@@ -100,7 +169,7 @@ which two models are worth racing), and the match on your task is the evidence.
 > suite matches between 12 models** (closed and open-weights) and every live race run since, so everything below
 > reproduces from a clean clone with **no API keys and no cost**.
 
-> **The record grows.** A live race on the hosted runner is sealed by the same engine on the same tests. It joins
+> **The record grows.** A live race on the project's hosted runner is sealed by the same engine on the same tests. It joins
 > the record as it ends (the page reads it from Ledger's live Relate store) and is archived in this repository by
 > an import, and from then on it counts like any other match played under the same conditions. The figures printed
 > in this README are the record as it stood at 05:00 UTC on Nov 26, 2026 (49 matches). Add
@@ -159,7 +228,7 @@ the race plays. "How they got there", beside it, loads the steps of every scenar
 process questions of them. Give one a level and the verdict is judged with it
 ([How they got there](#how-they-got-there-ask-the-record-a-new-question)).
 
-**Live races (hackathon judges for now, coming soon for everyone).** Under the recorded scenarios the page can
+**Live races ([with your own API key](#race-two-models-live-with-your-own-api-key)).** Under the recorded scenarios the page can
 ask a [Gladiator race runner](https://github.com/Loothore907/gladiator-core/blob/main/docs/DEPLOYMENT.md) for one
 fresh scenario between the two models chosen in step 2 (each model's card says whether it can race live). It first states
 what the record expects, or that the two have never met on this task, then streams the race as it happens, then
@@ -168,19 +237,20 @@ race ends (through the live record, below; an import also archives it in this re
 again with it, provided it was played under the record's conditions: the same settings, difficulty and
 scoring. A race at another level is kept on file, and the verdict says so and leaves it out. A batch plays 10 or 25
 scenarios in one go, and one model on both lanes is a consistency
-check that is never counted as a head-to-head. Judges sign in once, with the "Judge sign-in"
-button and their access code (or an invitation link that carries it); nobody else is shown a race button. The panel shows what is left of each provider's live budget, and a
-model leaves the list when its provider's budget is used up. To run one on your own
-machine with your own keys: start `gladiator serve` in a gladiator-core checkout with
-`--origin http://localhost:8000`, then open the page with `?runner=http://127.0.0.1:8787`. No server, no keys, nothing leaves
-the tab.
+check that is never counted as a head-to-head. The panel shows what the runner has left to spend, and a
+model leaves the list when its provider's budget is used up. A live race calls paid model APIs, so the page
+starts one only on a runner it has been given: the one on your own machine, holding your own key
+([the two commands](#race-two-models-live-with-your-own-api-key)), which asks for no sign-in; or the project's
+hosted runner, which is by invitation (the page's "Sign in (by invitation)" button, or an invitation link) and
+shows nobody else a race button.
+
+Without a runner the page is a folder of static files. No server, no keys, nothing leaves the tab:
 
 ```bash
 python3 -m http.server --directory site 8000    # then open http://localhost:8000
 ```
 A page served from a clone like this is the record as it ships in the repository, and says so at the top: the
-hosted live record and the hosted race runner answer the published page only. Judge sign-in and live races are
-on the hosted page, https://ledger.gladiatorbench.com/.
+hosted live record and the hosted race runner answer the published page only.
 
 **The live record: a race counts as it ends.** The page is published with a copy of the record, and an import
 that rebuilds and republishes everything takes about fifteen minutes. `ledger serve` is the same record kept
@@ -190,12 +260,12 @@ own copy lacks. A page that knows of one asks it on load and loads what is newer
 when a race started from the page ends, the race is in the graph a moment later: the verdict is read again and
 counts it, the race is one more cell in the evidence graph, and its world is drawn under the rows. The service runs
 no match and holds no key; the sealed records stay the master copy, and the import stays as the archive. The
-hosted page reads a hosted one (`record` in `site/data/live.json`), which reads the hosted runner. To see it on
-your own machine, beside a runner as above:
+hosted page reads a hosted one (`record` in `site/data/live.json`), which reads the hosted runner. On your own
+machine it is the second of [the two commands](#race-two-models-live-with-your-own-api-key): `--page` serves the
+page beside the record and prints the address that joins the two.
 
 ```bash
-uv run ledger serve --runner http://127.0.0.1:8787 --state live-state --origin http://localhost:8000
-# then open http://localhost:8000/?runner=http://127.0.0.1:8787&record=http://127.0.0.1:8790
+uv run ledger serve --runner http://127.0.0.1:8787 --page
 ```
 
 The service also builds as a container (`Dockerfile`: the code and the sealed records it starts from, nothing
@@ -637,9 +707,9 @@ uv run ledger verdict refund-queue --a "haiku 5.5" --b deepseek-v4.1 --store reb
 and twelve more have 12 to 16, enough for a verdict; the rest have met on 2 to 6 worlds per workflow and read
 "not enough evidence", which is the honest reading: more matches turn them into claims. Results hold for the task as tested, in a simulated world; a workflow of yours
 that only resembles one of these four needs its own test. Every verdict from the page and the assistant rests on
-finished, sealed matches. A live race (judges only for now) runs on a separate Gladiator runner: the page shows
-it as it happens, and once its sealed record has been imported it counts in the verdict like any other match, so
-the page's numbers move as races are run. A batch of one model against itself is a consistency check: it counts
+finished, sealed matches. A live race runs on a separate Gladiator runner (your own, with your own key, or the
+project's hosted one by invitation): the page shows it as it happens, and once its sealed record has joined the
+record it counts in the verdict like any other match, so the page's numbers move as races are run. A batch of one model against itself is a consistency check: it counts
 in that model's own fitness and never as a head-to-head. In two of the four (refund queue and incident triage)
 one obstacle was weaker than intended in the versions played here (below).
 
