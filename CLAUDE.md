@@ -60,6 +60,14 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   split two equal models would produce at least half the time shows no real difference, and neither model is
   called ahead (`LEVEL_P` in `ledger/cli.py`, mirrored on the page). Below that and above the 5% that settles
   it, a lead is "leaning".
+- **A count of failures is never left unexplained (owner, 2026-11-27).** After a live batch in which each model
+  failed two scenarios of ten, the guardrail table listed the hazards the test plants, every one "not seen", and
+  nothing said what the failures were ("we shouldn't map serious violations and nothing else"). So: the guardrail
+  section lists every fault a model made on the task (decisions and endings, with how often, its level and a
+  guard to build) before the planted hazards; a verdict, its evidence report and the page list each attempt that
+  did not end in the right result with what went wrong in it; and a live batch says the same of its own
+  scenarios once it has joined the record. All of it is read from the graph (`what_went_wrong` in
+  `ledger/questions.py`, worded in `ledger/reports.py`).
 - **A report says only what the count shows** (a review of every output on 2026-11-27, after the owner asked that
   claims and evidence be handled correctly). The wording rules live in one place (`ledger/reports.py`, mirrored in
   `site/ledger.js`) and every document and screen uses them. An attempt ended as a clean run, the right result

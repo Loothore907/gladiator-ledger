@@ -60,6 +60,90 @@ def ended(right, clean) -> str:
     return "clean run" if clean else "right, a step skipped" if right else "wrong result"
 
 
+WRONG_DECISION = "wrong decision"
+
+
+def fault_words(items, faults: list[dict]) -> str:
+    """What one attempt got wrong, in words, from the faults it made ({fault, kind, count}): how it stopped, then
+    what it did with the items it was given (on how many of them), then the hazards it fell for. A wrong decision
+    names the mix-up it was. A count of failed attempts says that something went wrong; this says what."""
+    mixups = [f for f in faults if f["kind"] == "mix-up"]
+    said = []
+    for kind in ("ending", "decision", "trap"):
+        for f in faults:
+            if f["kind"] != kind:
+                continue
+            if kind == "decision":
+                text = f"{f['fault']}: {f['count']} of {items} items" if items else f"{f['fault']}: {f['count']}"
+                if f["fault"] == WRONG_DECISION and mixups:
+                    kinds = "; ".join(m["fault"] + (f", {m['count']} times" if m["count"] > 1 else "") for m in mixups)
+                    text += f" ({kinds})"
+            elif kind == "trap":
+                text = f["fault"] + (f" ({f['count']} times)" if f["count"] > 1 else "")
+            else:
+                text = f["fault"]
+            said.append(text)
+    return "; ".join(said) if said else "no fault recorded"
+
+
+def what_went_wrong(found: list[dict], order: list[str] | None = None) -> list[dict]:
+    """The rows of the question `what_went_wrong`, gathered attempt by attempt: {match, scenario, side, model, right
+    (the result was right and only a step was skipped), faults, what (in words)}. `order`: a verdict's scenarios,
+    as match keys, so `scenario` is the number the verdict gives it; without it, the number the record gives."""
+    by: dict[tuple, dict] = {}
+    for r in found:
+        entry = by.setdefault(
+            (r["match"], r["side"]),
+            {
+                "match": r["match"],
+                "side": r["side"],
+                "model": r["model"],
+                "right": bool(r["right"]),
+                "items": r["items"],
+            },
+        )
+        if r["fault"]:
+            entry.setdefault("faults", []).append({"fault": r["fault"], "kind": r["kind"], "count": r["count"]})
+    place = {match: i for i, match in enumerate(order or [], 1)}
+    out = []
+    for e in by.values():
+        faults = e.get("faults") or []
+        out.append(
+            {
+                "match": e["match"],
+                "scenario": place[e["match"]] if order else int(e["match"].rsplit("/", 1)[1]),
+                "side": e["side"],
+                "model": e["model"],
+                "right": e["right"],
+                "faults": faults,
+                "what": fault_words(e["items"], faults),
+            }
+        )
+    return sorted(out, key=lambda w: (w["scenario"], w["side"]))
+
+
+def went_wrong_lines(went: list[dict], tick: str = "`") -> list[str]:
+    """What a report says under its scenarios: every attempt that did not end in the right result, with what went
+    wrong in it; and, in one line, the attempts whose result was right with a step skipped."""
+    wrong = [w for w in went if not w["right"]]
+    skipped = [w for w in went if w["right"]]
+    lines = []
+    if wrong:
+        lines += ["What went wrong in the attempts that did not end in the right result:", ""]
+        lines += [f"- Scenario {w['scenario']}, {tick}{w['model']}{tick}: {w['what']}." for w in wrong]
+        lines.append("")
+    if skipped:
+        tally: dict[str, int] = {}
+        for w in skipped:
+            for f in w["faults"]:
+                if f["kind"] != "mix-up":
+                    tally[f["fault"]] = tally.get(f["fault"], 0) + 1
+        said = "; ".join(f"{name} in {n}" for name, n in sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])))
+        many = f"{len(skipped)} {'attempt' if len(skipped) == 1 else 'attempts'}"
+        lines += [f"The right result with a step skipped: {many}" + (f" ({said})." if said else "."), ""]
+    return lines
+
+
 def record_kind(suite) -> str:
     """A suite match, a live race or a live batch."""
     return KINDS.get(suite, "suite match")
@@ -270,6 +354,7 @@ def evidence_markdown(v: dict, title: str) -> str:
                 f"{ended(r['b_right'], r['b_passed'])} | `{r['run']}` |"
             )
         lines.append("")
+        lines += went_wrong_lines(v.get("went_wrong") or [])
     lines += ["## Sealed records", ""]
     lines += [f"- {record_line(e)}" for e in v["evidence"]]
     lines += ["", ANSWER_KEYS, ""]

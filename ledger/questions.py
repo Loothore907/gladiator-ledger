@@ -311,6 +311,31 @@ RETURN model, hazard, exposed, tripped
 ORDER BY hazard, model
 """
 
+# What went wrong, attempt by attempt: every attempt that was not a clean run, in the given matches (`matches`: the
+# pairs behind a verdict) or in one sealed record (`run`: a live race or a live batch), with each fault it made and
+# how many times (for a decision fault, on how many items). One row for each attempt and fault; an attempt with no
+# fault recorded has one row with no fault. A count of failures says that something went wrong; this says what.
+WENT_WRONG = """
+MATCH (r:Run)<-[:PART_OF]-(mt:Match)<-[:IN]-(x:Attempt)-[:BY]->(m:Model)
+WHERE NOT x.passed AND NOT mt.excluded
+  AND ($run IS NULL OR r.run_id = $run) AND ($matches IS NULL OR mt.key IN $matches)
+OPTIONAL MATCH (x)-[made:MADE]->(f:Fault)
+RETURN mt.key AS match, x.side AS side, m.name AS model, coalesce(x.task_correct, x.passed) AS right,
+       x.termination AS ended, x.items AS items, f.name AS fault, f.kind AS kind, made.count AS count
+ORDER BY match, side, kind, fault
+"""
+
+# The same for a model run against itself (a consistency check): its attempts are not part of a match, so they are
+# asked for here, with the scenario standing where the match does.
+WENT_WRONG_SELF = """
+MATCH (r:Run)<-[:PART_OF]-(sc:SelfCheck)<-[:IN]-(x:SelfAttempt)-[:BY]->(m:Model)
+WHERE NOT x.passed AND NOT sc.excluded AND ($run IS NULL OR r.run_id = $run)
+OPTIONAL MATCH (x)-[made:MADE]->(f:Fault)
+RETURN sc.key AS match, x.side AS side, m.name AS model, coalesce(x.task_correct, x.passed) AS right,
+       x.termination AS ended, x.items AS items, f.name AS fault, f.kind AS kind, made.count AS count
+ORDER BY match, side, kind, fault
+"""
+
 # Opponents: the models whose published score on a benchmark is closest to one model's, whether the two score
 # ranges overlap ("close on paper"), and what the graph already knows about each: has it played any matches, and
 # how many pairs has it already played against this model? Scores only pick the opponent; the match decides.
@@ -512,6 +537,8 @@ ALL = {
     "pair_conditions": PAIR_CONDITIONS,
     "task_conditions": TASK_CONDITIONS,
     "pair_hazards": PAIR_HAZARDS,
+    "what_went_wrong": WENT_WRONG,
+    "what_went_wrong_self": WENT_WRONG_SELF,
     "fault_profile": FAULT_PROFILE,
     "task_attempts": TASK_ATTEMPTS,
     "self_attempts": SELF_ATTEMPTS,

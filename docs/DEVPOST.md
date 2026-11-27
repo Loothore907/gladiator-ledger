@@ -39,7 +39,8 @@ and walks it:
    result joins the record as the race ends: seconds later it is one more cell in the evidence graph, its world is
    drawn under the rows, and the verdict has been read again with it. (Open to judges: "Judge sign-in" on the
    page, with the access code.)
-6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every hazard,
+6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every fault
+   the model made (how often, and what to build against it) and for every hazard the test plants,
    and the sealed records behind it.
 
 The recorded loop runs three ways over the same graph: a static page that builds the graph in your browser, an MCP

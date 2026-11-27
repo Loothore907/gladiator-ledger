@@ -135,6 +135,8 @@ def export(data: Path, store: str, out: Path) -> dict:
                 "condition_words": cli.CONDITION_WORDS,
                 "guardrails": spec.GUARDRAILS,
                 "unforgivable": spec.UNFORGIVABLE,
+                # the kinds of fault the guardrail section lists beside the hazards
+                "fault_kinds": list(spec.FAULT_KINDS),
                 "reads": list(spec.READS),
                 # grader counter -> fault name, so the page can name the faults of a live race the same way
                 "fault_counters": {**gladiator.HAZARDS, **gladiator.DECISION_FAULTS},
