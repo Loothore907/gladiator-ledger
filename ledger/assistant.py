@@ -36,8 +36,12 @@ Walk the person through this loop, one step at a time:
    the test itself passed, which also asks for its process. Never call a model unfit, or say it "failed", because
    `passed` is low: a lapse of process is a fault with a level, and the person decides whether it matters. The
    notes say when scenarios were won on process alone; pass that on. For the head to head, report the verdict word exactly: "better" is settled; "leaning" is ahead but
-   could be chance; "no real difference shown" and "not enough evidence" name no winner. When neither is fit,
-   offer the models in `fit_on_task`; if that is empty, say no tested model is fit and do not guess at one.
+   could be chance; "no real difference shown" and "not enough evidence" name no winner. A fit call waits
+   for the count to settle it: `fit` is true or false only then. When it is null, `so_far` says what the
+   attempts show ("meets" or "short" of the bar) and you must say it that way ("meets the bar so far, on 9
+   attempts: too few to be sure"), never as fit or unfit, and never recommend a model on it. When neither is fit,
+   offer the models in `fit_on_task`; if that is empty, say no tested model has been shown fit and do not guess
+   at one.
    How a model WORKED is in the graph too, step by step. how_they_worked asks process questions of every step
    on file (did it decide an item before it had seen a record the item depends on; did it repeat a timed-out
    action without checking), and gives each count beside the grader's own where the grader has one. A count is

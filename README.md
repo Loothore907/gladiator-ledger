@@ -81,9 +81,9 @@ both models on the same generated world every time
 | Task | Scenarios won (Haiku / DeepSeek) | Attempts with the right result (Haiku / DeepSeek) | For one person | For a business running it unattended |
 |---|---|---|---|---|
 | Refund queue | 37 / 6 | 99% / 100% | **Use Haiku**: both are fit, and it did it better | neither is fit |
-| Incident triage | 30 / 11 | 91% / 97% | **Use Haiku**: both are fit, and it did it better | neither is fit |
+| Incident triage | 30 / 11 | 91% / 97% | **Use Haiku**: both are fit, and it did it better | not settled: both are short of the bar so far |
 | Access review | 19 / 22 | 98% / 99% | both fit, no settled lead | **Use DeepSeek**: Haiku is not fit |
-| Inventory transfer | 20 / 19 | 87% / 95% | both fit, no settled lead | neither is fit |
+| Inventory transfer | 20 / 19 | 87% / 95% | DeepSeek is fit; Haiku meets the bar so far | Haiku is not fit; DeepSeek is short of the bar so far |
 
 One model is not "better". Haiku won 106 of the 166 scenarios and is the settled choice on two workflows. Yet
 DeepSeek got the right result more often on all four, and on access reviews it is the only one of the two a
@@ -99,6 +99,11 @@ are fit; for a business it is serious and neither is. Ledger makes both calls, s
 
 That last point is in the table too. With sixteen scenarios each, DeepSeek led access review and inventory
 transfer 11 to 5, and Ledger called both "leaning, not settled". Twenty-five more scenarios levelled them.
+
+So is how sure a call is. On inventory transfer Haiku got the right result in 69 of its 79 attempts: 87%, over the
+80% bar. But 79 attempts cannot rule out a true rate just under 80%, so Ledger says "meets the bar so far" and
+names no model on the strength of it. A model is called fit or not fit only when its attempts settle it. One
+attempt with an unforgivable fault settles it at once.
 
 ## Three ways to use it
 All three walk the same loop over the same graph and give the same answers (the page is checked against the
@@ -269,6 +274,13 @@ fault has a level: **unforgivable** (one attempt with it makes the model unfit, 
 (fine if rare) or **minor** (shown, never decides). The two are kept apart on purpose. The test passes an attempt
 only when both the result and the process are right, so DeepSeek "passes" 30 of its 95 refund attempts while
 getting every one of them right. Whether the skipped lookup matters is your call, not the bar's.
+
+**A call waits for the count to settle it.** Nine right results in nine attempts do not tell a model that is right
+80% of the time from one that always is. So "fit" and "not fit" are said only when the attempts on file leave
+under a 5% chance that the truth is on the other side of the line: with none wrong, that takes 14 attempts at an
+80% bar and 29 at 90%. Until then a model **meets the bar so far** or is **short of the bar so far**, with the
+count, and no model is named to use on a "so far". An unforgivable fault needs no count: one attempt with it is a
+fact.
 
 Every attempt the model made on the task under the same conditions counts, whoever the opponent was, so a model's
 fitness for a task reads the same in every verdict. The same fault is not equally serious everywhere: paying a
@@ -570,6 +582,14 @@ read. Ledger already listed that as a fault whose level the reader sets, and the
 reader. Now the bar asks for the right result, and the process is judged only by the fault levels. No record,
 count or head-to-head result changed. Verdicts that said "not fit" for process alone changed, the first row of the
 table at the top among them: it used to read "Use Haiku: DeepSeek is not fit".
+
+**A fit call now waits for enough attempts (2026-11-27).** Until then a model was called fit or not fit from
+eight attempts on the share alone, so nine right results in nine named a model to use and seven in nine ruled one
+out. A review of every claim against its evidence found that, of the 52 calls on file at one person's tolerance
+on Nov 27, 15 said "fit" on a count that could not rule out a rate under the bar. Now a call is made only when the count settles
+it, and otherwise the verdict says what the attempts show so far. No record or count changed. Three cells of the
+table at the top did: incident triage for a business (was "neither is fit") and both cells for inventory transfer
+(were "both fit, no settled lead" and "neither is fit").
 
 **Costs corrected (2026-11-23).** A check of recorded costs against the providers' real bills found the engine
 had priced two kinds of call wrongly (Claude Haiku 5.5 about four times too high, models run through OpenRouter

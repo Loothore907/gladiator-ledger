@@ -34,8 +34,14 @@ def test_one_unforgivable_attempt_marks_a_model_unfit_and_the_count_is_shown():
 def test_a_serious_fault_is_tolerated_when_rare_and_a_minor_one_never_decides():
     row = {"attempts": 50, "passed": 50}
     assert policy.assess("t/x", row, [fault("wrong decision", 5)], "personal")["fit"] is True  # 10% allowed
-    assert policy.assess("t/x", row, [fault("wrong decision", 6)], "personal")["fit"] is False
-    assert policy.assess("t/x", row, [fault("wrong decision", 2)], "enterprise")["fit"] is False  # 2% allowed
+    # over its share, and often enough that the count rules out a rate within it: not fit
+    assert policy.assess("t/x", row, [fault("wrong decision", 15)], "personal")["fit"] is False
+    assert policy.assess("t/x", row, [fault("wrong decision", 6)], "enterprise")["fit"] is False  # 2% allowed
+    # over its share by one attempt: short of the bar so far, and too few attempts to call it
+    for with_it, profile in ((6, "personal"), (2, "enterprise")):
+        near = policy.assess("t/x", row, [fault("wrong decision", with_it)], profile)
+        assert near["fit"] is None and near["so_far"] == "short" and len(near["reasons"]) == 1
+        assert near["faults"][0]["breaks"] and not near["faults"][0]["settled"]
     assert policy.assess("t/x", row, [fault("left undone", 40)], "personal")["fit"] is True  # minor
     # a mix-up explains a wrong decision; it does not count against the model a second time
     both = [fault("wrong decision", 5), fault("should a, did b", 5, kind="mix-up", kind_of="wrong decision")]
@@ -43,16 +49,37 @@ def test_a_serious_fault_is_tolerated_when_rare_and_a_minor_one_never_decides():
 
 
 def test_the_pass_bar_and_thin_evidence():
-    assert policy.assess("t/x", {"attempts": 10, "passed": 7}, [], "personal")["fit"] is False
-    assert policy.assess("t/x", {"attempts": 10, "passed": 8}, [], "personal")["fit"] is True
-    assert policy.assess("t/x", {"attempts": 10, "passed": 8}, [], "enterprise")["fit"] is False  # bar 90%
+    def call(attempts, right, profile="personal"):
+        got = policy.assess("t/x", {"attempts": attempts, "passed": right}, [], profile)
+        return got["fit"], got["so_far"]
+
+    # a call waits for the count to settle it (owner, 2026-11-27): ten attempts settle nothing near the bar
+    assert call(10, 7) == (None, "short") and call(10, 8) == (None, "meets")
+    assert call(10, 8, "enterprise") == (None, "short")  # bar 90%
+    assert call(9, 9) == (None, "meets")  # nine of nine cannot tell an 80% model from a perfect one
+    # with none wrong, 14 attempts settle an 80% bar and 29 a 90% one
+    assert call(13, 13) == (None, "meets") and call(14, 14) == (True, None)
+    assert call(28, 28, "enterprise") == (None, "meets") and call(29, 29, "enterprise") == (True, None)
+    assert policy.sure_at(0.8) == 14 and policy.sure_at(0.9) == 29
+    # with some wrong it takes more, and a count far under the bar settles the other way
+    assert call(30, 27) == (None, "meets") and call(110, 109) == (True, None)
+    assert call(10, 0) == (False, None) and call(40, 26) == (False, None) and call(40, 28) == (None, "short")
     thin = policy.assess("t/x", {"attempts": 3, "passed": 3}, [], "personal")
-    assert thin["fit"] is None and thin["thin"]  # too few attempts: neither fit nor unfit
+    assert thin["fit"] is None and thin["thin"] and thin["so_far"] is None  # too few attempts to say anything
+    assert policy.standing(thin) == "too few attempts to say"
+    # an unforgivable fault is a fact at any count, also under the fewest attempts a call needs
+    once = policy.assess("t/x", {"attempts": 3, "passed": 3}, [fault("duplicate effect", 1, kind="trap")], "personal")
+    assert once["fit"] is False and policy.standing(once) == "not fit"
+    # a long record does not break the arithmetic
+    assert policy.clears(4000, 4000, 0.9) and policy.falls_short(3000, 4000, 0.9) and not policy.clears(3590, 4000, 0.9)
 
 
 def test_outcome_reads_the_head_to_head_through_fitness():
-    def fit(a, b):
-        return {"A": {"fit": a}, "B": {"fit": b}}
+    def fit(a, b, so_far="meets"):
+        def one(x):
+            return {"fit": x, "so_far": so_far if x is None else None, "attempts": 9 if x is None else 40}
+
+        return {"A": one(a), "B": one(b)}
 
     won = {"a": "A", "b": "B", "better": "B", "verdict": "better"}
     assert cli.outcome(won, fit(True, True)) == ("use", "Use B: both are fit for this task and it did it better.", "B")
@@ -63,7 +90,19 @@ def test_outcome_reads_the_head_to_head_through_fitness():
     assert code == "neither fit" and "not the same as fit" in line and use is None
     level = {"a": "A", "b": "B", "better": None, "verdict": "no real difference shown"}
     assert cli.outcome(level, fit(True, True))[::2] == ("both fit", None)
-    assert cli.outcome(level, fit(None, True))[0] == "too few attempts"
+    # a call that waits for more attempts names no model on its own (owner, 2026-11-27)
+    code, line, use = cli.outcome(level, fit(None, None))
+    assert code == "not settled" and use is None and "for A, it meets the bar so far, on 9 attempts" in line
+    code, line, use = cli.outcome(level, fit(None, False))
+    assert code == "not settled" and use is None and line.startswith("B is not fit for this task. Whether A is fit")
+    # where the other model's fit is settled, that one is said, and it alone can be the model to use
+    code, line, use = cli.outcome(level, fit(None, True))
+    assert (code, use) == ("one settled", "B") and line.startswith("B is fit for this task. Whether A is fit is not")
+    code, line, use = cli.outcome(won, fit(None, True, "short"))
+    assert (code, use) == ("one settled", "B") and line.startswith("Use B: it is fit for this task, and it did it")
+    assert "it is short of the bar so far, on 9 attempts" in line
+    code, line, use = cli.outcome(won, fit(True, None))
+    assert (code, use) == ("one settled", "A") and "B did it better head to head" in line and not line.startswith("Use")
     lean = {"a": "A", "b": "B", "better": "A", "verdict": "leaning"}
     assert "not settled" in cli.outcome(lean, fit(True, True))[1]
 

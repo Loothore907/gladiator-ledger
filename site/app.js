@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, recordKind } from './ledger.js';
+import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, recordKind, sureAt } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -3126,7 +3126,7 @@ function fightCard(spec, v) {
           'span',
           { class: 'text' },
           el('span', { class: 'name' }, sentence(name)),
-          el('span', { class: 'sub' }, `${PROFILE_HELP[name] || ''} ${percent(p.bar)} of attempts must end in the right result; a serious fault may show in at most ${percent(p.serious_share)} of them.`),
+          el('span', { class: 'sub' }, `${PROFILE_HELP[name] || ''} ${percent(p.bar)} of attempts must end in the right result; a serious fault may show in at most ${percent(p.serious_share)} of them. A model is called fit only once its attempts settle it: with none wrong, ${sureAt(p.bar)}.`),
         ),
       );
     }),
@@ -3169,7 +3169,7 @@ function fightCard(spec, v) {
     tapeRow(
       num(`${fa.right} of ${fa.attempts}`, fa.right_rate < fa.bar ? 'bad' : ''),
       'Right result, against anyone',
-      `${percent(fa.right_rate)} and ${percent(fb.right_rate)}; ${percent(fa.bar)} needed`,
+      `${percent(fa.right_rate)} and ${percent(fb.right_rate)}; ${percent(fa.bar)} needed, on enough attempts to be sure (${sureAt(fa.bar)} with none wrong)`,
       num(`${fb.right} of ${fb.attempts}`, fb.right_rate < fb.bar ? 'bad' : ''),
     ),
     tapeRow(
@@ -3235,16 +3235,26 @@ function fightCard(spec, v) {
       : null,
   );
 
-  const kind = { use: 'win', 'only one fit': 'win', 'both fit': 'even', 'neither fit': 'stop', 'too few attempts': 'even' }[v.outcome];
+  const kind = { use: 'win', 'only one fit': 'win', 'both fit': 'even', 'neither fit': 'stop', 'not settled': 'even', 'one settled': v.headline.startsWith('Use ') ? 'win' : 'even' }[v.outcome];
   const versus = {
     better: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios. A split that lopsided between two equal models would happen ${chance(v.p_value)} of the time.`,
     leaning: `Head to head, ${shortName(v.better)} won ${v.wins[v.better]} of ${v.pairs} scenarios: ahead, but a split like that happens by chance ${percent(v.p_value)} of the time, so it is not settled.`,
     'no real difference shown': `Head to head they split the ${v.pairs} scenarios ${v.wins[a]} to ${v.wins[b]}.`,
     'not enough evidence': `Head to head they have met on only ${plural(v.pairs, 'scenario')}, fewer than the ${rules.min_pairs} a verdict needs.`,
   }[v.verdict];
+  // where each model stands when it is not simply fit: not fit, with the reasons, or what its attempts show so far
+  const stands = (id) => {
+    const f = v.fit[id];
+    if (f.fit === false) return `${shortName(id)} is not fit: ${f.reasons.join('; ')}.`;
+    if (f.fit !== null) return null;
+    if (f.so_far === 'meets') return `${shortName(id)} meets the bar so far: the right result in ${f.right} of ${f.attempts} attempts, which is too few to be sure (with none wrong it takes ${sureAt(f.bar)}).`;
+    if (f.so_far === 'short') return `${shortName(id)} is short of the bar so far (${f.reasons.join('; ')}), and ${f.attempts} attempts are too few to be sure of that either.`;
+    return `${shortName(id)} has only ${plural(f.attempts, 'attempt')} on this task: too few to say.`;
+  };
   const why = ids
-    .filter((id) => v.fit[id].fit === false)
-    .map((id) => el('li', null, `${shortName(id)} is not fit: ${v.fit[id].reasons.join('; ')}.`));
+    .map(stands)
+    .filter(Boolean)
+    .map((line) => el('li', null, line));
   const others = v.fit_on_task.filter((o) => !ids.includes(o.model));
   const elsewhere =
     v.outcome !== 'neither fit'
@@ -3257,7 +3267,7 @@ function fightCard(spec, v) {
             others.map((o) => `${shortName(o.model)} (right result in ${percent(o.right_rate)} of ${o.attempts} attempts, $${fixed(o.cost_per_attempt, 4)} each)`).join('; '),
             '.',
           )
-        : el('p', null, `No model tested on this task is fit at ${v.profile} tolerance. That points to a larger model, more reasoning effort, or guardrails around the faults above; this page has no matches for those to show.`);
+        : el('p', null, `No model tested on this task has been shown fit at ${v.profile} tolerance. That points to a larger model, more reasoning effort, or guardrails around the faults above; this page has no matches for those to show.`);
   const band = el(
     'div',
     { class: `band ${kind}`, id: 'verdict-band' },

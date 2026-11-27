@@ -42,10 +42,14 @@ def test_the_bar_asks_for_the_right_result_and_the_levels_judge_the_process():
 
 
 def test_a_wrong_result_still_costs_the_bar_whatever_the_levels_say():
-    row = {"attempts": 10, "passed": 7, "right": 7}
-    got = policy.assess("t/x", row, [fault("left undone", 3, kind="decision")], "personal")  # minor for one person
+    row = {"attempts": 40, "passed": 26, "right": 26}
+    got = policy.assess("t/x", row, [fault("left undone", 14, kind="decision")], "personal")  # minor for one person
     assert got["fit"] is False
-    assert got["reasons"] == ["right result in 7 of 10 attempts (70%), under the 80% bar"]
+    assert got["reasons"] == ["right result in 26 of 40 attempts (65%), under the 80% bar"]
+    # on ten attempts the same shortfall is said, as what the count shows so far: too few to call it
+    few = policy.assess("t/x", {"attempts": 10, "passed": 7, "right": 7}, [fault("left undone", 3)], "personal")
+    assert few["fit"] is None and few["so_far"] == "short"
+    assert few["reasons"] == ["right result in 7 of 10 attempts (70%), under the 80% bar"]
     # with no count of right results (an older row), the engine's passes stand in
     assert policy.assess("t/x", {"attempts": 10, "passed": 7}, [], "personal")["right"] == 7
 
@@ -101,3 +105,42 @@ def test_right_results_are_counted_from_the_attempts_themselves():
             # the head to head keeps the same two counts for the pairs these two played
             side = v["models"][model]
             assert side["right"] >= side["passed"] and side["good_enough"] == (side["right_rate"] >= v["bar"])
+
+
+def test_no_verdict_on_file_names_a_model_whose_fit_is_not_settled():
+    """A fit call waits for the count to settle it (owner, 2026-11-27): held on every pair that met on the refund
+    queue, at both tolerances, as the record stands. The record holds models with nine attempts, so the rule is
+    exercised; were it ever not, the test says so instead of passing on nothing."""
+    met = cli.rows(
+        STORE,
+        """
+        MATCH (:Test {id: 'gladiator/refund-queue'})<-[:VERSION_OF]-(:TestVersion)<-[:USED]-(mt:Match),
+              (mt)<-[:IN]-(:Attempt)-[:BY]->(a:Model), (mt)<-[:IN]-(:Attempt)-[:BY]->(b:Model)
+        WHERE a.name < b.name AND NOT mt.excluded
+        RETURN DISTINCT a.name AS a, b.name AS b ORDER BY a, b
+        """,
+    )
+    assert len(met) > 10
+    waiting = named = 0
+    for pair in met:
+        for profile in policy.PROFILES:
+            v = cli.verdict(STORE, "refund-queue", pair["a"], pair["b"], profile=profile)
+            fits = [v["fit"][m] for m in (pair["a"], pair["b"])]
+            for f in fits:
+                # the three answers, and nothing between them
+                assert (f["fit"] is None) == (policy.standing(f) not in ("fit", "not fit"))
+                assert f["so_far"] in (None, "meets", "short") and (f["so_far"] is None or f["fit"] is None)
+                if f["fit"] is True:
+                    assert policy.clears(f["right"], f["attempts"], f["bar"]) and not f["reasons"]
+                if f["so_far"] == "meets":
+                    assert not f["reasons"] and not policy.clears(f["right"], f["attempts"], f["bar"])
+            if any(f["fit"] is None for f in fits):
+                waiting += 1
+                assert v["outcome"] in ("not settled", "one settled")
+            else:
+                assert v["outcome"] in ("use", "both fit", "only one fit", "neither fit")
+            if v["use"]:
+                named += 1
+                assert v["fit"][v["use"]]["fit"] is True  # never a model that only meets the bar so far
+            assert all(o["model"] and v["fit"].get(o["model"], {"fit": True})["fit"] for o in v["fit_on_task"])
+    assert waiting and named, "the record no longer exercises the rule: no verdict waits, or none names a model"

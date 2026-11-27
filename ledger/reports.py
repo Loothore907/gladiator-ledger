@@ -87,7 +87,7 @@ def head_to_head(d: dict, a: str, b: str, tick: str = "`") -> str:
         f"{d['pairs']} judged pairs on the same generated worlds: {tick}{a}{tick} won {d['wins'][a]}, "
         f"{tick}{b}{tick} won {d['wins'][b]}, {d['ties']} tied."
     )
-    if d["wins"][a] != d["wins"][b]:
+    if d["wins"][a] != d["wins"][b] and d["p_value"] < 1:
         line += (
             f" Between two equally good models a split this lopsided would happen {chance(d['p_value'])} of the time."
         )
@@ -219,12 +219,17 @@ def evidence_markdown(v: dict, title: str) -> str:
         return "\n".join([*lines, f"**No evidence.** {v['notes'][0]}", ""])
     if v.get("headline"):
         lines += [f"**{v['headline']}**", "", f"## Fit for this task, at {v['profile']} tolerance", ""]
-        lines += ["Every attempt each model made on this task counts here, whoever the opponent was.", ""]
+        lines += [
+            (
+                "Every attempt each model made on this task counts here, whoever the opponent was. A model is called "
+                "fit or not fit only when its attempts settle it; until then the report says what they show so far."
+            ),
+            "",
+        ]
         for name in (a, b):
             f = v["fit"][name]
-            word = {True: "fit", False: "not fit", None: "too few attempts to say"}[f["fit"]]
             lines += [
-                f"### `{name}`: {word}",
+                f"### `{name}`: {policy.standing(f)}",
                 "",
                 policy.result_line(f),
                 "",
@@ -233,7 +238,7 @@ def evidence_markdown(v: dict, title: str) -> str:
                 lines += ["| Fault | Level | Attempts with it | Counts against fitness |", "|---|---|---|---|"]
                 lines += [
                     f"| {x['fault']} | {x['level']} | {x['attempts_with']} of {f['attempts']} | "
-                    f"{'yes' if x['breaks'] else 'no'} |"
+                    f"{('yes' if x['settled'] else 'so far: too few attempts to be sure') if x['breaks'] else 'no'} |"
                     for x in f["faults"]
                 ]
             else:

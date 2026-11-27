@@ -36,7 +36,7 @@ export function chance(p) {
 // The head to head in a sentence: the count, and how often two equal models would split like that.
 export function headToHead(d, a, b, tick = '`') {
   let line = `${d.pairs} judged pairs on the same generated worlds: ${tick}${a}${tick} won ${d.wins[a]}, ${tick}${b}${tick} won ${d.wins[b]}, ${d.ties} tied.`;
-  if (d.wins[a] !== d.wins[b]) line += ` Between two equally good models a split this lopsided would happen ${chance(d.p_value)} of the time.`;
+  if (d.wins[a] !== d.wins[b] && d.p_value < 1) line += ` Between two equally good models a split this lopsided would happen ${chance(d.p_value)} of the time.`;
   return line;
 }
 
@@ -96,7 +96,7 @@ export function guardNotes(spec) {
     if (f && f.reasons.length) {
       lines.push(
         `- Fitness is judged over every attempt \`${model}\` made on this task (${f.attempts}), and counts ` +
-          `faults that are not hazards of the world too. Against it at this tolerance: ${f.reasons.join('; ')}.`,
+          `faults that are not hazards of the world too. Against it at this tolerance${f.fit === false ? '' : ', so far'}: ${f.reasons.join('; ')}.`,
       );
     }
   }
@@ -105,6 +105,60 @@ export function guardNotes(spec) {
 
 // Python's f"{x:,.0f}": a whole number with thousands separators.
 const grouped = (x) => fixed(x, 0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+// ---- a call waits for the count to settle it (ledger/policy.py) -----------------------------------------------------
+// "Fit" and "not fit" are said only when the attempts on file leave under a 5% chance that the truth is on the
+// other side of the line. Until then a model meets the bar so far, or is short of it so far.
+const ALPHA = 0.05;
+
+// The chance of each count 0..n in n attempts when the true rate is p (binomial), in logs so a long record cannot
+// underflow. Only what these sums decide is compared with the command line, never their digits.
+function binomial(n, p) {
+  const logP = Math.log(p);
+  const logQ = Math.log(1 - p);
+  const out = [];
+  let logC = 0.0;
+  for (let i = 0; i <= n; i += 1) {
+    out.push(Math.exp(logC + i * logP + (n - i) * logQ));
+    if (i < n) logC += Math.log((n - i) / (i + 1));
+  }
+  return out;
+}
+const chanceOfAtLeast = (k, n, p) => binomial(n, p).reduce((total, t, i) => (i >= k ? total + t : total), 0);
+const chanceOfAtMost = (k, n, p) => binomial(n, p).reduce((total, t, i) => (i <= k ? total + t : total), 0);
+const open = (x) => x > 0 && x < 1;
+
+// The count settles that the model meets the bar / does not meet it / shows a fault in more than its share.
+export function clears(right, attempts, bar) {
+  if (!attempts || !open(bar)) return Boolean(attempts) && bar <= 0;
+  return chanceOfAtLeast(right, attempts, bar) < ALPHA;
+}
+export function fallsShort(right, attempts, bar) {
+  if (!attempts || !open(bar)) return Boolean(attempts) && bar >= 1 && right < attempts;
+  return chanceOfAtMost(right, attempts, bar) < ALPHA;
+}
+export function exceeds(withIt, attempts, share) {
+  if (!attempts || !open(share)) return Boolean(attempts) && share <= 0 && withIt > 0;
+  return chanceOfAtLeast(withIt, attempts, share) < ALPHA;
+}
+
+// How many attempts, with none wrong, settle that a model meets the bar: 14 at 80%, 29 at 90%.
+export function sureAt(bar) {
+  let n = 1;
+  while (!clears(n, n, bar)) n += 1;
+  return n;
+}
+
+const SO_FAR = {
+  meets: 'meets the bar so far, too few attempts to be sure',
+  short: 'short of the bar so far, too few attempts to be sure',
+};
+
+// Where one model stands on a task, in words: fit, not fit, or what the count says so far (policy.standing).
+export function standing(f) {
+  if (f.fit === null) return SO_FAR[f.so_far] || 'too few attempts to say';
+  return f.fit ? 'fit' : 'not fit';
+}
 
 export function resultLine(f) {
   return (
@@ -231,12 +285,15 @@ export function evidenceMarkdown(v, title) {
   if (v.verdict === 'no data') return [...lines, `**No evidence.** ${v.notes[0]}`, ''].join('\n');
   if (v.headline) {
     lines.push(`**${v.headline}**`, '', `## Fit for this task, at ${v.profile} tolerance`, '');
-    lines.push('Every attempt each model made on this task counts here, whoever the opponent was.', '');
+    lines.push(
+      'Every attempt each model made on this task counts here, whoever the opponent was. A model is called ' +
+        'fit or not fit only when its attempts settle it; until then the report says what they show so far.',
+      '',
+    );
     for (const name of [a, b]) {
       const f = v.fit[name];
-      const word = f.fit === null ? 'too few attempts to say' : f.fit ? 'fit' : 'not fit';
       lines.push(
-        `### \`${name}\`: ${word}`,
+        `### \`${name}\`: ${standing(f)}`,
         '',
         resultLine(f),
         '',
@@ -244,7 +301,10 @@ export function evidenceMarkdown(v, title) {
       if (f.faults.length) {
         lines.push('| Fault | Level | Attempts with it | Counts against fitness |', '|---|---|---|---|');
         for (const x of f.faults) {
-          lines.push(`| ${x.fault} | ${x.level} | ${x.attempts_with} of ${f.attempts} | ${x.breaks ? 'yes' : 'no'} |`);
+          lines.push(
+            `| ${x.fault} | ${x.level} | ${x.attempts_with} of ${f.attempts} | ` +
+              `${x.breaks ? (x.settled ? 'yes' : 'so far: too few attempts to be sure') : 'no'} |`,
+          );
         }
       } else lines.push('No fault recorded.');
       lines.push('');
@@ -470,14 +530,26 @@ export function createLedger(ask, questions, rules, loadSteps = async () => ({ m
     const rightRate = attempts ? right / attempts : 0.0;
     const listed = [];
     const reasons = [];
+    let unforgivable = false; // an unforgivable fault was seen
+    let decided = false; // some reason is settled by the count
     for (const f of faults) {
       const level = levelOf(test, f.fault, f.kind_of ?? null, profile, overrides);
       const share = attempts ? f.attempts_with / attempts : 0.0;
+      // breaks: the attempts on file show it over what the reader accepts. settled: the count leaves no real
+      // doubt of that (one attempt with an unforgivable fault is a fact; a share needs enough attempts).
       let breaks = false;
-      if (level === 'unforgivable') breaks = f.attempts_with > 0;
-      // a mix-up is already counted in the fault it is a kind of: it explains, it does not decide twice
-      else if (level === 'serious') breaks = (f.kind_of ?? null) === null && share > limits.serious_share;
-      listed.push({ ...f, level, share: round(share, 4), breaks });
+      let settled = false;
+      if (level === 'unforgivable') {
+        breaks = f.attempts_with > 0;
+        settled = breaks;
+        unforgivable = unforgivable || breaks;
+      } else if (level === 'serious') {
+        // a mix-up is already counted in the fault it is a kind of: it explains, it does not decide twice
+        breaks = (f.kind_of ?? null) === null && share > limits.serious_share;
+        settled = breaks && exceeds(f.attempts_with, attempts, limits.serious_share);
+      }
+      decided = decided || settled;
+      listed.push({ ...f, level, share: round(share, 4), breaks, settled });
       if (breaks) {
         reasons.push(
           `${f.fault} (${level}) in ${f.attempts_with} of ${attempts} attempts` +
@@ -487,8 +559,17 @@ export function createLedger(ask, questions, rules, loadSteps = async () => ({ m
     }
     if (rightRate < bar) {
       reasons.unshift(`right result in ${right} of ${attempts} attempts (${percent(rightRate)}), under the ${percent(bar)} bar`);
+      decided = decided || fallsShort(right, attempts, bar);
     }
     const thin = attempts < limits.min_attempts;
+    // The call, and what the count says where it cannot make one yet (ledger/policy.py).
+    let fit = null;
+    let soFar = null;
+    if (unforgivable || (decided && !thin)) fit = false;
+    else if (thin) fit = null;
+    else if (reasons.length) soFar = 'short';
+    else if (clears(right, attempts, bar)) fit = true;
+    else soFar = 'meets';
     const order = (e) => policy.levels.indexOf(e.level);
     listed.sort(
       (x, y) =>
@@ -498,7 +579,8 @@ export function createLedger(ask, questions, rules, loadSteps = async () => ({ m
         byCodePoint(x.fault, y.fault),
     );
     return {
-      fit: thin ? null : reasons.length === 0,
+      fit,
+      so_far: soFar,
       attempts,
       passed,
       pass_rate: round(passRate, 4),
@@ -794,8 +876,28 @@ RETURN mt.key AS match ORDER BY match`;
     const ahead = v.better;
     const settled = v.verdict === 'better';
     if (fa === null || fb === null) {
-      const thin = [a, b].filter((m) => fit[m].fit === null);
-      return ['too few attempts', `Too few attempts to say whether ${thin.join(' or ')} is fit for this task.`, null];
+      // A call that waits for more attempts names no model on its own. Where the other model's fit is settled,
+      // that one is said, and it alone can be the model to use.
+      const soFar = (m) => {
+        const f = fit[m];
+        const said = { meets: 'it meets the bar so far', short: 'it is short of the bar so far' }[f.so_far];
+        return said ? `${said}, on ${f.attempts} attempts` : `it has only ${f.attempts} attempts`;
+      };
+      if (fa === null && fb === null) {
+        return ['not settled', `Not settled yet whether either is fit for this task: for ${a}, ${soFar(a)}; for ${b}, ${soFar(b)}.`, null];
+      }
+      const [known, waiting] = fa === null ? [b, a] : [a, b];
+      const rest = `Whether ${waiting} is fit is not settled yet: ${soFar(waiting)}.`;
+      if (!fit[known].fit) return ['not settled', `${known} is not fit for this task. ${rest}`, null];
+      if (ahead === known) {
+        const lead = settled ? 'did it better' : 'is ahead, not settled';
+        return ['one settled', `Use ${known}: it is fit for this task, and it ${lead}. ${rest}`, known];
+      }
+      if (ahead === waiting) {
+        const lead = settled ? 'did it better' : 'is ahead';
+        return ['one settled', `${known} is fit for this task. ${waiting} ${lead} head to head. ${rest}`, known];
+      }
+      return ['one settled', `${known} is fit for this task. ${rest}`, known];
     }
     if (!fa && !fb) {
       const more = ahead ? ` ${ahead} did it better of the two, which is not the same as fit.` : '';
@@ -1007,6 +1109,7 @@ RETURN mt.key AS match ORDER BY match`;
       for (const [model, f] of Object.entries(v.fit)) {
         out.fit[model] = {
           fit: f.fit,
+          so_far: f.so_far,
           attempts: f.attempts,
           passed: f.passed,
           pass_rate: f.pass_rate,
@@ -1104,9 +1207,9 @@ RETURN mt.key AS match ORDER BY match`;
       lines.push(`**${d.headline}**`, '', `Fit for this task, at ${d.profile} tolerance:`, '');
       for (const name of [a, b]) {
         const f = spec.fit[name];
-        const word = f.fit === null ? 'too few attempts to say' : f.fit ? 'fit' : 'not fit';
         const why = f.reasons.join('; ');
-        lines.push(`- \`${name}\`: **${word}**. ${resultLine(f)}` + (why ? ` Because: ${why}.` : ''));
+        const lead = f.fit === false ? 'Because' : 'So far';
+        lines.push(`- \`${name}\`: **${standing(f)}**. ${resultLine(f)}` + (why ? ` ${lead}: ${why}.` : ''));
       }
       const versus = {
         better: `\`${d.better}\` did this task better than the other model.`,

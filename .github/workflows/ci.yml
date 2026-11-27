@@ -149,9 +149,9 @@ jobs:
               { echo "The README's table is no longer what the record gives for $task"; exit 1; }
           done <<'ROWS'
           refund-queue|43|37|6|99|100|Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better.|Neither is fit for this task.
-          incident-triage|41|30|11|91|97|Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better.|Neither is fit for this task.
+          incident-triage|41|30|11|91|97|Use anthropic:claude-haiku-5-5: both are fit for this task and it did it better.|Not settled yet whether either is fit for this task: for anthropic:claude-haiku-5-5, it is short of the bar so far, on 80 attempts
           access-review|41|19|22|98|99|Both are fit for this task.|Use openrouter:deepseek/deepseek-v4.1-flash-1017: it is the only one of the two fit for this task
-          inventory-transfer|41|20|19|87|95|Both are fit for this task.|Neither is fit for this task.
+          inventory-transfer|41|20|19|87|95|Whether anthropic:claude-haiku-5-5 is fit is not settled yet: it meets the bar so far, on 79 attempts.|anthropic:claude-haiku-5-5 is not fit for this task. Whether openrouter:deepseek/deepseek-v4.1-flash-1017 is fit is not settled yet: it is short of the bar so far, on 93 attempts.
           ROWS
       - name: Rebuilding the store from the shipped records gives the same answers
         shell: bash

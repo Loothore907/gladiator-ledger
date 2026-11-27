@@ -61,8 +61,12 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   an answer key is promised only for the kind that has one published (a live race's stays with the runner). A
   fact the record does not hold is "not recorded", never "None". Read through a tolerance a verdict has one bar,
   the tolerance's own, and no second "good enough" beside it. Cost is given per right result and per clean run.
-  Still the owner's to decide: whether a fit or not-fit call should wait for more than the 8 attempts it needs
-  today.
+- **A fit call waits for the count to settle it (owner, 2026-11-27).** "Fit" and "not fit" are said only when the
+  attempts on file leave under a 5% chance that the truth is on the other side of the line (`ledger/policy.py`):
+  with none wrong, 14 attempts at an 80% bar and 29 at 90%. Until then a model "meets the bar so far" or is "short
+  of the bar so far", with the count, and no model is named to use on a "so far" (where the other model's fit is
+  settled, that one can be). An unforgivable fault makes a model unfit at any count: one attempt with it is a
+  fact.
 - **Fitness is decided by the fault levels (owner, 2026-11-26).** The bar asks for the right result (every
   decision right, nothing left undone), not for the test's own pass, which also asks for its process. How a model
   got there is judged only by its faults, each at the level the reader gives it, so a fault the reader calls minor

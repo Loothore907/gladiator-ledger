@@ -51,8 +51,9 @@ business could run unattended: Haiku made one wrong access decision in 81 attemp
 every refund correctly, and Haiku wins on process: in 65 of its 95 attempts DeepSeek decided a request without
 ever looking up a record it was told to read. Ledger does not decide whether that matters. It counts it, gives it a
 level you can change, and shows the answer for one person (minor: both are fit) and for a business (serious:
-neither is). When the evidence is thin or level it says "leaning" or names no winner, and when neither model is
-fit it says so and lists the tested models that are.
+neither is). When the evidence is thin or level it says "leaning" or names no winner. It calls a model fit or
+not fit only when its attempts settle that, and until then says what they show so far. When neither model is fit
+it says so and lists the tested models that are.
 
 ## How Relate is used
 - **Embedded Python library, single-file store**, opened read-only for every question.
