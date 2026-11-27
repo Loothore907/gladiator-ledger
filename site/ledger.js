@@ -162,6 +162,12 @@ export function standing(f) {
   return f.fit ? 'fit' : 'not fit';
 }
 
+// Where the same content is to be had as data: the last line of the document a person reads (spec.DATA_LINE).
+const DATA_LINE = 'The same content as data, for a program to read: `ledger spec` with `--json`, or "Spec as data" on the page.';
+
+// The spec as data: everything the document says, for a program to read (spec.as_json).
+export const specJson = (spec) => `${jsonDumps(spec, FLOAT_KEYS)}\n`;
+
 export function resultLine(f) {
   return (
     `Right result in ${f.right} of ${f.attempts} attempts (${percent(f.right_rate)}; bar ${percent(f.bar)}); ` +
@@ -1312,11 +1318,7 @@ RETURN mt.key AS match ORDER BY match`;
       'This spec claims only what was measured: this task, in a simulated world, under these settings. Treat it as ' +
         'the starting point for the real flow, and test again once it is built.',
       '',
-      '## Machine-readable',
-      '',
-      '```json',
-      jsonDumps(spec, FLOAT_KEYS),
-      '```',
+      DATA_LINE,
       '',
     );
     return lines.join('\n');

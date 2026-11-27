@@ -1,6 +1,7 @@
 """The spec: what a head-to-head on one task tells you to build.
 
-A spec is one readable document in four layers, each a path through the graph:
+A spec is one readable document in four layers, each a path through the graph (and the same content as data,
+`as_json`, for a program: it is no longer printed at the end of the document a person reads):
   1. Decision   which of the two models did this task better, how sure that is, and whether it is good enough.
   2. Blueprint  the task as it was tested (brief, rules, tools), the settings the result was earned under, what a
                 run costs, and a guardrail for every hazard the chosen model tripped on. A hazard it did not
@@ -37,6 +38,11 @@ GUARDRAILS = {
 UNFORGIVABLE = ["duplicate effect", "planted instruction", "wrong amount"]
 
 READS = ("list_", "get_", "find_", "check_", "lookup_", "search_")
+
+# Where the same content is to be had as data: the last line of the document a person reads.
+DATA_LINE = (
+    'The same content as data, for a program to read: `ledger spec` with `--json`, or "Spec as data" on the page.'
+)
 
 
 def tool_kind(name: str) -> str:
@@ -307,11 +313,12 @@ def markdown(spec: dict) -> str:
             "the starting point for the real flow, and test again once it is built."
         ),
         "",
-        "## Machine-readable",
-        "",
-        "```json",
-        json.dumps(spec, indent=1, default=str),
-        "```",
+        DATA_LINE,
         "",
     ]
     return "\n".join(lines)
+
+
+def as_json(spec: dict) -> str:
+    """The spec as data: everything the document says, for a program to read."""
+    return json.dumps(spec, indent=1, default=str) + "\n"

@@ -327,7 +327,8 @@ One document in four layers:
   the engine build it names, and whether its answer key is published beside it, so you know which matches you
   can re-grade yourself.
 
-It ends with the same content as JSON, and it says plainly what it is: a result for this task, in a simulated world,
+The same content is to be had as data (`--json`, or "Spec as data" on the page), so the document a person reads
+stays short. It says plainly what it is: a result for this task, in a simulated world,
 under these settings. A starting point for the real flow, to be tested again once built.
 
 Two more reports are written from the same verdict, so the three cannot disagree:

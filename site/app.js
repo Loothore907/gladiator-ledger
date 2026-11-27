@@ -1,6 +1,6 @@
 // The page: starts the engine worker, exposes window.ledgerDemo, and draws the three steps.
 
-import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, keyOf, recordKind, sureAt } from './ledger.js';
+import { ANSWER_KEYS, chance, costMarkdown, createLedger, ended, evidenceMarkdown, expandSteps, guardNotes, keyOf, recordKind, specJson, sureAt } from './ledger.js';
 import { fixed, percent, str } from './pyformat.js';
 
 // ---- the worker -------------------------------------------------------------------------------------------
@@ -194,6 +194,8 @@ window.ledgerDemo = {
     const { ledger } = await ledgerReady;
     return ledger.markdown(await ledger.spec(task, a, b, profile, overrides));
   },
+  // the spec as data, the file the page offers beside the document
+  specJson: async (task, a, b, profile = null, overrides = null) => specJson(await (await ledgerReady).ledger.spec(task, a, b, profile, overrides)),
   // the verdict now on screen (what the graph picture is drawn from)
   current: async () => shown.v,
   // which pairs a verdict counts: the rule itself, for site/check.cjs
@@ -3401,14 +3403,15 @@ function drawVerdict(spec, v) {
         { type: 'button', id: 'download-all', class: 'quiet', onclick: () => download([markdown, costText, evidenceText].join('\n\n'), 'ledger-reports.md') },
         'All three in one file',
       ),
+      el('button', { type: 'button', id: 'download-json', class: 'quiet', onclick: () => download(specJson(spec), 'spec.json') }, 'Spec as data (JSON)'),
       el('button', { type: 'button', id: 'copy-spec', class: 'quiet', onclick: () => copy(markdown, copyNote) }, 'Copy spec'),
       copyNote,
     ),
     el(
       'p',
       { class: 'note' },
-      'Three documents for this pair, each the same Markdown the ledger command line writes: the spec (what to build, with a ' +
-        'machine-readable copy at the end), the cost breakdown (per attempt, per right result, per clean run, per 1,000 runs, ' +
+      'Three documents for this pair, each the same Markdown the ledger command line writes: the spec (what to build; the ' +
+        'same content as data is its own file, for a program to read), the cost breakdown (per attempt, per right result, per clean run, per 1,000 runs, ' +
         'scenario by scenario) and the evidence report (fit, every fault with its count, every scenario and its sealed record).',
     ),
   ];
@@ -3416,7 +3419,8 @@ function drawVerdict(spec, v) {
 }
 
 function download(markdown, name) {
-  const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
+  const type = name.endsWith('.json') ? 'application/json' : 'text/markdown;charset=utf-8';
+  const url = URL.createObjectURL(new Blob([markdown], { type }));
   const link = el('a', { href: url, download: name });
   document.body.append(link);
   link.click();

@@ -195,14 +195,11 @@ async function main() {
       const args = [want.task, want.decision.a, want.decision.b];
       const got = await page.evaluate(([t, a, b]) => window.ledgerDemo.spec(t, a, b), args);
       same(want, got, `specs[${i}] (${args.join(', ')})`);
-      // The downloadable Markdown ends with the spec as JSON: it must be the same spec, in Python's formatting.
+      // The document a person reads carries no copy of itself as data (owner, 2026-11-27): the data is its own
+      // file, and it must be the same spec.
       const md = await page.evaluate(([t, a, b]) => window.ledgerDemo.specMarkdown(t, a, b), args);
-      const block = /## Machine-readable\n\n```json\n([\s\S]*)\n```\n$/.exec(md);
-      if (!md.startsWith('# Spec: ') || !block) {
-        problems.push(`specs[${i}]: the Markdown is not in the expected shape`);
-      } else {
-        same(want, JSON.parse(block[1]), `specs[${i}] Markdown JSON block`);
-      }
+      if (!md.startsWith('# Spec: ') || /```json|Machine-readable/.test(md)) problems.push(`specs[${i}]: the Markdown is not in the expected shape`);
+      same(want, JSON.parse(await page.evaluate(([t, a, b]) => window.ledgerDemo.specJson(t, a, b), args)), `specs[${i}] as data`);
     }
     // The same answers read through fitness (ledger/policy.py): both profiles, and a reader's own rule.
     for (const [i, { overrides, verdict: want }] of expected.judged.entries()) {
@@ -210,7 +207,7 @@ async function main() {
       const got = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.verdict(t, a, b, p, o), args);
       same(want, got, `judged[${i}] (${want.task}: ${want.a} vs ${want.b}, ${want.profile}${overrides ? ', own rule' : ''})`);
     }
-    for (const [i, { overrides, spec: want, markdown: wantText, cost: wantCost, evidence: wantEvidence }] of expected.judged_specs.entries()) {
+    for (const [i, { overrides, spec: want, markdown: wantText, json: wantJson, cost: wantCost, evidence: wantEvidence }] of expected.judged_specs.entries()) {
       const args = [want.task, want.decision.a, want.decision.b, want.decision.profile, overrides];
       const got = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.spec(t, a, b, p, o), args);
       same(want, got, `judged_specs[${i}] (${args.slice(0, 4).join(', ')})`);
@@ -218,7 +215,15 @@ async function main() {
         async ([t, a, b, p, o]) => window.ledgerDemo.specMarkdownJudged(t, a, b, p, o),
         args,
       );
-      const block = /## Machine-readable\n\n```json\n([\s\S]*)\n```\n$/.exec(md);
+      // the spec as data must be the command line's text too, in Python's formatting, character for character
+      const data = await page.evaluate(([t, a, b, p, o]) => window.ledgerDemo.specJson(t, a, b, p, o), args);
+      if (typeof wantJson !== 'string' || wantJson.length < 200) problems.push(`judged_specs[${i}]: no expected spec as data to compare`);
+      else if (data !== wantJson) {
+        const at = [...data].findIndex((ch, k) => ch !== wantJson[k]);
+        problems.push(`judged_specs[${i}]: the spec as data differs at character ${at}: page ${JSON.stringify(data.slice(at - 30, at + 60))}, command line ${JSON.stringify(wantJson.slice(at - 30, at + 60))}`);
+      }
+      compared += 1;
+      if (/```json|Machine-readable/.test(md)) problems.push(`judged_specs[${i}]: the document still carries a copy of itself as data`);
       // the downloadable spec must be the command line's text, character for character
       if (md !== wantText) {
         const at = [...md].findIndex((ch, k) => ch !== wantText[k]);
@@ -235,8 +240,7 @@ async function main() {
         }
         compared += 1;
       }
-      if (!block) problems.push(`judged_specs[${i}]: the Markdown is not in the expected shape`);
-      else same(want, JSON.parse(block[1]), `judged_specs[${i}] Markdown JSON block`);
+      same(want, JSON.parse(data), `judged_specs[${i}] as data`);
     }
     for (const [i, want] of expected.flows.entries()) {
       const got = await page.evaluate((text) => window.ledgerDemo.flows(text), want.described);
@@ -652,7 +656,7 @@ async function main() {
     }
     const foot = await page.locator('footer').innerText();
     if (!/This view cannot start a match/.test(foot) || /real money/.test(foot)) problems.push('the small print of the public page should say this view cannot start a match');
-    for (const id of ['download-spec', 'download-cost', 'download-evidence', 'download-all']) {
+    for (const id of ['download-spec', 'download-cost', 'download-evidence', 'download-all', 'download-json']) {
       if (example && !(await page.locator(`#${id}`).count())) problems.push(`the result offers no ${id} button`);
     }
     // What the screen may claim (the reports are held to the command line's text above; this is the page's own
