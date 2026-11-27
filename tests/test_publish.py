@@ -1,4 +1,6 @@
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ledger import cli, publish
 from ledger.bridges.gladiator import canonical_sha256
@@ -77,3 +79,73 @@ def test_verify_checks_seals_and_private_halves(tmp_path, capsys):
     result = publish.verify(data / "records")
     assert len(result["problems"]) == 1 and "r2" in result["problems"][0]
     assert cli.main(["verify", "--data", str(data)]) == 1
+
+
+def test_an_import_from_a_runner_brings_each_answer_key_the_runner_hands_out(tmp_path):
+    """A live race's answer key is published once the race is over (owner, 2026-11-27): the runner hands it out for
+    fresh worlds only, and the import applies its own two rules to it like to any other private half."""
+    filed = tmp_path / "runner"
+    with_private(filed, "fresh")  # the runner hands its key out
+    with_private(filed, "kept")  # ... and this one's not (a runner from before that day, or a fixed test)
+    with_private(filed, "swapped")  # ... and for this one hands out a key that is not the one sealed
+    served = {"fresh": "fresh", "swapped": "fresh"}  # run id -> whose operator.json is sent
+    asked = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            return
+
+        def do_GET(self):
+            asked.append(self.path)
+            name = self.path[len("/records/") :] if self.path.startswith("/records/") else ""
+            if self.path == "/races":
+                body = json.dumps(
+                    {"races": [{"run_id": "fresh"}, {"run_id": "kept"}], "batches": [{"run_id": "swapped"}]}
+                )
+            elif name.endswith("/operator") and name[: -len("/operator")] in served:
+                body = (filed / served[name[: -len("/operator")]] / "operator.json").read_text()
+            elif (filed / name / "record.json").is_file() and "/" not in name:
+                body = (filed / name / "record.json").read_text()
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        # the swapped key is a different private half: give it different content, so its fingerprint differs
+        (filed / "fresh" / "operator.json").write_text(json.dumps({"A": ["another world"], "B": []}))
+        reseal(
+            filed / "fresh" / "record.json",
+            lambda body: body.update(operator_sha256=canonical_sha256({"A": ["another world"], "B": []})),
+        )
+        into = tmp_path / "fetched"
+        got = publish.fetch_live(f"http://127.0.0.1:{server.server_address[1]}", into)
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert got == {"fetched": ["fresh", "kept", "swapped"], "answer_keys": ["fresh", "swapped"]}
+    assert "/records/kept/operator" in asked  # asked for, and not handed out: the record stands alone
+    assert files(into) == [
+        "fresh/operator.json",
+        "fresh/record.json",
+        "kept/record.json",
+        "swapped/operator.json",
+        "swapped/record.json",
+    ]
+    dest = tmp_path / "data" / "records"
+    out = publish.import_records(into, dest)
+    # the key that is not the one its record was sealed with is refused together with that record
+    assert out["private_copied"] == ["fresh"] and out["copied"] == ["fresh", "kept"] and len(out["refused"]) == 1
+    assert files(dest) == ["fresh/operator.json", "fresh/record.json", "kept/record.json"]
+    assert publish.verify(dest) == {"records": 2, "private_halves": 1, "problems": []}
+    # and the graph is told which record a reader can re-grade
+    from ledger.bridges import gladiator
+
+    keyed = {run["run_id"]: run["props"]["answer_key"] for run in gladiator.read_records(dest).runs}
+    assert keyed == {"fresh": True, "kept": False}

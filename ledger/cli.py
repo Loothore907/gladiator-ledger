@@ -631,7 +631,13 @@ def verdict(
     hazards = rows(store, questions.PAIR_HAZARDS, params)
     runs = {}
     for p in pairs:
-        runs[p["run"]] = {"run": p["run"], "seal_sha256": p["seal"], "engine_commit": p["engine"], "suite": p["suite"]}
+        runs[p["run"]] = {
+            "run": p["run"],
+            "seal_sha256": p["seal"],
+            "engine_commit": p["engine"],
+            "suite": p["suite"],
+            "answer_key": bool(p["answer_key"]),  # published beside the record, so the match can be re-graded
+        }
     if profile:
         # Fit first: is each model fit for the task at all, under the reader's tolerance? Then the head to head.
         version_key = max(p["version"] for p in pairs)
@@ -772,8 +778,10 @@ def print_verdict(v: dict) -> None:
     print("\nEvidence (sealed match records):")
     for e in v["evidence"]:
         engine = str(e["engine_commit"])[:7] if e["engine_commit"] else "not recorded"
+        key = "answer key published" if e.get("answer_key") else "no answer key published"
         print(
-            f"  - {e['run']}  {reports.record_kind(e.get('suite'))}  seal {str(e['seal_sha256'])[:12]}  engine {engine}"
+            f"  - {e['run']}  {reports.record_kind(e.get('suite'))}  seal {str(e['seal_sha256'])[:12]}  "
+            f"engine {engine}  {key}"
         )
 
 
@@ -1190,12 +1198,15 @@ def main(argv=None):
         print(json.dumps({k: {x: v[x] for x in v if x != "stats"} for k, v in out.items()}, indent=1))
     elif args.cmd == "import":
         out = {}
-        if args.runner:  # live races: public halves only, each checked against its seal like any other record
+        if args.runner:
+            # live races: each record checked against its seal like any other, and its answer key published
+            # beside it where the runner hands one out, under the same two rules (ledger/publish.py)
             import tempfile
 
             with tempfile.TemporaryDirectory() as folder:
                 out["live"] = publish.fetch_live(args.runner, Path(folder))
-                out["live_records"] = publish.import_records(Path(folder), args.data / "records", private=False)
+                private = not args.public_only
+                out["live_records"] = publish.import_records(Path(folder), args.data / "records", private)
         if args.records:
             out["records"] = publish.import_records(args.records, args.data / "records", not args.public_only)
         if args.validations:

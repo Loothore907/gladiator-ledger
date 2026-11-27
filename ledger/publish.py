@@ -17,7 +17,7 @@ import json
 import shutil
 from pathlib import Path
 
-from ledger.bridges.gladiator import canonical_sha256, seal_ok
+from ledger.bridges.gladiator import fresh_worlds_only, private_half_matches, seal_ok
 
 
 def _sealed(path: Path) -> dict | None:
@@ -26,24 +26,6 @@ def _sealed(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return record if isinstance(record, dict) and seal_ok(record) else None
-
-
-def fresh_worlds_only(record: dict) -> bool:
-    """True when every test in the match generates a fresh world per attempt (so its answers are spent)."""
-    kinds = {
-        (res.get("challenge") or {}).get("instances")
-        for side in record["body"]["contestants"].values()
-        for res in side["results"]
-    }
-    return kinds == {"generator"}
-
-
-def private_half_matches(record: dict, private_path: Path) -> bool:
-    try:
-        private = json.loads(private_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return canonical_sha256(private) == record["body"].get("operator_sha256")
 
 
 def _copy(src: Path, target: Path) -> bool:
@@ -96,7 +78,10 @@ def import_records(src: Path, dest: Path, private: bool = True) -> dict:
 def fetch_live(runner: str, into: Path) -> dict:
     """Download the sealed public records of the live races and batches a Gladiator runner has on file, into
     `into/<run_id>/record.json`, ready for import_records. Batches of one model against itself come too: the
-    loader keeps them apart as consistency checks, never as matches. Nothing private is asked for."""
+    loader keeps them apart as consistency checks, never as matches. Each finished race's answer key comes with
+    it where the runner hands one out (`/records/<run_id>/operator`: fresh worlds only; owner, 2026-11-27), into
+    `into/<run_id>/operator.json`; import_records then applies its own two rules to it like to any other."""
+    import urllib.error
     import urllib.request
 
     def get(path: str):
@@ -106,13 +91,19 @@ def fetch_live(runner: str, into: Path) -> dict:
 
     listed = get("/races")
     wanted = [r["run_id"] for r in listed.get("races", [])] + [b["run_id"] for b in listed.get("batches", [])]
-    fetched = []
+    fetched, keys = [], []
     for run_id in wanted:
         target = Path(into) / run_id / "record.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(get(f"/records/{run_id}"), indent=1, ensure_ascii=False), encoding="utf-8")
         fetched.append(run_id)
-    return {"fetched": fetched}
+        try:
+            key = get(f"/records/{run_id}/operator")
+        except (urllib.error.URLError, OSError, ValueError):
+            continue  # not handed out (a fixed test, or a runner from before 2026-11-27): the record stands alone
+        target.with_name("operator.json").write_text(json.dumps(key, indent=1, ensure_ascii=False), encoding="utf-8")
+        keys.append(run_id)
+    return {"fetched": fetched, "answer_keys": keys}
 
 
 def verify(dest: Path) -> dict:

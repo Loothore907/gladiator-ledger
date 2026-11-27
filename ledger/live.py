@@ -65,6 +65,7 @@ class LiveRecord:
         self.paths: dict[str, Path] = {}  # run id -> its sealed record on disk
         self.seals: dict[str, str] = {}  # run id -> its seal, for every run in the store
         self.refused: set[str] = set()  # run ids the runner listed whose record was refused: not asked for again
+        self.no_key: set[str] = set()  # run ids whose answer key the runner did not hand out: asked once per start
         self.synced = 0.0  # when the runner was last looked at
         self.problem = ""  # why the last look at the runner failed, if it did
         self._syncing = threading.Lock()
@@ -94,9 +95,11 @@ class LiveRecord:
     # ---- start-up: the store as it is, or built again from the records ----
 
     def _on_file(self) -> dict[str, Path]:
-        """Every sealed record this service has, by run id: the baseline, then the ones it took in itself."""
+        """Every sealed record this service has, by run id: the ones it took in itself, and the baseline. Where a
+        record is in both, the baseline's copy is the one read: it is the published one, with whatever is
+        published beside it (its answer key, its billed costs)."""
         found = {}
-        for root in (self.data / "records" if self.data else None, self.records):
+        for root in (self.records, self.data / "records" if self.data else None):
             if root and root.exists():
                 for path in gladiator.find_records(root):
                     found[path.parent.name] = path
@@ -148,9 +151,16 @@ class LiveRecord:
         for run in read.values():
             if run:
                 self.flows.absorb(run)
+        keys = [{"id": i, "key": run["props"]["answer_key"]} for i, run in read.items() if run and i in self.seals]
         for run_id, run in read.items():
             if run and run_id not in self.seals:
                 self._write(run, self._read(self.paths[run_id])[1])
+        if keys:  # records the reopened store already held: whether each one's answer key is on file now
+            self._ask(
+                lambda conn: conn.execute(
+                    "UNWIND $rows AS x MATCH (r:Run {run_id: x.id}) SET r.answer_key = x.key", {"rows": keys}
+                )
+            )
         self._beside()
         self.say(f"[live] ready: {len(self.seals)} records in the store")
 
@@ -184,7 +194,7 @@ class LiveRecord:
             self.say(f"[live] refused (the seal does not match): {Path(path).parent.name}")
             return None
         body = costs.corrected(record["body"], costs.read_billed(Path(path), record["sha256"]))
-        run = gladiator.run_rows(body, record["sha256"])
+        run = gladiator.run_rows(body, record["sha256"], gladiator.answer_key_beside(Path(path), record))
         return (run, steps.run_steps(record["body"])) if with_steps else run
 
     def _write(self, run: dict, run_steps: dict) -> None:
@@ -213,6 +223,7 @@ class LiveRecord:
         path = self.records / run_id / "record.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(record, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+        self._take_key(path, record)  # before the record is read, so its rows say whether the key is on file
         run, run_steps = self._read(path)
         with self._facts:
             self.paths[run_id] = path
@@ -220,6 +231,54 @@ class LiveRecord:
         self._write(run, run_steps)
         self.say(f"[live] took in {run_id}")
         return True
+
+    def _take_key(self, path: Path, record: dict) -> bool:
+        """Ask the runner for the answer key of one record this service took in, and keep it beside the record
+        when it is the one the record was sealed with (owner, 2026-11-27: a live race's answer key is published
+        once the race is over). True when the key is on file afterwards. A runner that hands none out (a fixed
+        test, or a runner from before that day) leaves the record as it is. Never fails a record."""
+        if gladiator.answer_key_beside(path, record):
+            return True
+        run_id = record["body"]["run_id"]
+        if not self.runner or not gladiator.fresh_worlds_only(record) or run_id in self.no_key:
+            return False
+        private = path.with_name("operator.json")
+        try:
+            key = self._fetch(f"/records/{run_id}/operator")
+            private.write_text(json.dumps(key, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+        except (urllib.error.URLError, OSError, ValueError):
+            self.no_key.add(run_id)  # asked once per start: a runner that hands it out later is asked again then
+            return False
+        if gladiator.answer_key_beside(path, record):
+            self.say(f"[live] kept the answer key of {run_id}")
+            return True
+        private.unlink(missing_ok=True)  # not the key this record was sealed with: never kept
+        self.no_key.add(run_id)
+        self.say(f"[live] refused an answer key (not the one sealed): {run_id}")
+        return False
+
+    def _late_keys(self) -> list[str]:
+        """Records this service took in before their answer key was handed out: ask for a few of them again,
+        and mark in the store the ones that now have it."""
+        with self._facts:
+            mine = [
+                (i, path) for i, path in self.paths.items() if self.records in path.parents and i not in self.no_key
+            ]
+        got, asked = [], 0
+        for run_id, path in mine:
+            if asked >= MAX_NEW_PER_SYNC:
+                break  # the rest wait for the next look
+            if path.with_name("operator.json").is_file():
+                continue
+            asked += 1
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if self._take_key(path, record):
+                got.append(run_id)
+        if got:
+            self._ask(
+                lambda conn: conn.execute("MATCH (r:Run) WHERE r.run_id IN $ids SET r.answer_key = true", {"ids": got})
+            )
+        return got
 
     # ---- the runner ----
 
@@ -251,6 +310,7 @@ class LiveRecord:
                     # refused once is refused until this service is started again: a sealed record does not
                     # change, so asking the runner for it on every look would only repeat the refusal
                     self.refused.add(run_id)
+            self._late_keys()
             self.problem = ""
         except (urllib.error.URLError, OSError, ValueError, KeyError) as error:
             self.problem = f"{type(error).__name__}: {str(error)[:200]}"
@@ -300,6 +360,7 @@ class LiveRecord:
         return {
             "ok": True,
             "records": len(self.runs()),
+            "answer_keys": self.rows("MATCH (r:Run) WHERE r.answer_key RETURN count(r) AS n")[0]["n"],
             "steps": counted,
             "runner": self.runner,
             "refused": sorted(self.refused),

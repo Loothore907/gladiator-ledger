@@ -105,6 +105,33 @@ def seal_ok(record: dict) -> bool:
     return canonical_sha256(record.get("body")) == record.get("sha256")
 
 
+def fresh_worlds_only(record: dict) -> bool:
+    """True when every test in the match generates a fresh world per attempt (so its answers are spent)."""
+    kinds = {
+        (res.get("challenge") or {}).get("instances")
+        for side in record["body"]["contestants"].values()
+        for res in side["results"]
+    }
+    return kinds == {"generator"}
+
+
+def private_half_matches(record: dict, private_path: Path) -> bool:
+    try:
+        private = json.loads(Path(private_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return canonical_sha256(private) == record["body"].get("operator_sha256")
+
+
+def answer_key_beside(record_path: Path, record: dict) -> bool:
+    """True when the record's answer key (its private half, `operator.json`) is published beside it: the file is
+    there, the match was played on fresh worlds only (the one kind whose answers are ever published) and the file
+    matches the fingerprint the sealed record carries. This is all the graph knows of an answer key: whether a
+    reader can check the match with it. Nothing inside it is read into the graph."""
+    private = Path(record_path).with_name("operator.json")
+    return private.is_file() and fresh_worlds_only(record) and private_half_matches(record, private)
+
+
 def version_rank(version) -> int:
     """2.10.1 -> 2010001, so versions compare as numbers in Cypher."""
     parts = [int(x) if x.isdigit() else 0 for x in str(version).split(".")[:3]] + [0, 0, 0]
@@ -268,7 +295,7 @@ def settle_flows(runs: list[dict], flows: Flows | None = None) -> Flows:
     return flows
 
 
-def run_rows(body: dict, seal: str) -> dict:
+def run_rows(body: dict, seal: str, answer_key: bool = False) -> dict:
     run_id = body["run_id"]
     settings = body.get("settings") or {}
     profile = ((body.get("suite") or {}).get("success") or {}).get("profile") or "balanced"
@@ -383,6 +410,9 @@ def run_rows(body: dict, seal: str) -> dict:
             "model_b": sides["B"]["id"],
             "recorded_winner": verdict.get("winner"),
             "seal_sha256": seal,
+            # whether its answer key is published beside it (answer_key_beside): a fact about what a reader can
+            # check, set by whoever reads the record from a folder
+            "answer_key": bool(answer_key),
         },
         "matches": matches,
         "self_checks": self_checks,
@@ -447,7 +477,7 @@ def read_records(root: Path) -> Evidence:
             continue
         # costs are corrected as the record is read (ledger/costs.py); the sealed file itself is never changed
         body = costs.corrected(record["body"], costs.read_billed(path, record["sha256"]))
-        out.runs.append(run_rows(body, record["sha256"]))
+        out.runs.append(run_rows(body, record["sha256"], answer_key_beside(path, record)))
     settle_flows(out.runs)
     return out
 
