@@ -18,12 +18,14 @@
     flow, the record of the closest tested workflow is a starting point, and a match on your task is the evidence.</p>
   <p id="status" class="status" role="status" aria-live="polite">Building the graph in your browser…</p>
   <p id="record-note" class="status" role="status" aria-live="polite" hidden></p>
-  <p class="judge-row"><button type="button" id="judge-open" class="quiet small" hidden>Judge sign-in</button></p>
+  <p class="judge-row"><button type="button" id="judge-open" class="quiet small" hidden>Sign in (by invitation)</button></p>
   <p id="live-banner" class="live-banner" role="status" aria-live="polite" hidden></p>
   <dialog id="judge-dialog" aria-labelledby="judge-title">
     <form id="judge-form" method="dialog" autocomplete="off">
       <h2 id="judge-title">Sign in for live races</h2>
-      <p class="note">Live races are open to the hackathon judges for now. Enter the access code you were given.</p>
+      <p class="note">Live races on the hosted runner are by invitation: enter the access code you were given.
+        Without one, a live race runs on your own machine with your own API key
+        (<a href="https://github.com/Loothore907/gladiator-ledger#race-two-models-live-with-your-own-api-key" target="_blank" rel="noopener">two commands, in the README</a>).</p>
       <label for="judge-code">Access code</label>
       <input id="judge-code" type="password" autocomplete="off" spellcheck="false" required>
       <p id="judge-note" class="note" role="status" aria-live="polite"></p>
@@ -90,8 +92,8 @@
 <footer class="foot">
   <p id="foot-view">Every verdict on this page rests on recorded matches: finished, sealed and replayable here. The page
     reads them locally in this browser tab, needs no key and sends nothing you type anywhere. This view cannot start a
-    match. Live races run on a separate Gladiator runner and are open to the hackathon judges for now (Judge sign-in,
-    at the top).</p>
+    match. A live race calls paid model APIs, so it runs on a separate Gladiator runner: on your own machine with
+    your own API key (two commands, in the README).</p>
   <p>Published scores are used only to suggest a fair opponent, never to rank or recommend. They come from Epoch AI,
     “Capabilities &amp; benchmarking” (the Epoch Capabilities Index), epoch.ai/benchmarks, licensed CC BY 4.0.</p>
   <p><a href="https://github.com/Loothore907/gladiator-ledger">Gladiator Ledger on GitHub</a></p>

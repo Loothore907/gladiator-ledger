@@ -1217,6 +1217,17 @@ def main(argv=None):
     sv.add_argument(
         "--origin", action="append", default=[], help="a page address allowed to read it from a browser (repeatable)"
     )
+    sv.add_argument(
+        "--page",
+        type=int,
+        nargs="?",
+        const=8000,
+        metavar="PORT",
+        help="also serve the page (site/) on this machine, on this port (8000 unless given), and print the "
+        "address to open: the page then reads this record, and races on --runner. For a live race on your own "
+        "machine with your own key",
+    )
+    sv.add_argument("--site", type=Path, default=Path("site"), help="the page's folder, for --page (default site/)")
     fl = sub.add_parser("flows", parents=[common], help="describe your flow: find the closest tested workflows")
     fl.add_argument("described", nargs="?", help="what the flow does, in your own words")
     fl.add_argument("--json", action="store_true")
@@ -1370,7 +1381,7 @@ def main(argv=None):
     elif args.cmd == "serve":
         from ledger import live
 
-        live.serve(args.state, args.data, args.runner, args.host, args.port, args.origin)
+        live.serve(args.state, args.data, args.runner, args.host, args.port, args.origin, args.page, args.site)
     elif args.cmd == "flows":
         result = find_flows(args.store, args.described)
         if args.json:

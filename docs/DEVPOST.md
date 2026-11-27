@@ -37,8 +37,9 @@ and walks it:
 5. **Race them live.** The graph states what the record expects, a runner plays one brand-new scenario (or a
    batch of 10 or 25), and the page says whether the result was in line with the record or against it. The sealed
    result joins the record as the race ends: seconds later it is one more cell in the evidence graph, its world is
-   drawn under the rows, and the verdict has been read again with it. (Open to judges: "Judge sign-in" on the
-   page, with the access code.)
+   drawn under the rows, and the verdict has been read again with it. (This is the one part that calls a paid
+   model API, so it runs on your own machine with your own API key: two commands, under "Setup" below. The
+   video shows one.)
 6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every fault
    the model made (how often, and what to build against it) and for every hazard the test plants,
    and the sealed records behind it.
@@ -110,8 +111,34 @@ uv run ledger cypher "MATCH (m:Model)<-[:BY]-(a:Attempt) RETURN m.name AS model,
 python3 -m http.server --directory site 8000     # the browser page
 ```
 No API keys and no cost. Linux, macOS and Windows. The record grows as live races are run; add
-`--until 2026-11-26T05:00` to a command to get the figures quoted here and in the README exactly. Live races and
-judge sign-in are on the hosted page; a page served from a clone shows the record as it ships and says so.
+`--until 2026-11-26T05:00` to a command to get the figures quoted here and in the README exactly. A page served
+from a clone shows the record as it ships and says so.
+
+**The live race, with your own API key** (the only part that needs one; README, "Race two models live, with your
+own API key"). The race runner is Gladiator, the open engine the matches were played on. It reads the key from
+`.env` in its folder, or from an environment variable of the same name:
+```
+git clone https://github.com/Loothore907/gladiator-core && cd gladiator-core && uv sync
+cp .env.example .env        # fill in ONE line: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY
+uv run gladiator serve      # this machine only; says which models it can offer
+```
+and in a second terminal, in gladiator-ledger:
+```
+uv run ledger serve --runner http://127.0.0.1:8787 --page     # prints the address to open
+```
+| Key | Provider | Models it can race |
+|---|---|---|
+| `OPENROUTER_API_KEY` | OpenRouter | DeepSeek V4.1 Flash, MiniMax M3.1 Flash, Qwen 3.8 27B, GLM-5.3 |
+| `ANTHROPIC_API_KEY` | Anthropic | Claude Haiku 5.5, Claude Sonnet 5.5 |
+| `OPENAI_API_KEY` | OpenAI | GPT-6 Luna, GPT-6.1 Terra |
+| `GEMINI_API_KEY` | Google | Gemini 3.1 Flash-Lite, Gemini 3.5 Flash-Lite |
+
+Any one key is enough. An OpenRouter key shows the most: the record already holds a verdict for every pair of its
+four models, so the race joins one (the README says what the record holds for each key's pairs).
+
+On the page: pick a workflow, two models marked "can race live", and press "Race them live". A race between two
+small models has cost about one cent; the runner will not spend more than $0.25 on a race or $5.00 in all. The key
+stays on your machine and goes only to its own provider.
 
 ## Before and during the contest (the contest opened Nov 11, 2026)
 | When | What |
@@ -138,9 +165,13 @@ and copies one small scoring file, marked in the source. The full statement is `
 ## Links to fill in
 - Repository: https://github.com/Loothore907/gladiator-ledger
 - Working demo: https://ledger.gladiatorbench.com/
-- Live races for judges: the page's address and the judging code for its "Judge sign-in" button. One code for all
-  judges: it carries its own budget and works from Dec 10 through Dec 17 (UTC), with no count for each judge. It
-  goes in the form's private field for testing instructions if the form has one; if it has none, send it to the
-  hackathon manager through the contest page. Never on a public page.
+- Live races: **no access code for judges** (the hackathon manager's answer on the contest forum, 2026-11-27:
+  "Please don't use a shared access code. Judges will supply their own API keys for any feature that calls a
+  paid model"). The live race reads the key of whoever runs it, from `.env`, as under "Setup" above, and the
+  README says which provider and models and where the key goes. Nothing private goes on the form.
 - Screenshots for the gallery: `docs/img/` (taken from the page; retake them on the day the video is recorded).
-- Video: (if recorded)
+- Video: **needed, and it must show a live race working** (the same answer: "Your demo video or demo link, plus
+  the README, is what judges will rely on, so make sure the video shows the live run working"). Shots to get:
+  the two commands being started, with the key's line in `.env` never on screen; the page saying which runner it
+  is using; a pair picked and what the record expects of it; the race itself, both lanes; the result beside the
+  record; the new cell in the evidence graph and the verdict read again.

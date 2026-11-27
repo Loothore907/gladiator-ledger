@@ -1717,6 +1717,8 @@ async function drawWorldGraph(v, ring = null, justRan = false) {
 // page was published with (site/data/live.json). No runner means no live races, and the page says so.
 let runnerPromise;
 let wantsRunner = false; // set when the visitor asks to sign in from the page
+let hostedRunner = false; // a runner is named for this page (published with it, or in its address): the sign-in button is for it
+const OWN_KEY_README = 'https://github.com/Loothore907/gladiator-ledger#race-two-models-live-with-your-own-api-key';
 const askedRunner = new URLSearchParams(location.search).get('runner');
 let basePromise;
 function runnerAddress() {
@@ -1864,8 +1866,9 @@ const stored = {
 };
 let sessionPromise;
 let signInOutcome = 'none'; // 'signed' | 'refused' (the runner said no) | 'unreachable' | 'none' (nothing to sign in with)
+let ownRunner = ''; // the address of a runner that asks for no sign-in: one on the visitor's own machine, with their own key
 let signInSaid = ''; // why the runner said no, in its own words, when it gave a reason about the invitation itself
-// What a sign-in has left, in a sentence. An invitation with a budget of its own (the judging code) is limited by
+// What a sign-in has left, in a sentence. An invitation with a budget of its own is limited by
 // money and by its last day, not by a number of races: the runner says how much is left and until when.
 function allowanceText(session) {
   if (!session) return '';
@@ -1881,6 +1884,7 @@ function signIn(runner, again = false, typed = null) {
   sessionPromise ||= (async () => {
     if (!runner.options.needs_code) {
       signInOutcome = 'signed';
+      ownRunner = runner.base;
       smallPrint();
       return { token: null, races_left: null };
     }
@@ -1929,14 +1933,14 @@ function smallPrint() {
   if (!foot) return;
   foot.textContent =
     signInOutcome === 'signed'
-      ? `You are signed in for live runs. The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money from the live budgets shown beside the button. What goes to the runner is the task, the two models, the settings and your sign-in; nothing else. ${
+      ? `${ownRunner ? `This page can start live runs on the race runner at ${ownRunner}, which asks for no sign-in.` : 'You are signed in for live runs.'} The verdict in step 3 rests on recorded matches: finished, sealed and replayable here, read locally in this browser tab. A live race or batch you start is different: it is sent to a Gladiator runner, which calls the real models and spends real money ${ownRunner ? 'through the API key that runner holds, within the limits shown beside the button' : 'from the live budgets shown beside the button'}. What goes to the runner is the task, the two models${ownRunner ? ' and the settings' : ', the settings and your sign-in'}; nothing else. ${
           liveRecord.address
             ? 'Each live result is sealed, and joins the record as soon as the runner has filed it: Ledger’s live record takes it in, this page loads it into its graph, and the verdict is read again.'
             : 'Each live result is sealed and shown beside the record at once; it is counted in the verdict once it has been imported into the record, which happens in batches, not instantly.'
         } A verdict counts the races played under its own conditions: one you start at another difficulty or scoring is kept on file, and the verdict says so and leaves it out.`
       : `Every verdict on this page rests on recorded matches: finished, sealed and replayable here. The page reads them locally in this browser tab, needs no key and sends nothing you type anywhere.${
           liveRecord.address ? ' Matches newer than the page are fetched from Ledger’s live record, a plain read of public records, and join the same graph in this tab.' : ''
-        } This view cannot start a match. Live races run on a separate Gladiator runner and are open to the hackathon judges for now (Judge sign-in, at the top).`;
+        } This view cannot start a match. A live race calls paid model APIs, so it runs on a separate Gladiator runner: on your own machine with your own API key (two commands, in the README)${hostedRunner ? ', or on the hosted runner by invitation (Sign in, at the top)' : ''}.`;
 }
 
 async function announceLive() {
@@ -1960,7 +1964,10 @@ async function announceLive() {
     liveModels = new Set(runner.options.models);
     if (state.task) drawFirst();
     if (state.a) drawSecond();
-    show(`You are signed in for live races.${allowanceText(session)} Pick a workflow and two models marked "can race live", then press "Race them live".`, false, true);
+    const opened = runner.options.needs_code
+      ? `You are signed in for live races.${allowanceText(session)}`
+      : `Live races are on: this page is using the race runner at ${runner.base}, which asks for no sign-in and pays with the API key it holds.`;
+    show(`${opened} Pick a workflow and two models marked "can race live", then press "Race them live".`, false, true);
   } else if (signInOutcome === 'refused' && signInSaid) {
     show(`${signInSaid} You are seeing the public page; recorded races still play.`, true);
   } else if (signInOutcome === 'refused') {
@@ -2003,6 +2010,8 @@ async function setUpSignIn() {
   const dialog = $('judge-dialog');
   const note = $('judge-note');
   if (!(await runnerAddress())) return; // no runner is published: nothing to sign in to
+  hostedRunner = true;
+  smallPrint();
   open.hidden = Boolean(stored.get()) || new URLSearchParams(location.search).has('invite');
   open.addEventListener('click', () => {
     note.textContent = '';
@@ -2053,9 +2062,19 @@ async function drawLive(v) {
   const runner = await findRunner();
   if ($('live') !== box) return; // the verdict was redrawn while we looked
   const title = el('h4', null, 'Race them live on a fresh scenario');
-  const soon = 'Live races are open to the hackathon judges for now (Judge sign-in, at the top of the page), and coming soon for everyone. Every scenario above is a real recorded race you can replay.';
+  // No race can be started from this page as it stands: say where one can. A live race calls paid model APIs, so
+  // it runs with the visitor's own key on their own machine; the hosted runner, where one is published, is by
+  // invitation.
+  const closed = () =>
+    el(
+      'p',
+      { class: 'note', id: 'live-soon' },
+      'A live race calls paid model APIs, so it runs on your own machine with your own API key: two commands, in the README under ',
+      el('a', { href: OWN_KEY_README, target: '_blank', rel: 'noopener' }, '“Race two models live, with your own API key”'),
+      `. ${hostedRunner ? 'The hosted runner behind this page is by invitation (Sign in, at the top of the page). ' : ''}Every scenario above is a real recorded race you can replay.`,
+    );
   if (!runner) {
-    box.replaceChildren(title, el('p', { class: 'note', id: 'live-soon' }, soon));
+    box.replaceChildren(title, closed());
     return;
   }
   if (!runner.options) {
@@ -2066,7 +2085,7 @@ async function drawLive(v) {
   if ($('live') !== box) return;
   if (!session) {
     // not signed in: nothing to press and nothing to type
-    box.replaceChildren(title, el('p', { class: 'note', id: 'live-soon' }, soon));
+    box.replaceChildren(title, closed());
     return;
   }
   const task = spec_task(v.task);
@@ -2241,7 +2260,12 @@ async function drawLive(v) {
     const parts = (options.budgets || []).map((b) => `${providerName(b.provider)} $${fixed(b.left_usd, 2)} of $${fixed(b.limit_usd, 2)}`);
     const out = (options.models_out || []).map(shortName);
     const unpriced = (options.models_unpriced || []).map(shortName);
+    // what the runner may spend: its cap on one race, and what is left of its limit on everything, where it has one
+    const cap = options.cap_usd_per_race ? `One race can cost $${fixed(options.cap_usd_per_race, 2)} at most. ` : '';
+    const total = options.total ? `This runner will spend $${fixed(options.total.left_usd, 2)} more at most, of $${fixed(options.total.limit_usd, 2)} in all. ` : '';
     money.replaceChildren(
+      cap,
+      total,
       parts.length ? `Live budget left, by provider: ${parts.join(' · ')}.` : '',
       allowanceText(signedIn),
       out.length ? ` Not on offer now (their provider's budget is used up): ${out.join(', ')}.` : '',
@@ -2338,7 +2362,10 @@ async function drawLive(v) {
         showExpect();
       }
       const counted = judged && (judged.evidence || []).some((e) => e.run === run);
-      note.textContent = alone
+      const left = mine.get(run) && notJudged(mine.get(run));
+      note.textContent = left
+        ? 'It is on file in the record, as a scenario that could not be judged: it counts for nothing, for or against either model.'
+        : alone
         ? `It is in the record now, as a steadiness check of ${shortName(alone)}: its attempts count in that model's own fitness above, and never as a match.`
         : counted
           ? 'It is in the record now, and the verdict above counts it: read again from the graph a moment ago.'
@@ -2494,7 +2521,13 @@ async function drawLive(v) {
       });
       if (failed || !record) throw new Error(failed || 'the race ended without a record');
       const winner = { A: a, B: b }[record.body.verdict.winner] || null;
-      const versus = !winner
+      // A side that was never played, or was cut off by its provider or the cap, leaves nothing to judge: the
+      // pair counts for nothing in the record, and it is said as that, never as a result.
+      const facts = raceFacts(record, task, a, b);
+      const unjudged = notJudged(facts);
+      const versus = unjudged
+        ? 'Live, this scenario could not be judged.'
+        : !winner
         ? 'Live, this scenario had no winner.'
         : r.verdict === 'no data'
           ? `Live, ${shortName(winner)} took this scenario: the first these two have played on this task.`
@@ -2507,10 +2540,9 @@ async function drawLive(v) {
       say.replaceChildren(versus, ' ', el('span', { class: 'note' }, 'Sealed record ', el('code', null, record.body.run_id), ', seal ', el('code', null, record.sha256.slice(0, 12)), '. ', became));
       // What this race showed, said from what happened: a winner's box only when the winner did the job, and
       // beside each model's result how usual that is for it in the record as it stood before the race.
-      const facts = raceFacts(record, task, a, b);
       const usual = (m) => (before.fit && before.fit[m]) || ownOf(m) || null;
       box.querySelector('#live-outcome')?.remove();
-      say.before(outcomeBox(facts, a, b, usual, `${offered.name || task}, ${level.value} difficulty, ${profile.value} scoring`));
+      say.before(unjudged ? notJudgedBox(facts, unjudged, Boolean(ownRunner)) : outcomeBox(facts, a, b, usual, `${offered.name || task}, ${level.value} difficulty, ${profile.value} scoring`));
       follow($('live-outcome'), 'nearest');
       const liveText = liveReport(record, a, b, task, r);
       window.ledgerDemo.lastLiveReport = liveText;
@@ -2906,7 +2938,7 @@ function raceFacts(record, task, a, b) {
   const out = { run_id: body.run_id, seal: record.sha256, task, a, b, winner: winner === 'A' ? a : winner === 'B' ? b : null };
   for (const [side, s] of [['A', 'a'], ['B', 'b']]) {
     const x = first(side);
-    Object.assign(out, { [`${s}_passed`]: Boolean(x.passed), [`${s}_cost_usd`]: x.cost_usd || 0, [`${s}_details`]: x.grade_details || {}, [`${s}_termination`]: x.termination, [`${s}_seconds`]: x.wall_s || 0 });
+    Object.assign(out, { [`${s}_passed`]: Boolean(x.passed), [`${s}_cost_usd`]: x.cost_usd || 0, [`${s}_details`]: x.grade_details || {}, [`${s}_termination`]: x.termination, [`${s}_seconds`]: x.wall_s || 0, [`${s}_error`]: x.error || null });
   }
   return out;
 }
@@ -2967,6 +2999,41 @@ function raceOutcome({ a, b, winner, A, B }) {
     headline: 'Neither got the right result',
     body: `${n(a)}: ${got(A)}. ${n(b)}: ${got(B)}.${w ? ` ${n(w)} ${further ? 'got further' : 'is ahead on efficiency'}, which settles the scenario in the count, but nobody did the job.` : ''}`,
   };
+}
+
+// A race with a side that was never played (its provider refused the key, the account is out of credit, the
+// runner's cap was reached), or that its provider or its budget cut off, cannot be judged: the engine leaves
+// the pair out of every count, and so does the record (ledger/bridges/gladiator.py, EXCLUDED). Returns the sides
+// it happened to, each with how it ended and what the runner was told, or null when both attempts were played out.
+function notJudged(x) {
+  const out = [];
+  for (const [s, model] of [['a', x.a], ['b', x.b]]) {
+    const ending = x[`${s}_termination`];
+    if ((rules.not_judged || []).includes(ending)) out.push({ model, ending, error: x[`${s}_error`] || '' });
+  }
+  return out.length ? out : null;
+}
+const NOT_JUDGED_WORDS = { not_run: 'was not run', provider_error: 'was cut off: its provider stopped answering', budget_stop: 'was cut off by the spending cap' };
+
+// The box under a race that could not be judged: who was not played and why, in the provider's own words, and
+// that nothing is counted. On a runner the visitor started themselves, with their own key, the usual causes are
+// named, because the key is the first thing to look at.
+function notJudgedBox(x, sides, own) {
+  const both = sides.length === 2;
+  const refused = sides.some((s) => s.ending === 'not_run');
+  return el(
+    'div',
+    { class: 'band stop', id: 'live-outcome', 'data-kind': 'not-judged' },
+    el('p', { class: 'band-kind' }, 'This live race'),
+    el('p', { class: 'headline' }, both && refused ? 'Not played' : 'Could not be judged'),
+    sides.map((s) => el('p', null, el('strong', null, shortName(s.model)), ` ${NOT_JUDGED_WORDS[s.ending] || 'did not finish'}.`, s.error ? ` The runner was told: ${s.error}` : '')),
+    el(
+      'p',
+      { class: 'small' },
+      'This says nothing about how either model does the task. A scenario needs both attempts played out to be judged, so this one counts for nothing in the record, for or against either model.',
+      own && refused ? ' On a runner you started yourself the usual causes are a key that is mistyped, an account with no credit left, or a key that may not use this model: check the line for this provider in the runner’s .env file, start the runner again and race again.' : '',
+    ),
+  );
 }
 
 // The box under a live race: what happened, how usual that is for each model, and under which settings.
@@ -3702,7 +3769,7 @@ async function recordArrived(caught) {
     const elsewhere = !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])([:/]|$)/.test(liveRecord.address);
     note.textContent =
       here && elsewhere
-        ? 'This copy of the page runs from your own machine, and the hosted live record only answers the published page. So this is the record as it ships in the repository: complete up to the last import. Races run since then are on the hosted page.'
+        ? 'This copy of the page runs from your own machine, and the hosted live record only answers the published page. So this is the record as it ships in the repository: complete up to the last import. To race two models live from this copy, with your own API key, start it with “uv run ledger serve --page” beside a runner (the README has both commands).'
         : 'The live record could not be reached just now, so this is the record as this page was published.';
   } else if (!n) {
     note.textContent = 'Live record: connected. Nothing is newer than this page.';
