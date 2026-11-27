@@ -457,8 +457,28 @@ def outcome(v: dict, fit: dict) -> tuple[str, str, str | None]:
     fa, fb = fit[a]["fit"], fit[b]["fit"]
     ahead, settled = v["better"], v["verdict"] == "better"
     if fa is None or fb is None:
-        thin = [m for m in (a, b) if fit[m]["fit"] is None]
-        return "too few attempts", f"Too few attempts to say whether {' or '.join(thin)} is fit for this task.", None
+        # A call that waits for more attempts names no model on its own. Where the other model's fit is settled,
+        # that one is said, and it alone can be the model to use.
+
+        def so_far(m):
+            f = fit[m]
+            said = {"meets": "it meets the bar so far", "short": "it is short of the bar so far"}.get(f["so_far"])
+            return f"{said}, on {f['attempts']} attempts" if said else f"it has only {f['attempts']} attempts"
+
+        if fa is None and fb is None:
+            line = f"Not settled yet whether either is fit for this task: for {a}, {so_far(a)}; for {b}, {so_far(b)}."
+            return "not settled", line, None
+        known, waiting = (b, a) if fa is None else (a, b)
+        rest = f"Whether {waiting} is fit is not settled yet: {so_far(waiting)}."
+        if not fit[known]["fit"]:
+            return "not settled", f"{known} is not fit for this task. {rest}", None
+        if ahead == known:
+            lead = "did it better" if settled else "is ahead, not settled"
+            return "one settled", f"Use {known}: it is fit for this task, and it {lead}. {rest}", known
+        if ahead == waiting:
+            lead = "did it better" if settled else "is ahead"
+            return "one settled", f"{known} is fit for this task. {waiting} {lead} head to head. {rest}", known
+        return "one settled", f"{known} is fit for this task. {rest}", known
     if not fa and not fb:
         more = f" {ahead} did it better of the two, which is not the same as fit." if ahead else ""
         return "neither fit", "Neither is fit for this task." + more, None
@@ -699,10 +719,10 @@ def print_verdict(v: dict) -> None:
         print(f"\nFit for this task ({v['profile']} tolerance):")
         for name in (a, b):
             f = v["fit"][name]
-            word = {True: "fit", False: "NOT fit", None: "too few attempts"}[f["fit"]]
+            word = "NOT fit" if f["fit"] is False else policy.standing(f)
             print(f"  {name}: {word}. {policy.result_line(f)}")
             for reason in f["reasons"]:
-                print(f"      because: {reason}")
+                print(f"      {'because' if f['fit'] is False else 'so far'}: {reason}")
             for x in f["faults"]:
                 if x["attempts_with"] and not x["breaks"] and x.get("kind_of") is None:
                     print(f"      tolerated: {x['fault']} ({x['level']}) in {x['attempts_with']} of {f['attempts']}")
@@ -720,7 +740,7 @@ def print_verdict(v: dict) -> None:
                     f"{money(o['cost_per_attempt'])} an attempt"
                 )
             if not others:
-                print("      none: no tested model is fit for this task under this tolerance")
+                print("      none: no tested model has been shown fit for this task under this tolerance")
     print(f"\n{'Head to head' if v.get('headline') else 'Verdict'}: {line}")
     print(f"  {reports.head_to_head(v, a, b, tick='')}")
     if v["decided_on"]:

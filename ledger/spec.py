@@ -76,7 +76,7 @@ def build(rows, verdict: dict) -> dict:
     }
     if judged:
         out["decision"].update({k: verdict[k] for k in ("outcome", "headline", "profile")})
-        keep = ("fit", "attempts", "passed", "pass_rate", "right", "right_rate", "bar", "reasons")
+        keep = ("fit", "so_far", "attempts", "passed", "pass_rate", "right", "right_rate", "bar", "reasons")
         out["fit"] = {model: {k: f[k] for k in keep} for model, f in verdict["fit"].items()}
     if verdict["verdict"] == "no data":
         return out
@@ -167,7 +167,8 @@ def guard_notes(spec: dict) -> list[str]:
         if f and f["reasons"]:
             lines.append(
                 f"- Fitness is judged over every attempt `{model}` made on this task ({f['attempts']}), and counts "
-                f"faults that are not hazards of the world too. Against it at this tolerance: {'; '.join(f['reasons'])}."
+                f"faults that are not hazards of the world too. Against it at this tolerance"
+                f"{'' if f['fit'] is False else ', so far'}: {'; '.join(f['reasons'])}."
             )
     return lines
 
@@ -197,9 +198,11 @@ def markdown(spec: dict) -> str:
         lines += [f"**{d['headline']}**", "", f"Fit for this task, at {d['profile']} tolerance:", ""]
         for name in (a, b):
             f = spec["fit"][name]
-            word = {True: "fit", False: "not fit", None: "too few attempts to say"}[f["fit"]]
             why = "; ".join(f["reasons"])
-            lines.append(f"- `{name}`: **{word}**. {policy.result_line(f)}" + (f" Because: {why}." if why else ""))
+            lead = "Because" if f["fit"] is False else "So far"
+            lines.append(
+                f"- `{name}`: **{policy.standing(f)}**. {policy.result_line(f)}" + (f" {lead}: {why}." if why else "")
+            )
         versus = {
             "better": f"`{d['better']}` did this task better than the other model.",
             "leaning": f"`{d['better']}` is ahead, but the lead could still be chance.",

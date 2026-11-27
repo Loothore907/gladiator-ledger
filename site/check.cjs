@@ -314,6 +314,7 @@ async function main() {
     // matches took over 5 seconds that way, on a page that was working. The limit is for a page that never
     // draws; how long the slowest one took is printed, so a page that is getting slow is seen and not guessed.
     const DRAW_LIMIT_MS = 20000;
+    const soFar = { verdicts: 0, lines: 0 }; // verdicts that wait for more attempts, and "so far" lines shown
     const slowest = { ms: 0, what: '' };
     const flowCount = await page.locator('#flow-cards button').count();
     if (!flowCount) problems.push('the page lists no flows to click');
@@ -351,6 +352,26 @@ async function main() {
             .then(() => true, () => false);
           if (!drawn) problems.push(`clicking flow ${f}, ${a} vs ${b}: no verdict was drawn within ${DRAW_LIMIT_MS / 1000} seconds`);
           else if (Date.now() - asked > slowest.ms) Object.assign(slowest, { ms: Date.now() - asked, what: `flow ${f}, ${a} vs ${b}` });
+          // A fit call waits for the count to settle it (owner, 2026-11-27), on every verdict the page draws: a
+          // headline that names a model to use is never in a band that is not a winner's, a verdict that waits
+          // for more attempts is never in a winner's band unless it names the one settled model, and it says what
+          // the attempts show so far. (A pair that never met has no verdict band of this kind.)
+          if (drawn) {
+            const band = await page.evaluate(() => {
+              const box = document.getElementById('verdict-band');
+              const head = document.getElementById('verdict-headline');
+              return box && head ? { win: box.classList.contains('win'), headline: head.innerText, why: [...box.querySelectorAll('ul.why li')].map((n) => n.textContent) } : null;
+            });
+            if (band) {
+              const waits = /not settled yet/.test(band.headline);
+              const names = band.headline.startsWith('Use ');
+              if (waits) soFar.verdicts += 1;
+              if (names && !band.win) problems.push(`flow ${f}, ${a} vs ${b}: "${band.headline}" is not in a winner's band`);
+              if (waits && band.win && !names) problems.push(`flow ${f}, ${a} vs ${b}: a verdict that waits for more attempts is in a winner's band: "${band.headline}"`);
+              if (waits && !band.why.some((x) => /so far|too few to say/.test(x))) problems.push(`flow ${f}, ${a} vs ${b}: a verdict that waits does not say what the attempts show so far: ${JSON.stringify(band.why)}`);
+              if (band.why.some((x) => /so far/.test(x))) soFar.lines += 1;
+            }
+          }
           // a broken page fails every pair the same way: stop early instead of waiting out each one
           if (problems.length >= 5) throw new Error(`stopped after ${problems.length} problems:\n  - ${problems.join('\n  - ')}`);
           clicked += 1;
@@ -358,6 +379,9 @@ async function main() {
       }
     }
     if (!clicked) problems.push('no pair of models could be clicked: the click-through tested nothing');
+    // the record holds models with few attempts, so some verdict must have been one that waits: a pass that saw
+    // none tested nothing about them
+    if (clicked && !(soFar.verdicts && soFar.lines)) problems.push(`no verdict in the click-through was one that waits for more attempts (${JSON.stringify(soFar)}): the fit rule was not exercised`);
     // The race: open a scenario of the pair on screen, skip to the end, and require both lanes to show the grade
     // and the finish line to name the same winner the square does.
     // (the click-through ends on whatever pair is last in the list, which may be one that never met: go to a
