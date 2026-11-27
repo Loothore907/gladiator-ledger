@@ -55,6 +55,13 @@ def record(run: str) -> dict:
     return json.loads((DATA / "records" / run / "record.json").read_text(encoding="utf-8"))
 
 
+def key_of(run: str) -> dict | None:
+    """The answer key published beside a shipped record, when there is one (a live race's is, once the runner has
+    handed it out and the import has kept it). These tests hold either way."""
+    path = DATA / "records" / run / "operator.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
 def data_folder(root: Path, runs: list[str]) -> Path:
     """A data folder like Ledger's own, holding only these records (with whatever is shipped beside each)."""
     for run in runs:
@@ -79,13 +86,18 @@ def quiet(_):
 
 
 def test_records_added_one_at_a_time_in_any_order_leave_the_graph_the_command_line_builds(tmp_path, built):
-    # a live record that starts from the two suite matches and takes the rest in newest first
+    # a live record that starts from the two suite matches and takes the rest in newest first. The runner it
+    # was started with answers for each race's answer key, where the record shipped here has one beside it
     said = []
-    rec = live.LiveRecord(tmp_path / "state", data_folder(tmp_path / "data", SUITE), None, say=said.append)
+    runner = Runner()
+    rec = live.LiveRecord(tmp_path / "state", data_folder(tmp_path / "data", SUITE), runner.url, say=said.append)
     try:
         assert [r["run_id"] for r in rec.runs()] == sorted(SUITE)
         for run in reversed(LIVE):
-            assert rec.take_in(record(run)) is True
+            assert rec.take_in(runner.file(run, listed=False)) is True
+        # each race it took in has its answer key beside it exactly where the shipped record has one
+        kept = sorted(p.parent.name for p in (tmp_path / "state" / "records").rglob("operator.json"))
+        assert kept == sorted(run for run in LIVE if key_of(run) is not None)
         assert [r["run_id"] for r in rec.runs()] == sorted(SUITE + LIVE)
         nodes, links = graph(rec.rows)
         assert len(nodes) > 4000 and len(links) > 10000  # results, steps and world records
@@ -100,6 +112,7 @@ def test_records_added_one_at_a_time_in_any_order_leave_the_graph_the_command_li
         assert alone[0]["attempts"] == 20 and alone[0]["steps"] > 100
     finally:
         rec.close()
+        runner.close()
     # started again, it reopens the store it left (no rebuild) with every record it took in
     rec = live.LiveRecord(tmp_path / "state", tmp_path / "data", None, say=said.append)
     try:
@@ -170,6 +183,16 @@ class Runner:
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
+    def file(self, run: str, listed: bool = True) -> dict:
+        """A race has ended on this runner: its sealed record is on file and, as on the real runner, so is its
+        answer key where one is published for it. `listed=False` keeps the record out of /races (a test that hands
+        the record over itself still needs the runner to answer for its key)."""
+        if listed:
+            self.filed[run] = record(run)
+        if key_of(run) is not None:
+            self.keys[run] = key_of(run)
+        return record(run)
+
     def close(self):
         self.server.shutdown()
         self.server.server_close()
@@ -205,17 +228,20 @@ def test_the_service_takes_in_what_the_runner_files_and_hands_a_page_what_it_lac
         assert [r["run_id"] for r in get(f"{at}/runs?fresh=1")[1]["runs"]] == sorted(SUITE)
         # a race ends on the runner; the page says so, and the record is in the store at once
         new = LIVE[-1]
-        runner.filed[new] = record(new)
+        runner.file(new)
         status, synced, _ = get(f"{at}/sync", method="POST")
         assert status == 200 and synced == {"took_in": [new], "problem": None}
         listed = get(f"{at}/runs")[1]["runs"]
         assert [r["run_id"] for r in listed] == sorted([*SUITE, new]) and listed[-1]["seal"] == record(new)["sha256"]
         assert get(f"{at}/sync", method="POST")[1]["took_in"] == []  # taken in once
         # only the runner it was started with is ever asked, and only for the list, for sealed records and,
-        # once, for the answer key of a record it took in (this runner hands none out: the record stands alone)
+        # once, for the answer key of a record it took in. The store says the race can be re-graded exactly when
+        # the runner handed its key out (which it does where the record shipped here has one beside it)
+        keyed = key_of(new) is not None
         assert set(runner.asked) == {"/races", f"/records/{new}", f"/records/{new}/operator"}
-        assert runner.asked.count(f"/records/{new}/operator") == 1 and get(f"{at}/health")[1]["answer_keys"] == 2
-        assert get(f"{at}/rows/{new}")[1]["run"]["props"]["answer_key"] is False
+        assert runner.asked.count(f"/records/{new}/operator") == 1
+        assert get(f"{at}/health")[1]["answer_keys"] == 2 + int(keyed)
+        assert get(f"{at}/rows/{new}")[1]["run"]["props"]["answer_key"] is keyed
 
         # what a page needs to catch up: the rows of that record. Loaded into a store that holds only what the
         # page shipped with, through the statements the page has, they leave the graph the command line builds
