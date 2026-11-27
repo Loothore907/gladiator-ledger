@@ -116,7 +116,8 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
 ## How work lands
 - Feature branch, PR into `main`, CI green (lint and tests on Linux and Windows), squash merge.
 - One exception: the `Import live races` workflow commits to `main` by itself, hourly, and only ever adds the
-  runner's sealed records and the files rebuilt from them (owner, 2026-11-25: every run builds the dataset).
+  runner's sealed records, their answer keys (owner, 2026-11-27) and the files rebuilt from them (owner,
+  2026-11-25: every run builds the dataset).
 - Fast checks before pushing:
 ```bash
 uv run ruff check . && uv run ruff format --check . && uv run pytest -q

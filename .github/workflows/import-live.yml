@@ -3,10 +3,12 @@
 # results are just getting dropped.")
 #
 # After a race (the runner starts this job itself), on a schedule, and by hand: download the runner's sealed public
-# records, import them like any other record (each seal is checked; nothing private is asked for), rebuild the store
+# records, import them like any other record (each seal is checked; a finished race's answer key comes with it
+# where the runner hands one out, checked against the fingerprint in its record), rebuild the store
 # and the page data, run the tests, and commit the result to main. Then CI is started on that commit; the page is published only after CI passes, as always.
 # Nothing is committed when the runner has nothing new. This is the one job that commits to main without a pull
-# request: it only ever adds sealed records and the files rebuilt from them.
+# request: it only ever adds sealed records, the answer keys the runner hands out for them (each checked against
+# its record's fingerprint) and the files rebuilt from them.
 name: Import live races
 
 on:
@@ -41,7 +43,7 @@ jobs:
           ref: main
       - uses: astral-sh/setup-uv@v10.4.0
       - run: uv sync --frozen
-      - name: Download and import the runner's sealed records
+      - name: Download and import the runner's sealed records and their answer keys
         run: uv run ledger import --runner "$RUNNER"
       - name: Anything new?
         id: new
@@ -74,7 +76,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data site/data
-          git commit -m "Import live races from the runner ($(git status --porcelain data/records | grep -c record.json || true) new records)"
+          # what this import brought: records, and answer keys (a key can arrive after its record, once the
+          # runner hands it out), so a commit that adds only keys does not read as an import of nothing
+          records=$(git status --porcelain data/records | grep -c record.json || true)
+          keys=$(git status --porcelain data/records | grep -c operator.json || true)
+          git commit -m "Import live races from the runner ($records new records, $keys answer keys)"
           git push origin HEAD:main
           # a push made by a workflow does not start other workflows, so CI is started by hand; the page is
           # published by the usual job once CI passes on this commit
