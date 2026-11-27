@@ -88,7 +88,15 @@ function fakeRunner(models, extra) {
       const budgets = [{ provider: 'openrouter', limit_usd: 30, left_usd: 30 - (3 - races) * 0.0055 }, { provider: 'google', limit_usd: 20, left_usd: 0.1 }];
       // `server.own`: a runner on a person's own machine with their own key, as `gladiator serve` starts one with
       // no options. It asks for no sign-in, and has a cap on one race and one limit on everything it may spend.
-      if (server.own) return json(res, 200, { tasks, models: [...models, extra], models_out: [], models_unpriced: [], budgets: [], total: { limit_usd: 5, left_usd: 5 - (server.ownSpent || 0) }, cap_usd_per_race: 0.25, profiles: ['balanced', 'budget', 'latency'], batches: [], batch_pass_rate: 0.8, needs_code: false });
+      // `server.tiers`: the runner holds two budgets per attempt and says which each model is raced under
+      // (`server.placed`: model -> track; a model it does not name is under the small one)
+      const tiers = server.tiers
+        ? {
+            tracks: [{ id: 'small-tier', attempt_usd: 0.12, cap_usd_per_race: 0.4 }, { id: 'mid-tier', attempt_usd: 0.4, cap_usd_per_race: 1 }],
+            placed: Object.fromEntries([...models, extra, ...(server.more || [])].map((m) => [m, (server.placed || {})[m] || 'small-tier'])),
+          }
+        : {};
+      if (server.own) return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: [], models_unpriced: [], budgets: [], total: { limit_usd: 5, left_usd: 5 - (server.ownSpent || 0) }, cap_usd_per_race: 0.25, profiles: ['balanced', 'budget', 'latency'], batches: [], batch_pass_rate: 0.8, needs_code: false, ...tiers });
       // `server.takesKeys`: a hosted runner that also plays a race its visitor pays for, with the key in the request
       const own_keys = server.takesKeys ? { models: [...models, extra], cap_usd_per_race: 0.4, per_hour: 12 } : null;
       return json(res, 200, { tasks, models: [...models, extra, ...(server.more || [])], models_out: ['google:gemini-3.1-flash-lite'], budgets, profiles: ['balanced', 'budget', 'latency'], needs_code: true, own_keys, ...(server.old ? {} : { batches: [{ runs: 10, cap_usd: 0.6 }], batch_pass_rate: 0.8 }) });
@@ -1141,7 +1149,9 @@ async function main() {
       const fresh = other.locator(`#second-model input[name="second"][value="${NEWCOMER}"]`);
       if (!(await fresh.count())) problems.push('a model the runner offers, with no record, is not offered in step 2');
       else {
-        if (!(await other.locator('#first-list label', { hasText: 'not tested on this workflow yet' }).count())) problems.push('a model with no record is not described as one on its card');
+        // it has never raced here at all, which its card says: that is less than "not on this workflow yet"
+        if (!(await other.locator('#first-list label', { hasText: 'not yet tried here: no record on any workflow' }).count())) problems.push('a model with no record is not described as one on its card');
+        if (await other.locator('#first-list label', { hasText: 'never-raced' }).filter({ hasText: 'not tested on this workflow yet' }).count()) problems.push('a model that has never raced here is described as only missing this workflow');
         await pickSecond(other, NEWCOMER);
         await other.waitForFunction(() => /never met/.test(document.getElementById('verdict-headline')?.innerText || ''), null, { timeout: 8000 }).catch(() => problems.push('choosing a model with no record did not give a plain "no verdict" result'));
         await other.waitForSelector('#live-go', { timeout: 8000 }).catch(() => problems.push('a model with no record, on the live list, cannot be raced'));
@@ -1293,6 +1303,71 @@ async function main() {
         await plain.waitForSelector('#live-soon', { timeout: 5000 });
         if (await plain.locator('#live-own-key-go').count()) problems.push('a runner that takes no visitor keys is offered as one that does');
         await plain.close();
+      }
+
+      // A runner with two budgets per attempt. The page races a pair under the budget its record was played
+      // under, or with no record under the smallest both models fit, says which and why beside the button with
+      // the cap of that race, and sends it with the race. A model that has never raced here is marked so.
+      {
+        runner.own = true;
+        runner.tiers = true;
+        const MID = expected.judged.map((j) => j.verdict).find((x) => (x.conditions || '').includes('attempt_budget_usd=0.4'));
+        if (!MID) problems.push('the record holds no pair played under the mid-tier budget to check the conditions with');
+        runner.more = MID ? [MID.a, MID.b] : [];
+        runner.placed = { [NEWCOMER]: 'mid-tier' }; // the recorded mid-tier pair is left under the small budget on purpose
+        const flowOf = (task) => (task.includes('refund') ? 'Refund' : task.includes('incident') ? 'Incident' : task.includes('access') ? 'Access' : 'Inventory');
+        const pickTwo = async (page, task, a, b) => {
+          await page.evaluate(() => window.ledgerDemo.ready());
+          await page.locator('#live-banner').waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+          await page.locator('#flow-cards button', { hasText: flowOf(task) }).first().click();
+          await page.locator(`#first-list input[value="${a}"]`).check();
+          await pickSecond(page, b);
+          await page.waitForSelector('#live-go', { timeout: 8000 });
+        };
+        const raced = async (page) => {
+          await page.locator('#live-go').click();
+          await page.waitForFunction(() => document.getElementById('live-result').innerText.startsWith('Live,'), null, { timeout: 10000 }).catch(() => problems.push('a race under a named budget never reported a result'));
+          return runner.asked;
+        };
+        const cases = [
+          // the pair's record was played under the small budget: so is the race, and it can join that record
+          { task: pair.task, a: pair.a, b: pair.b, track: 'small-tier', parts: ['Each model has $0.12 for its attempt', 'the budget these two were recorded under', 'One race can cost $0.40 at most'] },
+          // one of the two needs the larger budget and they have never met: the smallest that fits both
+          { task: pair.task, a: pair.a, b: NEWCOMER, track: 'mid-tier', parts: ['Each model has $0.40 for its attempt', 'the smallest budget both can finish within', 'One race can cost $1.00 at most'] },
+        ];
+        // their record was played under the larger budget: the race is too, whatever the runner places them under
+        if (MID) cases.push({ task: MID.task, a: MID.a, b: MID.b, track: 'mid-tier', parts: ['Each model has $0.40 for its attempt', 'the budget these two were recorded under', 'One race can cost $1.00 at most'] });
+        for (const c of cases) {
+          const tiered = await (await browser.newContext()).newPage();
+          tiered.on('pageerror', (e) => problems.push(`two-budget page error: ${e.message}`));
+          await tiered.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+          await pickTwo(tiered, c.task, c.a, c.b).catch((e) => problems.push(`could not pick ${c.a} and ${c.b} on a runner with two budgets: ${e.message.split('\n')[0]}`));
+          const said = await tiered.locator('#live-budget').innerText().catch(() => '');
+          for (const part of c.parts) if (!said.includes(part)) problems.push(`${c.a} vs ${c.b}: the run box lacks ${JSON.stringify(part)}: ${JSON.stringify(said)}`);
+          if (c.b === NEWCOMER) {
+            const card = await tiered.locator('#first-list label', { hasText: 'never-raced' }).innerText().catch(() => '');
+            if (!card.includes('not yet tried here')) problems.push(`a model that has never raced here is not marked so: ${JSON.stringify(card)}`);
+            const known = await tiered.locator('#first-list label', { hasText: 'not yet tried here' }).count();
+            if (known !== 1) problems.push(`${known} models are marked as never raced; only the newcomer has no record`);
+            const before = await tiered.locator('#live-expect').innerText();
+            if (!before.includes('no record to estimate the cost from') || !before.includes('$1.00')) problems.push(`with a model that has no record the page does not say there is no estimate, and the cap: ${JSON.stringify(before)}`);
+          }
+          const asked = await raced(tiered);
+          if (asked.track !== c.track) problems.push(`${c.a} vs ${c.b} was sent to be raced under ${JSON.stringify(asked.track)}, not ${c.track}`);
+          if (asked.a !== c.a || asked.b !== c.b) problems.push(`the race under ${c.track} was not the pair chosen`);
+          await tiered.context().close();
+        }
+        // and a runner with one set of conditions is sent none to choose, as before
+        runner.tiers = false;
+        const single = await (await browser.newContext()).newPage();
+        await single.goto(`${origin}${BASE}?runner=${encodeURIComponent(runnerUrl)}`);
+        await pickTwo(single, pair.task, pair.a, pair.b);
+        if ((await single.locator('#live-budget').innerText()).includes('for its attempt')) problems.push('a runner with one budget is said to have chosen one');
+        if ('track' in (await raced(single))) problems.push('a runner with one set of conditions was sent conditions to race under');
+        await single.context().close();
+        runner.more = [];
+        runner.placed = null;
+        runner.own = false;
       }
 
       // An invitation the runner does not accept is said so at the top: never a silent fall back to the public page.

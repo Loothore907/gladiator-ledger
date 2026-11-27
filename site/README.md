@@ -32,6 +32,15 @@ machine with your own API key, and where the two commands are; a hosted runner i
 evidence. It counts in the verdict once its record has been imported (`ledger import --runner`, which the
 `Import live races` workflow runs) and this folder's data has been rebuilt from it.
 
+**The budget a live race is played under.** A runner may hold more than one budget per attempt (`tracks` in its
+`/options`, smallest first, each with the cap of one race) and says which each model is raced under (`placed`):
+a model raced under a smaller budget than it can finish within is cut off, not beaten. The page picks for the
+pair (`conditionsFor` in `app.js`): the budget their record was played under, where the runner has it and it is
+large enough for both, so the race can join that record; with no record, the smallest that fits both. It says
+which and why beside the button, with the cap of that race, and sends it with the race (`track`). A runner with
+one set of conditions is sent none. A model on the runner's list that has no attempt anywhere in the record is
+marked "not yet tried here" on its card; where the record cannot give an estimate the panel says so, and the cap.
+
 **A race paid for with the visitor's own API key.** A hosted runner may take one (`gladiator serve --own-keys`;
 `own_keys` in its `/options`). The page then offers "Race them here with my own API key" in the live panel: a
 hidden field for each provider the two chosen models need, what happens to the key said in full beside it, and

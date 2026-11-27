@@ -493,14 +493,37 @@ function availableModels() {
   const fresh = liveModels ? [...liveModels].filter((m) => !known.has(m)).map((model) => ({ model, pairs: 0 })) : [];
   return [...state.models, ...fresh];
 }
-const recordWords = (pairs) => (pairs ? plural(pairs, 'judged pair') : 'not tested on this workflow yet');
+// A model on a runner's list may never have raced here at all. That is said: nothing is known of it yet, which
+// is different from a model with a record on other workflows and none on this one. `raced` is every model with
+// an attempt anywhere in the record, read once the page knows a runner's list.
+let raced = null;
+async function loadRaced() {
+  raced ||= new Set((await ask('MATCH (m:Model)<-[:BY]-(:Attempt) RETURN DISTINCT m.name AS model', {})).map((x) => x.model));
+}
+const recordWords = (pairs, model) => (pairs ? plural(pairs, 'judged pair') : raced && !raced.has(model) ? 'not yet tried here: no record on any workflow' : 'not tested on this workflow yet');
+
+// The conditions a live race is played under. A runner may hold more than one budget per attempt (`tracks`,
+// smallest first) and says which each model is raced under (`placed`): a model raced under a smaller budget than
+// it can finish within is cut off, not beaten. The pair is raced under the budget its record was played under,
+// where the runner has it and it is large enough for both; with no record, under the smallest that fits both.
+// `why` says which of the two it was. A runner with one set of conditions has nothing to choose: `id` is null.
+function conditionsFor(options, v) {
+  const tracks = options.tracks || [];
+  if (tracks.length < 2) return { id: null, attempt_usd: tracks[0] ? tracks[0].attempt_usd : null, cap_usd_per_race: options.cap_usd_per_race, why: null };
+  const placed = options.placed || {};
+  const at = (id) => Math.max(0, tracks.findIndex((t) => t.id === id));
+  const need = Math.max(at(placed[v.a]), at(placed[v.b]));
+  const recorded = /(?:^|; )attempt_budget_usd=([0-9.]+)/.exec(v.conditions || '');
+  const fromRecord = recorded ? tracks.findIndex((t) => Math.abs((t.attempt_usd || 0) - Number(recorded[1])) < 1e-9) : -1;
+  return fromRecord >= need ? { ...tracks[fromRecord], why: 'record' } : { ...tracks[need], why: 'fit' };
+}
 
 function drawFirst() {
   const models = availableModels().sort((x, y) => y.pairs - x.pairs || (x.model < y.model ? -1 : 1));
   $('first-list').className = 'options compact';
   $('first-list').replaceChildren(
     ...models.map((m) =>
-      option('first', m.model, m.model === state.a, false, recordWords(m.pairs) + liveTag(m.model), () => chooseFirst(m.model), true),
+      option('first', m.model, m.model === state.a, false, recordWords(m.pairs, m.model) + liveTag(m.model), () => chooseFirst(m.model), true),
     ),
   );
 }
@@ -686,7 +709,9 @@ function drawSecond() {
   const head = (m) =>
     (m.met
       ? `${plural(m.met, 'judged pair')} against ${shortName(state.a)}: ${m.met >= rules.min_pairs ? 'enough for a verdict' : 'too few for a verdict yet'}`
-      : `no head-to-head with ${shortName(state.a)} yet: no verdict, each model's own record only`);
+      : raced && !raced.has(m.model)
+        ? 'not yet tried here: no record on any workflow, so this race would be the first evidence of it'
+        : `no head-to-head with ${shortName(state.a)} yet: no verdict, each model's own record only`);
   const cards = firsts; // every other model is a card too, in the list under the picture
   $('second-list').className = 'options';
   $('second-list').replaceChildren(...cards.map((m) => option('second', m.model, m.model === state.b, false, `${head(m)} · ${m.place.text}${liveTag(m.model)}`, () => chooseSecond(m.model))));
@@ -1972,6 +1997,7 @@ async function announceLive() {
   if (session) {
     // the cards in step 2 can now say which models race live
     liveModels = new Set(runner.options.models);
+    await loadRaced();
     if (state.task) drawFirst();
     if (state.a) drawSecond();
     const opened = runner.options.needs_code
@@ -2134,6 +2160,7 @@ async function drawLive(v) {
   if (byKey && !(liveModels && models.length === liveModels.size && models.every((m) => liveModels.has(m)))) {
     // the cards in step 2 can now say which models a key can race
     liveModels = new Set(models);
+    await loadRaced();
     if (state.task) drawFirst();
     if (state.a) drawSecond();
   }
@@ -2169,6 +2196,8 @@ async function drawLive(v) {
   const pick = (label, select) => el('label', { class: 'pick' }, el('span', null, label), select);
   // Batches, where the runner offers them: the same test many times in one go, by the pair or by one of the two
   // on both lanes. The bigger sizes are shown as what is coming, never as something to press.
+  // the budget per attempt this pair is raced under, and so the cap of one race
+  const played = conditionsFor(runner.options, v);
   const sizes = byKey ? [] : runner.options.batches || []; // with the visitor's own key a race is one scenario
   const runsPick = el(
     'select',
@@ -2243,11 +2272,11 @@ async function drawLive(v) {
     });
     const known = [ma, mb].map(ownOf);
     const cost = known.every(Boolean) ? known.reduce((sum, o) => sum + o.cost_per_attempt * runs, 0) : null;
-    const cap = runs > 1 ? (sizes.find((x) => x.runs === runs) || {}).cap_usd : runner.options.cap_usd_per_race;
+    const cap = runs > 1 ? (sizes.find((x) => x.runs === runs) || {}).cap_usd : played.cap_usd_per_race;
     expect.replaceChildren(
       el('strong', null, 'Before you run: '),
       ...parts,
-      cost === null ? '' : `At those rates this run should cost about $${fixed(cost, 2)}`,
+      cost === null ? (cap ? `There is no record to estimate the cost from; it cannot pass the hard cap of $${fixed(cap, 2)}.` : '') : `At those rates this run should cost about $${fixed(cost, 2)}`,
       cost !== null && cap ? ` (hard cap $${fixed(cap, 2)}${cost > cap * 0.8 ? ': close to the cap, so some scenarios may not be played' : ''}).` : cost !== null ? '.' : '',
     );
   };
@@ -2336,14 +2365,20 @@ async function drawLive(v) {
     const parts = (options.budgets || []).map((b) => `${providerName(b.provider)} $${fixed(b.left_usd, 2)} of $${fixed(b.limit_usd, 2)}`);
     const out = (options.models_out || []).map(shortName);
     const unpriced = (options.models_unpriced || []).map(shortName);
+    // Where the runner holds more than one budget per attempt, which one this pair is raced under, and why.
+    const budget =
+      played.id && played.attempt_usd
+        ? `Each model has $${fixed(played.attempt_usd, 2)} for its attempt: ${played.why === 'record' ? 'the budget these two were recorded under, so the race can join their record' : 'the smallest budget both can finish within'}. `
+        : '';
     if (byKey) {
       // none of the runner's budgets is touched: what bounds the race is its cap, and how many one visitor may start
       const mine = options.own_keys || ownOffer;
-      money.replaceChildren(`One race can cost $${fixed(mine.cap_usd_per_race, 2)} at most, paid from your own key and from no budget of this runner. It starts ${mine.per_hour} such races an hour for one visitor.`);
+      money.replaceChildren(`${budget}One race can cost $${fixed(played.cap_usd_per_race ?? mine.cap_usd_per_race, 2)} at most, paid from your own key and from no budget of this runner. It starts ${mine.per_hour} such races an hour for one visitor.`);
       return;
     }
     // what the runner may spend: its cap on one race, and what is left of its limit on everything, where it has one
-    const cap = options.cap_usd_per_race ? `One race can cost $${fixed(options.cap_usd_per_race, 2)} at most. ` : '';
+    const raceCap = played.cap_usd_per_race ?? options.cap_usd_per_race;
+    const cap = raceCap ? `${budget}One race can cost $${fixed(raceCap, 2)} at most. ` : '';
     const total = options.total ? `This runner will spend $${fixed(options.total.left_usd, 2)} more at most, of $${fixed(options.total.limit_usd, 2)} in all. ` : '';
     money.replaceChildren(
       cap,
@@ -2591,7 +2626,8 @@ async function drawLive(v) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // with the visitor's own key the request carries the key of each provider needed, and no sign-in
-        body: JSON.stringify({ task, a, b, difficulty: level.value, profile: profile.value, ...(byKey ? { keys: Object.fromEntries(needed.map((name) => [name, myKeys.get(name)])) } : { token: session.token || '' }) }),
+        // and the conditions it is played under, where the runner holds more than one budget per attempt
+        body: JSON.stringify({ task, a, b, difficulty: level.value, profile: profile.value, ...(played.id ? { track: played.id } : {}), ...(byKey ? { keys: Object.fromEntries(needed.map((name) => [name, myKeys.get(name)])) } : { token: session.token || '' }) }),
       });
       if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
       let record = null;
