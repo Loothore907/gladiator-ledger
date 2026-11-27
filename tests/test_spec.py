@@ -149,10 +149,13 @@ def test_spec_has_a_decision_a_blueprint_and_evidence_from_the_matches_it_rests_
         "`r1`",
     ):
         assert part in text
-    assert json.loads(text.split("```json\n")[1].split("\n```")[0])["chosen"] == "p:a"
+    # the document a person reads carries no copy of itself as data (owner, 2026-11-27): that is its own file
+    assert "```json" not in text and text.rstrip().endswith(spec.DATA_LINE)
+    assert json.loads(spec.as_json(built)) == json.loads(json.dumps(built, default=str))
+    assert json.loads(spec.as_json(built))["chosen"] == "p:a"
     # what the spec may not say: a clearance from a count, a chance printed as "p = 0.0", a missing fact as "None",
     # or an answer key promised for every record
-    said = text.split("## Machine-readable")[0]
+    said = text
     for never in ("can run alone", "sign test p", "`None`", "private answer key both published", "Passed ("):
         assert never not in said
     assert "Not seen is a count, not a clearance: none in 10 rules out a rate above about 26%" in said
@@ -213,6 +216,14 @@ def test_cost_and_evidence_reports_are_written_from_the_same_verdict_as_the_spec
     assert out.read_text(encoding="utf-8").startswith("# Spec:")
     assert (tmp_path / "plan.cost.md").read_text(encoding="utf-8") == cost
     assert (tmp_path / "plan.evidence.md").read_text(encoding="utf-8") == evidence
+    # and the spec as data, beside them
+    data = json.loads((tmp_path / "plan.json").read_text(encoding="utf-8"))
+    assert (
+        data["task"] == "t/refunds" and data["decision"]["a"] == "p:a" and "```" not in out.read_text(encoding="utf-8")
+    )
+    capsys.readouterr()  # what the lines above printed (which files were written)
+    assert cli.main([*args, "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == data
 
 
 def test_report_wording_says_only_what_the_record_shows():

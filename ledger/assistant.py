@@ -240,7 +240,7 @@ def build(store: str) -> MCPServer:
     ) -> str:
         """One Markdown document in four layers: the decision, the blueprint (the job and rules as tested, the
         tools, the settings the result holds for, a guardrail for each hazard it tripped on), the cost
-        and the evidence. Ends with the same content as JSON. `report` picks the document: "spec" (default),
+        and the evidence. `report` picks the document: "spec" (default), "data" (the spec as JSON),
         "cost" (the cost breakdown, scenario by scenario), "evidence" (fitness with every fault, every
         scenario and its sealed record) or "all" (the three, one after another)."""
         found = cli.verdict(
@@ -262,8 +262,10 @@ def build(store: str) -> MCPServer:
         }
         if report == "all":
             return "\n\n".join(write() for write in docs.values())
+        if report == "data":  # the spec as data, for a program: no longer printed at the end of the document
+            return spec.as_json(built)
         if report not in docs:
-            raise ValueError(f"report must be one of spec, cost, evidence, all (got {report!r})")
+            raise ValueError(f"report must be one of spec, data, cost, evidence, all (got {report!r})")
         return docs[report]()
 
     @server.tool(title="Describe the graph: nodes, relationships and the ready-made questions")

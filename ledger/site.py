@@ -180,6 +180,7 @@ def export(data: Path, store: str, out: Path) -> dict:
                     "overrides": overrides,
                     "spec": built,
                     "markdown": spec.markdown(built),
+                    "json": spec.as_json(built),
                     "cost": reports.cost_markdown(found, title),
                     "evidence": reports.evidence_markdown(found, title),
                 }

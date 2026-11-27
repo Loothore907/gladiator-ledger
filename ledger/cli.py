@@ -1281,17 +1281,20 @@ def main(argv=None):
         built = spec.build(lambda q, p: rows(args.store, q, p), found)
         title = (built.get("blueprint") or {}).get("title") or built["task"]
         docs = {
-            "spec": lambda: json.dumps(built, indent=1, default=str) if args.json else spec.markdown(built),
+            "spec": lambda: spec.as_json(built) if args.json else spec.markdown(built),
             "cost": lambda: reports.cost_markdown(found, title),
             "evidence": lambda: reports.evidence_markdown(found, title),
         }
         wanted = list(docs) if args.report == "all" else [args.report]
         if args.report == "all" and args.out:
-            # three files side by side: spec.md, spec.cost.md, spec.evidence.md
+            # files side by side: spec.md, spec.cost.md, spec.evidence.md, and the spec as data in spec.json
             for name in wanted:
                 path = args.out if name == "spec" else args.out.with_suffix(f".{name}{args.out.suffix}")
                 path.write_text(docs[name](), encoding="utf-8")
                 print(f"{name.capitalize()} written to {path}")
+            if not args.json:
+                args.out.with_suffix(".json").write_text(spec.as_json(built), encoding="utf-8")
+                print(f"Spec as data written to {args.out.with_suffix('.json')}")
         elif args.out:
             args.out.write_text(docs[wanted[0]](), encoding="utf-8")
             print(f"{wanted[0].capitalize()} written to {args.out}")
