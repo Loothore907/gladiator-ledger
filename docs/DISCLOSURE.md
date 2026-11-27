@@ -56,7 +56,8 @@ every decision right. Ledger already recorded that as a fault whose level the re
 by default), and then let the pass rate overrule the reader. Since this date the bar asks for the right result,
 and the process is judged only by the fault levels. No record, count or head-to-head result changed. Verdicts that
 said "not fit" for process alone did, and so did the claim this entry led with: "on the refund queue only Haiku is
-fit" became "both get the refunds right; Haiku follows the stated process and DeepSeek often does not".
+fit" became "both get the refunds right in every scenario they shared; Haiku follows the stated process and
+DeepSeek often does not".
 
 **A weaker obstacle in two workflows, found on 2026-11-24.** A Gladiator test can change a record while the model
 works and say so in a tool result; the model must then decide by the new facts. In refund-queue 2.2.0 and
@@ -155,8 +156,9 @@ matching; it makes no claim from it.
   OpenRouter) from the Gladiator engine.
 
 ## Independence
-Gladiator Ledger is an independent project. It is not affiliated with, sponsored by or endorsed by Anthropic,
-OpenAI, Google, OpenRouter, Epoch AI or any model maker. Model names are used only to identify what was tested. The
+Gladiator Ledger is an independent project. It is not affiliated with, sponsored by or endorsed by Neo4j,
+Anthropic, OpenAI, Google, OpenRouter, Epoch AI or any model maker. Relate is named only to say what the project
+is built on, and model names only to identify what was tested. The
 match transcripts in `data/records/` are AI-generated: they are the models' own tool calls and text during the tests.
 
 ## AI tools

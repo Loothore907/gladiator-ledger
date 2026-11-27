@@ -56,6 +56,10 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   Gladiator model id only when it is an exact match (`MODEL_IDS` in `ledger/bridges/epoch.py`).
 - **Relate is the store and the query engine, not an export target.** Questions are Cypher over the graph.
 - **No made-up winners.** Thin evidence or a level head-to-head means no pick is named, the same as in Gladiator.
+  Level is more than an exact tie (owner, 2026-11-27, after a review found 20 scenarios to 19 called "ahead"): a
+  split two equal models would produce at least half the time shows no real difference, and neither model is
+  called ahead (`LEVEL_P` in `ledger/cli.py`, mirrored on the page). Below that and above the 5% that settles
+  it, a lead is "leaning".
 - **A report says only what the count shows** (a review of every output on 2026-11-27, after the owner asked that
   claims and evidence be handled correctly). The wording rules live in one place (`ledger/reports.py`, mirrored in
   `site/ledger.js`) and every document and screen uses them. An attempt ended as a clean run, the right result

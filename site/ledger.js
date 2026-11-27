@@ -982,6 +982,12 @@ RETURN mt.key AS match ORDER BY match`;
     } else if (winsA === winsB) {
       kind = 'no real difference shown';
       notes.push(`The pairs split ${winsA}-${winsB}: neither did this task better.`);
+    } else if (pValue >= rules.level_p) {
+      kind = 'no real difference shown';
+      notes.push(
+        `The pairs split ${Math.max(winsA, winsB)}-${Math.min(winsA, winsB)}: two equal models split at least that ` +
+          `unevenly ${percent(pValue)} of the time, so neither is ahead.`,
+      );
     } else {
       const [lead, trail] = winsA > winsB ? [winsA, winsB] : [winsB, winsA];
       better = winsA > winsB ? a : b;
@@ -1209,7 +1215,7 @@ RETURN mt.key AS match ORDER BY match`;
     const headline = {
       better: `**Use \`${d.better}\` for this task.** It did the task better than the other model.`,
       leaning: `**Leaning \`${d.better}\`, not settled.** It is ahead, but the lead could still be chance.`,
-      'no real difference shown': '**No winner.** The two models split the pairs evenly on this task.',
+      'no real difference shown': '**No winner.** The pairs show no real difference between the two on this task.',
       'not enough evidence': '**No winner yet.** There are too few head-to-head pairs to call it.',
     }[d.verdict];
     if (d.headline) {
@@ -1224,7 +1230,7 @@ RETURN mt.key AS match ORDER BY match`;
       const versus = {
         better: `\`${d.better}\` did this task better than the other model.`,
         leaning: `\`${d.better}\` is ahead, but the lead could still be chance.`,
-        'no real difference shown': 'the two models split the pairs evenly.',
+        'no real difference shown': 'the pairs show no real difference between the two.',
         'not enough evidence': 'too few head-to-head pairs to call it.',
       }[d.verdict];
       lines.push('', `Head to head: ${versus}`, '');

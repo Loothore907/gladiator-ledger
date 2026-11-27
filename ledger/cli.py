@@ -16,6 +16,7 @@ ledger route refund-queue --a "haiku 5.5" --b deepseek-v4.1 --scenario 3     the
 import argparse
 import json
 import math
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,9 @@ DEFAULT_STORE = "data/ledger.rl"
 GOOD_ENOUGH = 0.8  # default bar for "good enough for this task": share of attempts with the right result
 MIN_PAIRS = 8  # fewer judged pairs than this for a model on a workflow is "not enough evidence"
 CLEAR_P = 0.05  # sign-test p-value below which a head-to-head lead counts as clear
+# At or above this the split is level: two equal models would split at least that unevenly half the time or more,
+# so nobody is "ahead" (20 to 19 is not a lead). Between the two a lead is a lean: ahead, and it could be chance.
+LEVEL_P = 0.5
 
 
 def rows(store: str, query: str, params: dict | None = None) -> list[dict]:
@@ -78,6 +82,16 @@ SCOPE_DEFAULTS = {
     "current_only": False,
     "open_only": False,
     "kinds": None,
+}
+# What to put for a value a named question needs, in the line that says it needs one.
+ASK_EXAMPLES = {
+    "a": '"haiku 5.5"',
+    "b": "deepseek-v4.1",
+    "model": '"haiku 5.5"',
+    "test_id": "refund-queue",
+    "budget": "0.01",
+    "q": '"refund requests"',
+    "benchmark": '"Epoch Capabilities Index"',
 }
 # Questions that need the steps (ledger/routes.py): asked of the store that holds them.
 STEP_QUESTIONS = {"what_decisions_need", "same_world", *(q for q in questions.ALL if q.startswith("steps:"))}
@@ -391,6 +405,13 @@ def conditions_apart(reference: str, other: str) -> str:
     return ", ".join(words) or "other conditions"
 
 
+def conditions_said(conditions: str) -> str:
+    """One set of conditions in words, every setting: what a verdict was played under."""
+    read = dict(part.split("=", 1) for part in conditions.split("; ") if "=" in part)
+    order = [key for key in CONDITION_WORDS if key in read] + sorted(set(read) - set(CONDITION_WORDS))
+    return ", ".join(CONDITION_WORDS.get(key, key + " {}").replace("{}", read[key]) for key in order)
+
+
 def not_counted_note(not_counted: list[dict]) -> str:
     """The sentence a verdict carries when the two models also met under conditions it does not count."""
     left_out = sum(c["pairs"] for c in not_counted)
@@ -582,6 +603,12 @@ def verdict(
     elif wins_a == wins_b:
         kind = "no real difference shown"
         notes.append(f"The pairs split {wins_a}-{wins_b}: neither did this task better.")
+    elif p_value >= LEVEL_P:
+        kind = "no real difference shown"
+        notes.append(
+            f"The pairs split {max(wins_a, wins_b)}-{min(wins_a, wins_b)}: two equal models split at least that "
+            f"unevenly {p_value:.0%} of the time, so neither is ahead."
+        )
     else:
         better, lead, trail = (a, wins_a, wins_b) if wins_a > wins_b else (b, wins_b, wins_a)
         if p_value < CLEAR_P:
@@ -714,6 +741,9 @@ def print_verdict(v: dict) -> None:
     if v["verdict"] == "no data":
         print(f"\nNo verdict: {v['notes'][0]}")
         return
+    # One verdict, one set of conditions: said with every verdict, because the same model on the same task reads
+    # differently under other settings (a tighter limit per attempt, another level), and that is not a contradiction.
+    print(f"Played under: {conditions_said(v['conditions'])}. Every count below is under these conditions.")
     line = {
         "better": f"{v['better']} does this task better",
         "leaning": f"Leaning {v['better']}",
@@ -1041,10 +1071,36 @@ def main(argv=None):
         "verify", parents=[common], help="check every shipped match: its seal, and its private half's fingerprint"
     )
     vf.add_argument("--data", type=Path, default=Path("data"), help="data folder (default data/)")
-    a = sub.add_parser("ask", parents=[common], help="run one of the fixed questions")
+    a = sub.add_parser(
+        "ask",
+        parents=[common],
+        help="run one of the named questions (a question that needs a model, a pair or a task says which, "
+        "and takes each as --param name=value)",
+    )
     a.add_argument("question", choices=sorted(questions.ALL))
-    a.add_argument("--param", action="append", default=[], help="name=value (numbers are parsed)")
+    a.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        help='name=value, repeatable (numbers are parsed; a model may be given by part of its name: a="haiku 5.5")',
+    )
     a.add_argument("--json", action="store_true")
+    cy = sub.add_parser(
+        "cypher",
+        parents=[common],
+        help="read the graph yourself: one Cypher statement over the store, opened read-only",
+    )
+    cy.add_argument(
+        "statement", help='e.g. "MATCH (m:Model)<-[:BY]-(a:Attempt) RETURN m.name, count(a) ORDER BY m.name"'
+    )
+    cy.add_argument(
+        "--steps",
+        action="store_true",
+        help="read the store that also holds every step and world record (built on first use, about a minute)",
+    )
+    cy.add_argument("--data", type=Path, default=Path("data"), help="data folder, for --steps (default data/)")
+    cy.add_argument("--limit", type=int, default=200, help="rows to print (default 200)")
+    cy.add_argument("--json", action="store_true")
     r = sub.add_parser(
         "recommend", parents=[common], help="which model for this workflow under this budget, with evidence"
     )
@@ -1237,12 +1293,46 @@ def main(argv=None):
                 params[k] = v
         for k, v in SCOPE_DEFAULTS.items():
             params.setdefault(k, v)
+        # A model may be given by part of its name and a task without its owner, as everywhere else.
+        for k in ("a", "b", "model"):
+            if isinstance(params.get(k), str):
+                params[k] = resolve_model(args.store, params[k]) or params[k]
+        if isinstance(params.get("test_id"), str):
+            params["test_id"] = test_id(params["test_id"])
+        # A question that needs a model, a pair or a task says so, instead of failing inside the engine.
+        needed = sorted(set(re.findall(r"\$([a-z_]+)", questions.ALL[args.question])) - set(params))
+        if needed:
+            example = " ".join(f"--param {name}={ASK_EXAMPLES.get(name, 'VALUE')}" for name in needed)
+            print(
+                f"`{args.question}` needs {', '.join(needed)}. Give each as --param name=value:\n"
+                f"  uv run ledger ask {args.question} {example}",
+                file=sys.stderr,
+            )
+            return 2
         asked = routes.ensure(args.store) if args.question in STEP_QUESTIONS else args.store
-        result = rows(asked, questions.ALL[args.question], params)
+        try:
+            result = rows(asked, questions.ALL[args.question], params)
+        except relate.Error as exc:
+            print(f"The question could not be asked: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
         if args.json:
             print(json.dumps(result, indent=1, default=str))
         else:
             print_table(result)
+    elif args.cmd == "cypher":
+        asked = routes.ensure(args.store, args.data) if args.steps else args.store
+        try:
+            result = rows(asked, args.statement)
+        except relate.Error as exc:  # the store is opened read-only: a statement that writes ends here too
+            print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        shown = result[: max(0, args.limit)]
+        if args.json:
+            print(json.dumps(shown, indent=1, default=str))
+        else:
+            print_table(shown)
+        if len(result) > len(shown):
+            print(f"({len(result)} rows; the first {len(shown)} are shown: --limit N for more)", file=sys.stderr)
     elif args.cmd == "recommend":
         if not (args.workflow or args.suite):
             ap.error("recommend needs a workflow or --suite")
@@ -1307,6 +1397,19 @@ def main(argv=None):
         else:
             print_opponents(result)
     elif args.cmd == "verdict":
+        # A slip in a name is said as that, never as "these two never met".
+        tasks = [r["id"] for r in rows(args.store, "MATCH (t:Test) RETURN t.id AS id ORDER BY id")]
+        if test_id(args.workflow) not in tasks:
+            ap.error(f"no task called {args.workflow!r} is in the record. The tasks are: {', '.join(tasks)}")
+        for given in (args.a, args.b):
+            if resolve_model(args.store, given) is None:
+                played = rows(
+                    args.store, "MATCH (m:Model)<-[:BY]-(:Attempt) RETURN DISTINCT m.name AS name ORDER BY name"
+                )
+                ap.error(
+                    f"no single model matches {given!r}. Use an exact id or a fuller name. "
+                    f"The models with matches: {', '.join(r['name'] for r in played)}"
+                )
         a = resolve_model(args.store, args.a) or args.a
         b = resolve_model(args.store, args.b) or args.b
         overrides = {fault: level for level in policy.LEVELS for fault in getattr(args, level)}

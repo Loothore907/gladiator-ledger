@@ -196,7 +196,7 @@ def markdown(spec: dict) -> str:
     headline = {
         "better": f"**Use `{d['better']}` for this task.** It did the task better than the other model.",
         "leaning": f"**Leaning `{d['better']}`, not settled.** It is ahead, but the lead could still be chance.",
-        "no real difference shown": "**No winner.** The two models split the pairs evenly on this task.",
+        "no real difference shown": "**No winner.** The pairs show no real difference between the two on this task.",
         "not enough evidence": "**No winner yet.** There are too few head-to-head pairs to call it.",
     }[d["verdict"]]
     if d.get("headline"):
@@ -212,7 +212,7 @@ def markdown(spec: dict) -> str:
         versus = {
             "better": f"`{d['better']}` did this task better than the other model.",
             "leaning": f"`{d['better']}` is ahead, but the lead could still be chance.",
-            "no real difference shown": "the two models split the pairs evenly.",
+            "no real difference shown": "the pairs show no real difference between the two.",
             "not enough evidence": "too few head-to-head pairs to call it.",
         }[d["verdict"]]
         lines += ["", f"Head to head: {versus}", ""]
