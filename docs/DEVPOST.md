@@ -38,8 +38,8 @@ and walks it:
    batch of 10 or 25), and the page says whether the result was in line with the record or against it. The sealed
    result joins the record as the race ends: seconds later it is one more cell in the evidence graph, its world is
    drawn under the rows, and the verdict has been read again with it. (This is the one part that calls a paid
-   model API, so it runs on your own machine with your own API key: two commands, under "Setup" below. The
-   video shows one.)
+   model API, so your own API key pays for it: pasted on the hosted page, which uses it for that race and stores
+   it nowhere, or kept on your own machine with the two commands under "Setup" below. The video shows one.)
 6. **Get the spec.** The job and rules as tested, the settings the result holds for, a guardrail for every fault
    the model made (how often, and what to build against it) and for every hazard the test plants,
    and the sealed records behind it.
@@ -115,7 +115,16 @@ No API keys and no cost. Linux, macOS and Windows. The record grows as live race
 from a clone shows the record as it ships and says so.
 
 **The live race, with your own API key** (the only part that needs one; README, "Race two models live, with your
-own API key"). The race runner is Gladiator, the open engine the matches were played on. It reads the key from
+own API key"). Two ways, the same engine and tests.
+
+*On the hosted page.* Open https://ledger.gladiatorbench.com/, pick a workflow and two models, press "Race them
+here with my own API key", paste the key of each model's provider and press "Race them live". 23 models of four
+providers (OpenRouter, Anthropic, OpenAI, Google). The key goes to the race runner with that race and to its
+provider; it is checked first for nothing, used for the one race and kept in no file, log or record; the page
+holds it in that tab only. A race costs at most $0.40 between small models and $1.00 with a mid-tier one, shown
+before you press.
+
+*On your own machine,* where the key never leaves it. The race runner is Gladiator, the open engine the matches were played on. It reads the key from
 `.env` in its folder, or from an environment variable of the same name:
 ```
 git clone https://github.com/Loothore907/gladiator-core && cd gladiator-core && uv sync
@@ -167,8 +176,9 @@ and copies one small scoring file, marked in the source. The full statement is `
 - Working demo: https://ledger.gladiatorbench.com/
 - Live races: **no access code for judges** (the hackathon manager's answer on the contest forum, 2026-11-27:
   "Please don't use a shared access code. Judges will supply their own API keys for any feature that calls a
-  paid model"). The live race reads the key of whoever runs it, from `.env`, as under "Setup" above, and the
-  README says which provider and models and where the key goes. Nothing private goes on the form.
+  paid model"). The live race is paid for with the key of whoever runs it: pasted on the hosted page for one
+  visit, or read from `.env` on their own machine, both as under "Setup" above. The README says which providers
+  and models and where the key goes. Nothing private goes on the form.
 - Screenshots for the gallery: `docs/img/` (taken from the page; retake them on the day the video is recorded).
 - Video: **needed, and it must show a live race working** (the same answer: "Your demo video or demo link, plus
   the README, is what judges will rely on, so make sure the video shows the live run working"). Shots to get:
