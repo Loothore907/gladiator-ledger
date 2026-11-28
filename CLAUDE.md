@@ -31,7 +31,16 @@ get green. Ask first before merging a PR Claude did not open, or changing repo s
   refused the key, the account had no credit, the key may not use that model) or was cut off from outside is
   said as that, with the provider's words: "not played" or "could not be judged", counted for nothing, and
   never worded as a wrong result (`notJudged` in `site/app.js`, from `EXCLUDED` in
-  `ledger/bridges/gladiator.py`). The hosted runner is by invitation (signed in once: the
+  `ledger/bridges/gladiator.py`). **The hosted page takes a pasted key too (owner, 2026-11-27; switched on
+  2026-11-28):** the manager's answer says judges supply their own keys, not that they clone anything, and most
+  will only open the demo link. A visitor presses "Race them here with my own API key", pastes the key of each
+  model's provider, and races for as long as the tab is open. The page keeps the key in the tab's memory only
+  (never in storage, the address, the page or a report; a reload forgets it) and sends it with each race; the
+  runner uses it for that race and stores it nowhere. It is open to anyone, one scenario at a time, and these
+  races join the public record like any other. The page offers it only where the runner takes keys
+  (`"own_keys": true` in `site/data/live.json`; take it out and the button is gone) and contacts no runner
+  until the button is pressed. Accounts, with a person's keys saved once, are the plan for after the hackathon;
+  this is the session-long version, not a replacement. The hosted runner's own budgets are by invitation (signed in once: the
   page's "Sign in (by invitation)" button and an access code, or an invitation link that carries it; owner,
   2026-11-24: nobody should have to build an address by hand. No code per run, and no run button for anyone
   else), and the public page says where a live race can be run instead. A live result is labelled live
